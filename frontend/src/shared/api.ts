@@ -9,10 +9,10 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-export async function api<T>(path: string, body?: unknown): Promise<T> {
+export async function api<T>(path: string, body?: unknown, base = '/api/v1/admin'): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api/v1/admin/${path}`, {
+    response = await fetch(`${base}/${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-VibeEval-Request': '1' },

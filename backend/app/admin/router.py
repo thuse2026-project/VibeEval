@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from ..core.security import require_browser_header
 from .accounts import hash_password, verify_password
 
 COOKIE_NAME = "vibeeval_admin"
@@ -49,12 +50,6 @@ def state(request: Request) -> AuthState:
 
 def token_key(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-def require_browser_header(request: Request) -> None:
-    # A cross-origin site cannot send this header without an allowed CORS preflight.
-    if request.headers.get("X-VibeEval-Request") != "1":
-        raise HTTPException(403, "请求来源校验失败，请刷新页面后重试")
 
 
 def current_session(request: Request, auth: AuthState = Depends(state)) -> Session:

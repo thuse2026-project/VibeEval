@@ -1,6 +1,7 @@
 import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Login from '../admin/login/Login';
+import Entry from '../candidate/entry/Entry';
 import { api, ApiError, type Examiner } from '../shared/api';
 import './style.css';
 
@@ -77,4 +78,5 @@ function App() {
   </div>;
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+const candidateEntry = window.location.pathname === '/entry' || window.location.pathname === '/entry/';
+createRoot(document.getElementById('root')!).render(candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);

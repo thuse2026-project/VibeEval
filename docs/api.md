@@ -6,7 +6,7 @@
 
 ## 待确认项
 
-- 考生会话访问凭证及 HTTP / WebSocket 鉴权方式；不能只凭 session_id 访问。
+- 考生 WebSocket 鉴权和考试状态流转（HTTP 入场及恢复已约定如下）。
 - 场次提交列表的接口（考官登录约定见下节）。
 - 会话状态、开始计时与截止后的处理方式。
 - 公开测试的执行入口，以及结果如何保存并关联提交。
@@ -23,6 +23,27 @@
 - 两个 POST 需带 `X-VibeEval-Request: 1`；前端同源调用，不开放跨域 CORS。正式部署使用 HTTPS 并启用 Secure Cookie。
 - 错误：401（凭证错误或未登录/过期）、403（缺少请求来源校验头）、422（请求字段不合法）、429（同一客户端地址 60 秒内已失败 5 次）、503（未配置账号）；错误正文为 FastAPI 的 `detail` 字段。客户端展示友好提示，不区分未知账号与密码错误。
 - 当前会话仅存在单进程内存，重启后失效。此约定取代下方原始草案中的管理端 Bearer JWT 设想；后续提交查询接口尚未实现。
+
+## 考生入场与恢复（本轮实现）
+
+以下规则更新原始 E.3 的入场与状态草案，题目、沙箱及开始计时不在本轮范围。
+
+1. 首先请求 `GET /api/v1/sessions/current`，携带 `X-VibeEval-Request: 1` 并允许同源 Cookie。未入场返回 401；没有有效浏览器凭证时，同时初始化 `vibeeval_candidate` HttpOnly、SameSite=Strict Cookie，路径 `/api/v1/sessions`，最长 30 天。已有 Cookie 不轮换、不续期。来源校验失败返回 403 且不设置 Cookie。
+2. `POST /api/v1/sessions/verify-token`：JSON `{ "token": "tok_..." }`，同样携带校验头和上述 Cookie。首次兑换与消费在事务内完成；必须先初始化浏览器 Cookie，以支持兑换响应丢失后的安全重试。
+3. 成功返回 200：`{ "session_id": "ses_...", "status": "admitted", "candidate": { "id": "student-001", "name": "张同学" }, "exam_info": { "id": "exam-001", "title": "平台入场联调", "duration_minutes": 60 }, "admitted_at": 1793325600, "started_at": null, "deadline_at": null }`。会话编号仅用于定位，不能充当凭证；不得据 `admitted` 宣称沙箱已就绪。
+4. 同一浏览器后续请求 `GET /current` 返回同一会话；再次兑换同一凭证也返回原会话，包括邀请凭证已过期的情况。首次入场期限只约束首次兑换，不参与原会话恢复判定。
+5. `GET /api/v1/sessions/{session_id}/status` 需携带恢复 Cookie 和校验头，只能读取自己的会话；未授权或编号不符统一返回 404。后续文件接口可复用 `require_candidate_session` 依赖。候选人恢复 Cookie 与考官登录 Cookie 独立。
+6. 401：无效凭证/尚未入场；403：缺少请求来源头；409：已被其他浏览器使用，或当前浏览器试图切换会话；410：未使用凭证已过期；422：字段不合法；428：未初始化浏览器 Cookie；429：客户端地址 60 秒内出现 10 次无效凭证尝试。错误正文使用 `detail`，并禁止缓存。
+
+恢复 Cookie 丢失或 30 天窗口结束后需要联系考官，已消费凭证不会重新启用；服务端也会检查入场后 30 天的恢复上限（到期返回 410），本轮没有重开/换设备接口。前端不要将入场凭证放在 URL、localStorage 或日志中。多标签页初始化与兑换使用同源 Web Locks 串行处理；持久化入场记录及两类凭证的哈希，后端重启不会重置。
+
+### 本轮开源参考
+
+- [Assessment Platform 的入场页面](https://github.com/PrahladWebDev/assessment-platform/blob/main/assessment-frontend/src/views/TokenEntry.vue)：参考凭证输入与考生免注册入场流程。
+- [候选人鉴权](https://github.com/PrahladWebDev/assessment-platform/blob/main/assessment-backend/src/middleware/candidateAuth.js)及[候选人模型](https://github.com/PrahladWebDev/assessment-platform/blob/main/assessment-backend/src/models/Candidate.js)：参考将候选人、考核和作答状态关联；本项目另外实现原子首次消费和独立浏览器恢复凭证。
+- [PrairieLearn 工作区说明](https://docs.prairielearn.com/workspaces/)：参考环境准备与正式作答的区分，本轮保留未开始计时状态。
+
+仅参考相关环节与职责划分，代码独立实现，未引入其技术栈、监考、评分或完整题库。
 
 ---
 ### E\.3 核心联调接口契约 \(v1\.0\-draft\，原始参考)
