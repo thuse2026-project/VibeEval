@@ -1,0 +1,31 @@
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Local runtime data: snapshots, database files, logs, candidate data
+/runtime/
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
