@@ -7,7 +7,7 @@
 ## 待确认项
 
 - 考生 WebSocket 鉴权和考试状态流转（HTTP 入场及恢复已约定如下）。
-- 真实提交服务接入与答卷详情接口（考官总览查询已实现）。
+- 真实提交服务实现、公开测试结果持久化与 PostgreSQL 集成（管理端只读接口已实现）。
 - 会话状态、开始计时与截止后的处理方式。
 - 公开测试的执行入口，以及结果如何保存并关联提交。
 - 提交是同步完成还是异步处理，以及冻结失败、重复提交和状态查询的语义。
@@ -22,7 +22,7 @@
 - `POST /api/v1/admin/logout`：撤销当前会话并清除 Cookie，返回 204；重复退出同样返回 204。
 - 两个 POST 需带 `X-VibeEval-Request: 1`；前端同源调用，不开放跨域 CORS。正式部署使用 HTTPS 并启用 Secure Cookie。
 - 错误：401（凭证错误或未登录/过期）、403（缺少请求来源校验头）、422（请求字段不合法）、429（同一客户端地址 60 秒内已失败 5 次）、503（未配置账号）；错误正文为 FastAPI 的 `detail` 字段。客户端展示友好提示，不区分未知账号与密码错误。
-- 当前会话仅存在单进程内存，重启后失效。此约定取代下方原始草案中的管理端 Bearer JWT 设想；考务总览查询已实现，真实提交服务接入与答卷详情尚待实现。
+- 当前会话仅存在单进程内存，重启后失效。此约定取代下方原始草案中的管理端 Bearer JWT 设想；总览和答卷详情均复用此鉴权，真实提交服务仍由持久化成员实现。
 
 ## 考务总览（本轮实现）
 
@@ -30,7 +30,7 @@
 
 | 查询参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `source` | `live` | `live` 真实记录或 `demo` 显式联调示例，两者不混合 |
+| `source` | `live` | `live` 真实记录或 `demo` 演示数据，两者不混合 |
 | `exam_id` | 不传 | 按场次精确筛选，不传表示全部场次 |
 | `status` | `all` | `all`、`invited`、`admitted`、`in_progress`、`submitted`、`invitation_expired`、`recovery_expired` |
 | `page` / `page_size` | `1` / `10` | 页码至少 1，单页 1～100 条；超出末页返回末页，无数据返回第 1 页 |
@@ -43,9 +43,48 @@
 
 真实记录当前只读取已预配置凭证和入场数据：`invited` 尚未入场，`admitted` 已入场未开始；未入场凭证过期为 `invitation_expired`，入场恢复期结束为 `recovery_expired`。入场不等于开始或交卷，未提交记录的 `submission_id`、`submitted_at` 必须为 null。
 
-**持久化成员接入点**：`backend/app/admin/overview.py` 的 `read_live_records(store)` 返回上述最小记录列表。接入提交服务时按考生与场次关联并避免重复行，可补充仅存在于提交库中的历史记录；只有存在真实开始记录才返回 `in_progress` / `started_at`，只有真实持久化提交才返回 `submitted` / `submission_id` / `submitted_at`。同时更新 `submission_service_connected` 为 true。不读取活动沙箱来推断已提交答卷，不返回代码内容。查询筛选与统计可随后迁移至 PostgreSQL，目前课程规模采用本地列表处理。
+**统一接入点**：`backend/app/admin/submissions.py` 的 `get_submission_reader`（具体见下节）同时供列表与详情使用。总览按 `(exam_id, candidate_id)` 将已提交记录与入场记录合并，真实提交优先；同一考生同一场次不得重复，重复提交编号也会拒绝并返回 502。允许展示仅存在于提交库的历史记录。`submission_service_connected` 根据是否注入 reader 自动生成，不需要手动修改布尔值；入场不推断开始或交卷。
 
-`demo` 为只读生成的 12 条虚构记录，两个场次覆盖四种进度状态；明确标记联调示例，不改变真实数据，不代表提交服务已完成。本轮不实现交卷、快照、评分或详情接口。
+`demo` 为 12 条虚构记录，两个场次覆盖四种进度状态；界面统一标记“演示数据”。演示身份和时间固定，列表与详情保持一致，不写入真实存储。未交卷记录没有“查看答卷”入口。
+
+## 答卷详情与提交服务只读契约（已实现）
+
+`GET /api/v1/admin/submissions/{submission_id}?source=live|demo`，默认 `live`。使用考官 Cookie，未登录/过期 401。不会回退到另一数据来源：真实 reader 未接入返回 503，已接入但无此提交返回 404；演示来源中找不到记录也返回 404。非法 ID/来源返回 422；接口仅支持 GET，禁止缓存。
+
+响应保留附录 E 的 `submission_id`、`submitted_at`、`public_test_output` 与 `files[{path, content}]`，补充定位与身份信息：`source`、`session_id`、`snapshot_id`、`candidate_id`、`candidate_name`、`exam_id`、`exam_title`、`admitted_at`、`started_at`。
+
+所有时间为 Unix 秒。未提供的入场/开始时间为 null；公开测试输出 null 表示尚未提供，空字符串表示已提供但输出为空，两者都不等于通过。界面按原始纯文本展示代码及输出，不解释 HTML，不自动推断分数。
+
+**持久化成员只需提供一个 reader**（不在管理端实现数据库、交卷或快照写入）：
+
+```python
+class SubmissionReader:
+    def list_submissions(self):
+        # 返回已持久化提交的摘要列表
+        ...
+
+    def get_submission(self, submission_id):
+        # 返回固定快照详情，查无记录返回 None
+        ...
+```
+
+摘要字段与 `SubmissionSummary` 模型一致：提交编号、会话编号、考生编号/姓名、场次编号/标题、提交时间，以及可为 null 的入场/开始时间。详情在摘要上增加 `snapshot_id`、`files`、`public_test_output`，与 `SubmissionDetail` 模型一致。方法可返回模型或同字段字典；没有公开测试结果时显式返回 null。返回值不包含密钥、内部磁盘路径或可变工作区引用。
+
+在服务启动时，将 `get_submission_reader` 通过 FastAPI 依赖注入接到持久化成员的实现；也可在此函数内接现有服务。例如已有 `submission_reader` 实例时：
+
+```python
+from app.admin.submissions import get_submission_reader
+
+app.dependency_overrides[get_submission_reader] = lambda: submission_reader
+```
+
+这里的 `submission_reader` 是队友提供的真实只读实现，目前没有在项目里启用。列表与详情使用同一个 reader，不分别维护两套查询。无 reader 时总览仍展示真实入场，详情明确提示尚未接入。服务异常返回不含内部异常信息的 503；字段缺失、重复文件路径、错误的提交身份或不合法快照路径返回 502。
+
+提交编号为 1～128 位字母、数字、下划线或连字符；其他身份文本长度沿用现有考务字段限制。快照 `path` 为唯一的相对 POSIX 路径，不允许绝对路径、盘符、空路径段或 `..`。`content` 是 UTF-8 解码后的文本，空文本和空文件列表均允许，管理端不根据路径去打开服务器文件。
+
+前端详情地址为 `/admin/submissions/{id}?source=...&return_to=...`。来源显式保留；返回目标仅允许同源 `/admin` 的已知筛选参数，防止外部跳转。未登录直接打开详情，登录后继续该详情；返回按钮、刷新、浏览器前进/后退保留列表筛选和页码。
+
+演示快照是单独保存的固定 JSON 文件，内容来自原始会议室样题；每次请求不重读候选人目录、当前工作区或维护者参考答案。演示测试输出明确标为虚构，不代表真实考试执行结果。真正快照冻结、测试执行和持久化归赵晨一/陈弘毅的模块，本次未新增这些写入逻辑。
 
 ## 考生入场与恢复（已实现）
 

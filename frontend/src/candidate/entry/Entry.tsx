@@ -79,6 +79,6 @@ export default function Entry() {
         </form>
         <p className="login-note" id="entry-help">凭证只用于首次入场。请使用准备作答的浏览器；换设备或清除本站数据后，请联系考官。</p>
       </section>}</main>
-    <footer>VibeEval · 入场联调</footer>
+    <footer>VibeEval · 入场验证</footer>
   </div>;
 }

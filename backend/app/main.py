@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from .admin.accounts import load_accounts
 from .admin.router import AuthState, router
 from .admin.overview import router as overview_router
+from .admin.submissions import router as submission_router
 from .exams.router import router as entry_router
 from .exams.store import EntryStore
 
@@ -17,6 +18,7 @@ def create_app(accounts: dict | None = None, entry_db: str | Path | None = None)
     app.state.entry_failures = defaultdict(list)
     app.include_router(router)
     app.include_router(overview_router)
+    app.include_router(submission_router)
     app.include_router(entry_router)
 
     @app.middleware("http")
