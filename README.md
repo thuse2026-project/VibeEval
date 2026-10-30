@@ -4,7 +4,7 @@
 
 当前开发 **Release 1.0 MVP**：先完成无 AI 辅助的「凭证入场 → 独立沙箱准备 → 多文件编辑与终端操作 → 交卷冻结 → 考官调阅」闭环。AI 辅助、隐藏测试和能力画像留待后续版本。
 
-目前仓库仅包含目录骨架与协作文档，尚未实现可运行的前后端服务。
+当前已提供考官登录功能供本地验收，其余一期功能仍待实现。开发进度与验证结果见 [BCL.md](BCL.md)。
 
 ## 文档入口
 
@@ -68,15 +68,44 @@ VibeEval/
 
 ## 本地开发
 
-当前尚无可运行服务，启动与检查命令待对应工程接入后补充。添加运行能力的成员同步更新本节，至少说明：
+### 考官登录（本地）
 
-- 所需软件及版本。
-- 环境变量配置方式；添加必需配置时提供 `.env.example`。
-- 前端、后端和数据库的启动命令。
-- 现有测试及代码检查命令。
-- 哪些功能需要 E2B 账号，哪些部分可独立开发。
+需要 Python 3.12 和 Node.js 22（当前验证环境）；安装及启动命令在 PowerShell 执行。此功能无需数据库或 E2B 账号。先在仓库根目录运行：
 
-后续由赵晨一添加根目录 `docker-compose.yml` 和数据库迁移配置；前后端负责人分别补充依赖配置与应用入口。
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+Set-Location backend
+..\.venv\Scripts\python.exe -m app.admin.accounts examiner --name "陈智恒"
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+初始化命令会提示输入并确认密码（10～128 字符），仅将带盐哈希写入被 Git 忽略的 `runtime/admin-accounts.json`。再次执行同名账号命令可修改密码，配置生效需重启后端；不同账号可重复执行。不要将真实密码写进命令或提交到仓库。
+
+另开终端，在仓库根目录运行：
+
+```powershell
+Set-Location frontend
+npm.cmd ci
+npm.cmd run dev
+```
+
+访问 `http://127.0.0.1:5173/admin/login`，使用刚配置的账号登录。前端将 `/api` 代理至本地 8000 端口，接口文档位于 `http://127.0.0.1:8000/docs`。退出、刷新及未登录直接访问 `/admin` 均可人工检查。
+
+登录使用 HttpOnly Cookie，由后端记录固定 3 小时有效期，刷新不会续期，退出会撤销会话。当前为单进程内存会话，后端重启后全部退出，不使用多 worker；账号数据库持久化后续与工程底座集成。
+
+配置示例见 [`backend/.env.example`](backend/.env.example)。这些是可选的进程环境变量，示例文件不会自动加载；PowerShell 可用 `$env:变量名 = "值"` 设置。账号路径默认位于仓库 `runtime/`；以后通过 HTTPS 部署时应设置 `COOKIE_SECURE=true`，当前本地 HTTP 预览保持默认值。
+
+验证命令（从仓库根目录运行）：
+
+```powershell
+Set-Location backend
+..\.venv\Scripts\python.exe -m unittest discover -s tests -v
+Set-Location ../frontend
+npm.cmd run build
+```
+
+接口测试通过模拟服务端时钟验证恰好 3 小时失效，不需要实际等待。`npm run dev` 仅用于本地调试，正式部署方式后续补充。后续由赵晨一添加 `docker-compose.yml` 和数据库迁移配置。
 
 ## 开发与部署流程
 
