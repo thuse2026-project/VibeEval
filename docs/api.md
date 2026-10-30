@@ -7,7 +7,7 @@
 ## 待确认项
 
 - 考生 WebSocket 鉴权和考试状态流转（HTTP 入场及恢复已约定如下）。
-- 场次提交列表的接口（考官登录约定见下节）。
+- 真实提交服务接入与答卷详情接口（考官总览查询已实现）。
 - 会话状态、开始计时与截止后的处理方式。
 - 公开测试的执行入口，以及结果如何保存并关联提交。
 - 提交是同步完成还是异步处理，以及冻结失败、重复提交和状态查询的语义。
@@ -22,9 +22,32 @@
 - `POST /api/v1/admin/logout`：撤销当前会话并清除 Cookie，返回 204；重复退出同样返回 204。
 - 两个 POST 需带 `X-VibeEval-Request: 1`；前端同源调用，不开放跨域 CORS。正式部署使用 HTTPS 并启用 Secure Cookie。
 - 错误：401（凭证错误或未登录/过期）、403（缺少请求来源校验头）、422（请求字段不合法）、429（同一客户端地址 60 秒内已失败 5 次）、503（未配置账号）；错误正文为 FastAPI 的 `detail` 字段。客户端展示友好提示，不区分未知账号与密码错误。
-- 当前会话仅存在单进程内存，重启后失效。此约定取代下方原始草案中的管理端 Bearer JWT 设想；后续提交查询接口尚未实现。
+- 当前会话仅存在单进程内存，重启后失效。此约定取代下方原始草案中的管理端 Bearer JWT 设想；考务总览查询已实现，真实提交服务接入与答卷详情尚待实现。
 
-## 考生入场与恢复（本轮实现）
+## 考务总览（本轮实现）
+
+`GET /api/v1/admin/overview` 使用考官登录 Cookie 鉴权；未登录/过期返回 401，候选人 Cookie 不具备访问权限。当前所有预配置考官均可查看全部场次，无场次分配权限模型。
+
+| 查询参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `source` | `live` | `live` 真实记录或 `demo` 显式联调示例，两者不混合 |
+| `exam_id` | 不传 | 按场次精确筛选，不传表示全部场次 |
+| `status` | `all` | `all`、`invited`、`admitted`、`in_progress`、`submitted`、`invitation_expired`、`recovery_expired` |
+| `page` / `page_size` | `1` / `10` | 页码至少 1，单页 1～100 条；超出末页返回末页，无数据返回第 1 页 |
+
+响应：`source`、`items`、筛选后记录数 `total`、实际 `page` / `page_size`、全部场次选项 `exams`、统计 `summary`、读取时间 `updated_at`，及真实提交服务接入标志 `submission_service_connected`（当前 false）。非法查询参数返回 422，所有响应禁止缓存。
+
+每条记录字段：`candidate_id`、`candidate_name`、`exam_id`、`exam_title`、`status`、`session_id`（未入场为 null）、`admitted_at`、`started_at`、`submission_id`、`submitted_at`。时间为 Unix 秒，尚未发生的时间为 null；不返回入场或恢复凭证及哈希。
+
+`summary` 包含 `total`、`not_submitted`、`submitted`，计算所选场次的全部状态和全部页，不受状态筛选影响；按 `(exam_id, candidate_id)` 计人次。列表按最近提交/入场时间倒序，未入场放最后，同时间以场次和考生编号稳定排序。前端改变来源、场次或状态时重置页码；改变来源还重置其他筛选。
+
+真实记录当前只读取已预配置凭证和入场数据：`invited` 尚未入场，`admitted` 已入场未开始；未入场凭证过期为 `invitation_expired`，入场恢复期结束为 `recovery_expired`。入场不等于开始或交卷，未提交记录的 `submission_id`、`submitted_at` 必须为 null。
+
+**持久化成员接入点**：`backend/app/admin/overview.py` 的 `read_live_records(store)` 返回上述最小记录列表。接入提交服务时按考生与场次关联并避免重复行，可补充仅存在于提交库中的历史记录；只有存在真实开始记录才返回 `in_progress` / `started_at`，只有真实持久化提交才返回 `submitted` / `submission_id` / `submitted_at`。同时更新 `submission_service_connected` 为 true。不读取活动沙箱来推断已提交答卷，不返回代码内容。查询筛选与统计可随后迁移至 PostgreSQL，目前课程规模采用本地列表处理。
+
+`demo` 为只读生成的 12 条虚构记录，两个场次覆盖四种进度状态；明确标记联调示例，不改变真实数据，不代表提交服务已完成。本轮不实现交卷、快照、评分或详情接口。
+
+## 考生入场与恢复（已实现）
 
 以下规则更新原始 E.3 的入场与状态草案，题目、沙箱及开始计时不在本轮范围。
 
