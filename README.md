@@ -10,6 +10,8 @@
 
 - [完整 VibeEval 文档](docs/requirements/VibeEval-AICoding%20平台.md)：一期范围以附录 E 为主要依据，正文和其他附录作为背景参考。
 - [一期接口草案](docs/api.md)：从附录 E 提取的初始联调参考，尚待组内确认；确认后的接口变更统一在此维护。
+- [会议室预约样题](problems/python-debug-01/README.md)：完整考生工程，包含两个待修复缺陷和公开测试。
+- [样题维护说明](maintainer/python-debug-01/README.md)：参考修复与发布前验证，仅供维护者使用。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
@@ -49,6 +51,7 @@ VibeEval/
 │   └── python-debug-01/
 │       ├── src/                # 待修复代码
 │       └── tests/              # 题目的公开测试
+├── maintainer/                 # 维护者材料，不发布到考生工作区
 ├── docs/
 │   ├── requirements/           # 原始需求文档及配图
 │   └── api.md                  # 当前一期接口草案与后续契约
@@ -136,6 +139,20 @@ npm.cmd run build
 真实数据中，入场成功只更新同一考生行的入场状态和时间，不会自动记为开始作答或交卷；首次入场凭证过期与恢复期限过期分别标记。当前没有真实提交或答卷详情入口。后续由持久化负责人在后端 `read_live_records` 中关联真实提交数据，接入契约见 [docs/api.md](docs/api.md)。
 
 人工联调可以先预配置考生，刷新总览看到“尚未入场”；在另一浏览器使用该凭证进入 `/entry`，再刷新总览，同一条记录应变为“已入场，未开始”。网络错误可刷新重试，考官登录过期会返回登录页。
+
+### 会议室预约样题（独立运行）
+
+样题仅依赖 Python 3.12 标准库，不需要启动平台前后端。在仓库根目录运行：
+
+```powershell
+python problems/python-debug-01/src/main.py
+python -m unittest discover -s problems/python-debug-01/tests -p "test_*.py" -v
+python maintainer/python-debug-01/verify_sample.py
+```
+
+原始演示应有一个场景通过、两个未通过；原始公开测试应为 6 项通过、2 项失败，测试命令非零退出是预期状态。维护者验证命令应成功，展示原始两个预期失败、参考修复 8 项全部通过，并确认原始工程未修改。
+
+仅将 `problems/python-debug-01/` 作为考生工程发布；`maintainer/` 的参考答案不进入工作区或答卷快照。新增测试由考生编写，此样题目前尚未接入沙箱、网页或交卷服务。
 
 ## 开发与部署流程
 
