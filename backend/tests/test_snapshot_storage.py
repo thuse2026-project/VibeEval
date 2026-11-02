@@ -19,6 +19,9 @@ class SnapshotStorageTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name) / "snapshots"
         self.store = SnapshotStore(self.root)
+        # Windows CI may supply TEMP via a short-name or directory alias.
+        # Compare against the same canonical root used by the storage module.
+        self.root = self.store.root
 
     def object_path(self, stored):
         return self.root / stored.content_sha256[:2] / (stored.content_sha256 + ".json")
@@ -212,6 +215,23 @@ class SnapshotStorageTests(unittest.TestCase):
                         PureWindowsPath(extended).parent / "outside"
                     ).is_relative_to(root)
                 )
+
+    def test_real_directory_link_escape_is_rejected_before_writing(self):
+        files = [SnapshotFile("a.py", "safe content")]
+        stored = self.store.write(files)
+        destination = self.object_path(stored)
+        directory = destination.parent
+        destination.unlink()
+        directory.rmdir()
+        outside = self.root.parent / "outside"
+        outside.mkdir()
+        try:
+            directory.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Creating directory links is unavailable for this account")
+        with self.assertRaises(SnapshotStorageError):
+            self.store.write(files)
+        self.assertEqual(list(outside.iterdir()), [])
 
     def test_leaf_symbolic_link_is_still_rejected(self):
         stored = self.store.write([SnapshotFile("a.py", "safe content")])

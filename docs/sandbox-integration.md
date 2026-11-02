@@ -116,4 +116,4 @@ with lifecycle.lock_session(session_id) as locked:
 
 已复现 `test_concurrent_writers_publish_one_complete_object` 的路径误判：Windows 并发发布硬链接和创建目录时，`Path.resolve()` 偶尔保留 `\\?\` 命名空间前缀，使同一快照根目录的合法路径与普通盘符路径比较失败。现在仅解析父目录边界，并将 Windows 普通盘符、UNC 与扩展命名空间转换成一致的比较表示；实际读写路径不改写，快照文件符号链接仍被拒绝，读取仍校验摘要。
 
-修复后本地 Windows 16 线程累计 5,120 次写入无误；Linux 容器中的 19 项快照测试全部通过，包括并发、目录越界和符号链接拒绝。合入修复无需改动调用方，也不改变快照格式。涉及新版本字段时，再执行 Alembic `upgrade head` 到 `0004`。
+修复后本地 Windows 16 线程累计 5,120 次写入无误；Linux 容器中的 20 项快照测试全部通过，包括并发、目录越界和符号链接拒绝。Windows 测试夹具使用存储模块规范化后的根目录，兼容 CI 临时目录的短名或目录别名；另有真实目录链接越界用例确认不会向根目录外写入。合入修复无需改动调用方，也不改变快照格式。涉及新版本字段时，再执行 Alembic `upgrade head` 到 `0004`。
