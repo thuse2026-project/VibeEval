@@ -11,10 +11,18 @@ from .admin.router import AuthState, current_session, router
 from .admin.submissions import router as submission_router
 from .exams.router import router as entry_router
 from .exams.store import configured_store
+from .submissions.coordinator import SubmissionSandbox
+from .submissions.router import router as candidate_submission_router
+from .submissions.storage import SnapshotStore
 
 
 def create_app(
-    accounts: dict | None = None, entry_db: str | Path | None = None, entry_store=None
+    accounts: dict | None = None,
+    entry_db: str | Path | None = None,
+    entry_store=None,
+    *,
+    submission_sandbox: SubmissionSandbox | None = None,
+    snapshot_store: SnapshotStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="VibeEval API", version="0.1.0")
     app.state.auth = AuthState(load_accounts() if accounts is None else accounts)
@@ -22,6 +30,8 @@ def create_app(
         entry_store if entry_store is not None else configured_store(entry_db)
     )
     app.state.entry_failures = defaultdict(list)
+    app.state.submission_sandbox = submission_sandbox
+    app.state.snapshot_store = snapshot_store
     if entry_db is None:
         from .admin.submissions import get_submission_reader
         from .submissions.service import SubmissionService
@@ -29,13 +39,16 @@ def create_app(
         def submission_reader(request: Request, authenticated=Depends(current_session)):
             if request.query_params.get("source") == "demo":
                 return None
-            return SubmissionService(factory=app.state.entry.factory)
+            return SubmissionService(
+                store=app.state.snapshot_store, factory=app.state.entry.factory
+            )
 
         app.dependency_overrides[get_submission_reader] = submission_reader
     app.include_router(router)
     app.include_router(overview_router)
     app.include_router(submission_router)
     app.include_router(entry_router)
+    app.include_router(candidate_submission_router)
 
     @app.exception_handler(SQLAlchemyError)
     async def database_unavailable(request: Request, error: SQLAlchemyError):

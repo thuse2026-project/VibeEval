@@ -4,7 +4,7 @@
 
 当前开发 **Release 1.0 MVP**：先完成无 AI 辅助的「凭证入场 → 独立沙箱准备 → 多文件编辑与终端操作 → 交卷冻结 → 考官调阅」闭环。AI 辅助、隐藏测试和能力画像留待后续版本。
 
-陈智恒负责的模块已提供考官登录、共享数据库入场与恢复、考务总览、只读答卷详情和标准样题；真实提交查询已接共享持久化服务。真实沙箱及交卷 HTTP 全链路仍需对应成员联调，演示来源可单独预览。进度与验证结果见 [BCL.md](BCL.md)。
+陈智恒负责的模块已提供考官登录、共享数据库入场与恢复、考务总览、只读答卷详情和标准样题；真实提交查询已接共享持久化服务。赵晨一已接入交卷 HTTP 路由与协调器，真实沙箱适配器及候选人交卷交互仍需联调。演示来源可单独预览，陈智恒模块进度与验证结果见 [BCL.md](BCL.md)。
 
 已整合 PostgreSQL 与 Redis 开发环境、共享会话与提交服务。入场接共享数据库的启动、旧数据和沙箱对接说明见 [入场 PostgreSQL 交接](docs/entry-postgres-handoff.md)。
 
@@ -17,6 +17,7 @@
 - [陈智恒一期交接](docs/chen-zhiheng-handoff.md)：本人交付、剩余外部依赖与组员接入位置。
 
 - [沙箱与共享数据库接入](docs/sandbox-integration.md)：会话映射、数据库锁、统一状态及交卷/清理边界。
+- [交卷 HTTP 接入](docs/submission-http-handoff.md)：原浏览器鉴权、提交回执、沙箱注入与错误处理。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
@@ -113,7 +114,7 @@ Set-Location ../frontend
 npm.cmd run build
 ```
 
-接口测试通过模拟服务端时钟验证恰好 3 小时失效，不需要实际等待。`npm run dev` 仅用于本地调试，正式部署方式后续补充。后续由赵晨一添加 `docker-compose.yml` 和数据库迁移配置。
+接口测试通过模拟服务端时钟验证恰好 3 小时失效，不需要实际等待。`npm run dev` 仅用于本地调试，正式部署方式后续补充。已提供的 `docker-compose.yml` 和数据库迁移配置见后文。
 
 ### 考生入场与恢复（本地联调）
 
@@ -243,9 +244,9 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 
 ### 快照与提交持久化
 
-内部服务位于 `backend/app/submissions/`，接入契约见 [docs/api.md](docs/api.md#提交持久化内部契约)。当前实现接收调用方已冻结的 UTF-8 文件和已有公开测试输出，不调用 E2B、不停止终端进程、不执行测试，也未开放交卷 HTTP 路由。
+服务位于 `backend/app/submissions/`，内部契约及 HTTP 接口见 [docs/api.md](docs/api.md#主动交卷-http已实现)。`POST /api/v1/sessions/{session_id}/submit` 复用原浏览器 Cookie 和会话归属校验，需要 `X-VibeEval-Request: 1` 与 `Idempotency-Key`；只在最终答卷成功入库后返回 202 回执。文件和已有公开测试输出由服务端沙箱适配器提供，不接受浏览器上传作为答卷来源，也不在平台后端执行考生代码或测试。
 
-交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。真实沙箱适配器、HTTP 鉴权入口、到期自动提交和后台清理仍待接入；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
+交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。真实适配器通过 `create_app(submission_sandbox=adapter)` 接入；默认应用未配置适配器，尚未交卷的请求明确返回 503，已有答卷仍可恢复回执。到期自动提交和后台清理仍待接入；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
 
 调用方须先完成会话归属校验，将会话置为 `submitting`，禁止新写入并等待进行中的保存结束，停止仍会写文件的进程，再导出固定文件集。之后调用 `persist_frozen_submission()`：服务锁定会话行，落盘并校验快照，在同一数据库事务写入快照元数据、最终提交及会话的提交时间和 `submitted` 状态。重复请求（包括更换幂等键）始终返回首份已提交答卷，不读取或覆盖新传入的文件。
 

@@ -1,6 +1,6 @@
 # 沙箱与共享数据库接入约定
 
-本说明对应数据库迁移 `0004`。共享数据库层、提交存储及 `SubmissionCoordinator` 交卷协调器已实现；Docker + gVisor 生命周期代码由陈弘毅提供，当前尚未接入其真实代码，也未完成沙箱冻结或 HTTP 交卷的端到端联调。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。
+本说明对应数据库迁移 `0004`。共享数据库层、提交存储、`SubmissionCoordinator` 交卷协调器及候选人交卷 HTTP 路由已实现；Docker + gVisor 生命周期代码由陈弘毅提供，当前尚未接入其真实代码，未完成真实沙箱端到端联调。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。HTTP 鉴权、错误码和应用注入见 [交卷 HTTP 接入](submission-http-handoff.md)。
 
 ## 1. 会话、沙箱和截止时间
 
@@ -128,7 +128,7 @@ for view in coordinator.lifecycle.list_cleanup_candidates():
 
 - 暂停/导出/快照/数据库失败：沙箱侧保留环境和文件，不自动恢复编辑或删除容器。错误处理应在失败的锁上下文退出、事务回滚之后执行。
 - 若提交结果不确定，先查询 `get_session_receipt`；已存在回执就按成功处理。没有时另开锁调用 `mark_submission_failed("SNAPSHOT_WRITE_FAILED")` 等安全错误代码，保持禁止编辑，不因重试重置截止时间。
-- 由提交侧发起交卷重试，重新 `begin_submission`，复用同一暂停环境、容器 ID、固定资源标识及首份最终答卷语义；沙箱侧的暂停/导出须幂等。当前尚未新增自动重试 worker 或真实 HTTP 提交入口。
+- 由提交侧发起交卷重试，重新 `begin_submission`，复用同一暂停环境、容器 ID、固定资源标识及首份最终答卷语义；沙箱侧的暂停/导出须幂等。HTTP 提交入口已接协调器，当前尚未新增自动重试 worker。
 - 快照已落盘而数据库失败时，可能保留未引用文件；它不会被当作成功答卷，也不会触发沙箱清理。该类文件的垃圾回收仍未实现。
 - 只有确认数据库提交成功后，提交侧才发起清理通知；本阶段提供待清理台账 `list_cleanup_candidates(limit=...)`，尚未启动后台清理 worker。沙箱侧执行删除，保留工作区文件；容器已不存在时应按幂等成功处理。
 - 清理失败调用 `locked.mark_cleanup_failed("SANDBOX_CLEANUP_FAILED")`，会话仍是 `submitted`，答卷成功不撤销。待清理记录继续可查；后续清理必须再次拿锁、核对原 ID。清理后保留历史映射，不创建新空环境。

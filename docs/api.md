@@ -7,10 +7,10 @@
 ## 待确认项
 
 - 考生 WebSocket 鉴权和考试状态流转（HTTP 入场及恢复已约定如下）。
-- 真实提交服务实现、公开测试结果持久化与 PostgreSQL 集成（管理端只读接口已实现）。
+- 真实沙箱冻结/导出与交卷 HTTP 的适配器联调（持久化、管理端读取和 HTTP 路由已实现）。
 - 会话状态、开始计时与截止后的处理方式。
 - 公开测试的执行入口，以及结果如何保存并关联提交。
-- 提交是同步完成还是异步处理，以及冻结失败、重复提交和状态查询的语义。
+- 到期自动交卷、后台重试与清理调度（主动交卷的同步回执、失败和重复请求语义见下文）。
 - 文件版本冲突、越界路径、只读文件和冻结后操作的错误约定。
 - 终端退出、断开及错误消息的约定。
 
@@ -22,7 +22,7 @@
 - `POST /api/v1/admin/logout`：撤销当前会话并清除 Cookie，返回 204；重复退出同样返回 204。
 - 两个 POST 需带 `X-VibeEval-Request: 1`；前端同源调用，不开放跨域 CORS。正式部署使用 HTTPS 并启用 Secure Cookie。
 - 错误：401（凭证错误或未登录/过期）、403（缺少请求来源校验头）、422（请求字段不合法）、429（同一客户端地址 60 秒内已失败 5 次）、503（未配置账号）；错误正文为 FastAPI 的 `detail` 字段。客户端展示友好提示，不区分未知账号与密码错误。
-- 当前会话仅存在单进程内存，重启后失效。此约定取代下方原始草案中的管理端 Bearer JWT 设想；总览和答卷详情均复用此鉴权，真实提交服务仍由持久化成员实现。
+- 当前考官会话仅存在单进程内存，重启后失效。此约定取代下方原始草案中的管理端 Bearer JWT 设想；总览和答卷详情均复用此鉴权，真实答卷由共享 `SubmissionService` 提供。
 
 ## 考务总览（本轮实现）
 
@@ -109,15 +109,51 @@ app.dependency_overrides[get_submission_reader] = lambda: submission_reader
 
 仅参考相关环节与职责划分，代码独立实现，未引入其技术栈、监考、评分或完整题库。
 
+## 主动交卷 HTTP（已实现）
+
+`POST /api/v1/sessions/{session_id}/submit` 在 `backend/app/submissions/router.py` 实现，复用入场模块的 `require_candidate_session`。请求必须来自原浏览器，携带 `vibeeval_candidate` Cookie、`X-VibeEval-Request: 1` 和 `Idempotency-Key`。幂等键为 1～128 位字母、数字、下划线或连字符，可用 UUID；不放入 URL。不需要 JSON 请求体，前端传入的文件、身份、容器 ID 或测试结果不会作为答卷来源。
+
+接口先检查浏览器与会话归属，再从共享数据库读取已提交回执。没有回执时，由协调器设置 `submitting`、调用服务端沙箱适配器冻结导出并保存最终答卷。成功响应沿用附录 E 的 **202**，但本实现同步等待快照和数据库事务提交；`status: "frozen"` 表示答卷已经保存，不表示仅加入后台队列。所有响应带 `Cache-Control: no-store`。
+
+```json
+{
+  "submission_id": "sub_99a8b7c6d5e4",
+  "session_id": "ses_01j7c390a8e1b",
+  "snapshot_id": "snp_33214abc",
+  "submitted_at": 1730004800,
+  "status": "frozen"
+}
+```
+
+同一会话更换幂等键也只返回首份最终答卷。网络断开或响应丢失时，可用原浏览器再次 POST 恢复回执；不会重新导出或覆盖文件。后端重启后即使尚未配置沙箱适配器，已有的固定回执仍可恢复。`GET /sessions/{session_id}/status` 继续返回共享会话状态、开始及截止时间；回执仍通过 POST 获取。`frozen` 是回执状态，数据库最终状态为 `submitted`。
+
+| HTTP 状态 | 条件与代码 | 客户端处理 |
+| --- | --- | --- |
+| 403 | 缺少/错误的 `X-VibeEval-Request` | 检查同源请求配置 |
+| 404 | 浏览器不属于该会话或会话不存在 | 回原浏览器恢复；不靠 session_id 获取权限 |
+| 409 | `SESSION_BUSY`，正在保存、交卷或清理 | 响应带 `Retry-After: 1`，按提示延迟并有界重试 |
+| 409 | `SUBMISSION_NOT_READY`，如尚未开考 | 查询当前状态，不强行重新建环境或开始计时 |
+| 410 | 入场恢复窗口已结束 | 联系考官；原凭证不重新启用 |
+| 422 | 缺少或非法 `Idempotency-Key` | 修正请求头；不执行冻结或状态变更 |
+| 503 | `SUBMISSION_UNAVAILABLE`，未配置完整适配器，或显式 SQLite 回归模式 | 当前会话状态不变；等待服务接入后重试 |
+| 503 | `SANDBOX_FREEZE_EXPORT_FAILED`、`SANDBOX_EXPORT_MISMATCH`、`SNAPSHOT_PERSIST_FAILED` | 保留原会话，查询状态并重试/联系维护者；不能把失败视作成功或恢复编辑 |
+| 503 | 共享数据库不可用 | 稍后查询或重试，不能推断是否已提交 |
+
+交卷领域错误使用 `{"detail": {"code": "...", "message": "..."}}`；入场鉴权、参数校验和通用数据库异常沿用各自原有 `detail` 格式，客户端需兼容字符串、校验列表和对象。返回值及日志不暴露 SDK 异常、数据库凭据或磁盘路径。
+
+成功入库后会尝试清理容器。清理失败仍返回同一份 202 回执，清理待办继续保存在共享台账，不要求考生重复提交。冻结或持久化失败时保持写入门禁，尽力记录 `submission_failed`；数据库暂时不可用时也可能仍为 `submitting`，后续重试使用同一容器和原截止时间。
+
+实际沙箱需在应用构建时注入 `create_app(submission_sandbox=adapter)`，接口与配置见 [交卷 HTTP 接入说明](submission-http-handoff.md)。默认 `app.main:app` 未配置真实适配器，对没有最终答卷的交卷请求明确返回 503，不会调用空冻结或生成演示答卷。当前已验证真实 PostgreSQL + HTTP + 管理端查询，沙箱部分使用测试替身；真实 Docker + gVisor 端到端、候选人提交交互和后台任务仍待后续接入。
+
 ## 提交持久化内部契约
 
 共享会话、容器映射、跨进程行锁、状态集合及提交失败后的恢复规则见 [沙箱接入约定](sandbox-integration.md)，对应迁移 `0004`。`SessionView.task_version_id` 与 `sandbox_image_ref` 分别提供题目发布版本和镜像引用；提交台账会冻结保存两者，现有管理端 reader 字段保持不变。已有 HTTP 草案仍待对齐这些内部状态和鉴权方式。
 
-以下为当前分支已实现的 Python 内部服务，HTTP 交卷和沙箱冻结尚未接入，下方 E.3 仍是 HTTP 草案。
+以下为当前分支已实现的 Python 内部服务，HTTP 交卷路由见上一节，真实沙箱适配器尚未接入；下方 E.3 保留原始 HTTP 草案。
 
-`backend/app/submissions/coordinator.py` 的 `SubmissionCoordinator(sandbox_adapter)` 是交卷编排入口，提供 `submit(session_id, idempotency_key)` 和 `cleanup(session_id)`。调用方先验证会话归属，再由协调器提交 `submitting` 门禁、调用注入适配器的 `freeze_and_export(view)`、核验导出的会话与容器身份、持久化答卷、事务提交后尝试 `delete_sandbox(view)`。适配器返回 `FrozenWorkspace(session_id, sandbox_id, files, public_test_output=None)`；具体冻结、超时、保留文件要求见沙箱接入约定。当前只以替身验证该接口，尚无真实沙箱适配器或 HTTP 路由。
+`backend/app/submissions/coordinator.py` 的 `SubmissionCoordinator(sandbox_adapter)` 是交卷编排入口，提供 `submit(session_id, idempotency_key)` 和 `cleanup(session_id)`。调用方先验证会话归属，再由协调器提交 `submitting` 门禁、调用注入适配器的 `freeze_and_export(view)`、核验导出的会话与容器身份、持久化答卷、事务提交后尝试 `delete_sandbox(view)`。适配器返回 `FrozenWorkspace(session_id, sandbox_id, files, public_test_output=None)`；具体冻结、超时、保留文件要求见沙箱接入约定。当前只以替身验证沙箱接口，尚无真实沙箱适配器。
 
-`submit()` 返回下述固定回执，重复请求直接返回第一份已提交答卷。冻结、导出或持久化失败抛出带安全 `code` 的 `SubmissionAttemptFailed`，保留原环境及禁止写入状态供重试；并发锁冲突透传 `SessionBusy`。提交已成功时，清理失败不撤销回执，继续出现在 `lifecycle.list_cleanup_candidates()`；后续单独 `cleanup()` 失败可抛出 `SandboxCleanupFailed`。数据库异常后的回执恢复、错误代码和无自动 worker 的边界见沙箱接入约定；这些内部异常暂不规定 HTTP 状态码。
+`submit()` 返回下述固定回执，重复请求直接返回第一份已提交答卷。冻结、导出或持久化失败抛出带安全 `code` 的 `SubmissionAttemptFailed`，保留原环境及禁止写入状态供重试；并发锁冲突透传 `SessionBusy`。提交已成功时，清理失败不撤销回执，继续出现在 `lifecycle.list_cleanup_candidates()`；后续单独 `cleanup()` 失败可抛出 `SandboxCleanupFailed`。数据库异常后的回执恢复、错误代码和无自动 worker 的边界见沙箱接入约定；HTTP 映射见上一节，清理没有公开的候选人 HTTP 接口。
 
 `backend/app/submissions/service.py` 中的 `SubmissionService` 提供：
 
@@ -136,8 +172,8 @@ get_session_receipt(session_id)
 - `get_submission(id)` 查无记录返回 `None`，否则在摘要上增加 `snapshot_id`、`files[{path, content}]` 与 `public_test_output`。身份与时间取自提交当时保存的数据，文件及测试输出仅从固定快照读取。`public_test_output` 为 `None` 和空字符串时保留区别。
 - `get_session_receipt(session_id)` 返回该会话已提交的固定回执，尚未提交时为 `None`，用于重试和不确定提交结果的恢复。
 - 持有生命周期锁时，使用 `locked.persist_frozen_submission(service, key, files, ...)` 复用当前事务，不能另起普通提交事务。块内返回值须等待锁上下文成功退出后才可响应；清理必须另开锁上下文，通过 `require_cleanup()` 后进行，禁止在尚未提交的事务内删容器。
-- 返回字段对齐队友 `feat/admin-submission-details` 分支的 `SubmissionReader`，尚未注入管理端路由；返回值不包含幂等键、凭据哈希、内部磁盘路径或内容存储摘要。
-- 未知会话抛出 `SubmissionNotFound`；未开始或状态不正确抛出 `InvalidSubmissionState`；快照输入不合法抛出 `SnapshotValidationError`；文件丢失、损坏或存储不可用抛出 `SnapshotStorageError`。HTTP 状态映射和冻结失败后的会话恢复策略在路由接入时对齐。
+- 返回字段对齐 `SubmissionReader`，已通过 `create_app` 注入管理端路由，写入和调阅共用同一数据库工厂及快照存储配置；返回值不包含幂等键、凭据哈希、内部磁盘路径或内容存储摘要。
+- 底层服务未知会话抛出 `SubmissionNotFound`；未开始或状态不正确抛出 `InvalidSubmissionState`；快照输入不合法抛出 `SnapshotValidationError`；文件丢失、损坏或存储不可用抛出 `SnapshotStorageError`。候选人 HTTP 经协调器调用，使用上一节的领域错误与恢复语义。
 
 数据库错误会回滚提交、快照元数据和会话更新。文件系统中可能保留未引用对象，查询不会将其显示为成功提交；当前未实现垃圾回收。存储位置与大小限制见根 README。
 
