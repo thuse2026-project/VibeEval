@@ -4,7 +4,7 @@
 
 当前开发 **Release 1.0 MVP**：先完成无 AI 辅助的「凭证入场 → 独立沙箱准备 → 多文件编辑与终端操作 → 交卷冻结 → 考官调阅」闭环。AI 辅助、隐藏测试和能力画像留待后续版本。
 
-目前仓库仅包含目录骨架与协作文档，尚未实现可运行的前后端服务。
+当前 `main` 的前后端仍以目录骨架为主；已提供 PostgreSQL 与 Redis 本地开发环境，前后端服务及数据库迁移待接入。
 
 ## 文档入口
 
@@ -68,15 +68,54 @@ VibeEval/
 
 ## 本地开发
 
-当前尚无可运行服务，启动与检查命令待对应工程接入后补充。添加运行能力的成员同步更新本节，至少说明：
+### PostgreSQL 与 Redis
 
-- 所需软件及版本。
-- 环境变量配置方式；添加必需配置时提供 `.env.example`。
-- 前端、后端和数据库的启动命令。
-- 现有测试及代码检查命令。
-- 哪些功能需要 E2B 账号，哪些部分可独立开发。
+需要 Docker Engine 和 Docker Compose v2.20 或以上版本。Windows 可安装 [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)，使用 WSL 2 后端和 Linux 容器。先确认 Docker 已启动：
 
-后续由赵晨一添加根目录 `docker-compose.yml` 和数据库迁移配置；前后端负责人分别补充依赖配置与应用入口。
+```sh
+docker version
+docker compose version
+```
+
+在仓库根目录准备本地配置。PowerShell 使用：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Linux/macOS 使用 `cp .env.example .env`。已有 `.env` 时直接编辑，不重复复制覆盖。打开 `.env`，填写 `POSTGRES_PASSWORD`；空密码会使配置检查失败。`.env` 已被 Git 忽略，真实密码不要写入 `.env.example`。
+
+从仓库根目录检查并启动：
+
+```sh
+docker compose config --quiet
+docker compose up -d --wait --wait-timeout 120
+docker compose ps
+```
+
+首次启动需要下载镜像。启动成功后，`postgres` 和 `redis` 均应显示为 `healthy`。检查失败时使用 `docker compose logs --tail 100 postgres redis` 查看服务日志。
+
+| 服务 | 镜像 | 本机连接地址 | 数据位置 |
+| --- | --- | --- | --- |
+| PostgreSQL | `postgres:16-alpine` | `127.0.0.1:5432` | 命名卷 `postgres_data` |
+| Redis | `redis:7.4-alpine` | `127.0.0.1:6379` | 命名卷 `redis_data`，启用 AOF |
+
+端口由 `.env` 中的 `POSTGRES_PORT`、`REDIS_PORT` 控制；冲突时修改后重新启动。数据库名和用户名默认均为 `vibeeval`，密码取自 `.env`。后续运行在同一 Compose 网络内的服务应通过 `postgres:5432`、`redis:6379` 连接。
+
+验证数据库查询和 Redis 连接（若改过数据库名或用户名，相应调整命令）：
+
+```sh
+docker compose exec postgres psql -U vibeeval -d vibeeval -c "SELECT 1;"
+docker compose exec redis redis-cli ping
+```
+
+预期分别返回 `1` 和 `PONG`。停止服务使用 `docker compose down`；命名卷保留，下次启动可继续读取原数据。数据库初始化变量仅在新数据卷首次启动时生效，修改 `.env` 不会自动修改已有数据库的账号、密码或库名。
+
+此配置供本地开发使用，端口只绑定本机；Redis 未配置认证。PostgreSQL 保存业务数据，Redis 用于缓存与通知，不能作为业务数据的唯一持久化来源。这两个基础服务不需要 E2B 账号。
+
+### 前后端与数据库迁移
+
+前后端依赖、应用入口、数据库模型与 Alembic 迁移尚未在当前分支接入，暂不提供应用启动和业务测试命令。添加运行能力时同步补充启动、测试、代码检查命令与配置示例；沙箱联调需要 E2B 账号。
 
 ## 开发与部署流程
 
