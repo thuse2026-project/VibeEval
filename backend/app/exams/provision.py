@@ -3,7 +3,7 @@
 import argparse
 from datetime import datetime
 
-from .store import EntryStore
+from .store import configured_store
 
 
 def main():
@@ -16,13 +16,19 @@ def main():
     parser.add_argument("--valid-hours", type=int, default=24)
     args = parser.parse_args()
     try:
-        token, expires = EntryStore().invite(
-            args.candidate_id, args.name, args.exam_id, args.title,
-            args.duration_minutes, args.valid_hours,
+        token, expires = configured_store().invite(
+            args.candidate_id,
+            args.name,
+            args.exam_id,
+            args.title,
+            args.duration_minutes,
+            args.valid_hours,
         )
     except ValueError as error:
         parser.error(str(error))
-    print(f"首次入场截止：{datetime.fromtimestamp(expires).astimezone().isoformat(timespec='seconds')}")
+    print(
+        f"首次入场截止：{datetime.fromtimestamp(expires).astimezone().isoformat(timespec='seconds')}"
+    )
     print("请私下发给对应考生，凭证仅在此输出，服务端只存哈希：")
     print(token)
     print("入场页面：http://127.0.0.1:5173/entry")

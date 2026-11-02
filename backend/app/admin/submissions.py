@@ -9,7 +9,9 @@ from .router import current_session
 
 
 class SubmissionSummary(BaseModel):
-    submission_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    submission_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
+    )
     session_id: str = Field(min_length=1, max_length=128)
     candidate_id: str = Field(min_length=1, max_length=120)
     candidate_name: str = Field(min_length=1, max_length=120)
@@ -27,8 +29,13 @@ class SnapshotFile(BaseModel):
     @field_validator("path")
     @classmethod
     def relative_path(cls, value: str) -> str:
-        if (value.startswith("/") or "\\" in value or ":" in value or "\x00" in value
-                or any(part in ("", ".", "..") for part in value.split("/"))):
+        if (
+            value.startswith("/")
+            or "\\" in value
+            or ":" in value
+            or "\x00" in value
+            or any(part in ("", ".", "..") for part in value.split("/"))
+        ):
             raise ValueError("Snapshot paths must be relative POSIX file paths")
         return value
 
@@ -63,28 +70,41 @@ def get_submission_reader() -> SubmissionReader | None:
 
 
 Reader = Annotated[SubmissionReader | None, Depends(get_submission_reader)]
-router = APIRouter(prefix="/api/v1/admin", tags=["答卷调阅"], dependencies=[Depends(current_session)])
+router = APIRouter(
+    prefix="/api/v1/admin", tags=["答卷调阅"], dependencies=[Depends(current_session)]
+)
 
 
 def list_committed(reader: SubmissionReader) -> list[SubmissionSummary]:
     try:
-        records = [SubmissionSummary.model_validate(row) for row in reader.list_submissions()]
+        records = [
+            SubmissionSummary.model_validate(row) for row in reader.list_submissions()
+        ]
         identities = {(row.exam_id, row.candidate_id) for row in records}
-        if len(identities) != len(records) or len({row.submission_id for row in records}) != len(records):
+        if len(identities) != len(records) or len(
+            {row.submission_id for row in records}
+        ) != len(records):
             raise ValueError("Duplicate committed submission")
         return records
     except (ValidationError, ValueError, TypeError) as error:
-        raise HTTPException(502, "提交服务返回的列表数据不完整，请联系维护者") from error
+        raise HTTPException(
+            502, "提交服务返回的列表数据不完整，请联系维护者"
+        ) from error
     except Exception as error:
         raise HTTPException(503, "提交数据暂时不可用，请稍后重试") from error
 
 
 @router.get("/submissions/{submission_id}", response_model=SubmissionView)
-def detail(reader: Reader,
-           submission_id: str = Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
-           source: Literal["live", "demo"] = "live"):
+def detail(
+    reader: Reader,
+    submission_id: str = Path(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
+    ),
+    source: Literal["live", "demo"] = "live",
+):
     if source == "demo":
         from .demo import demo_submission
+
         record = demo_submission(submission_id)
     else:
         if reader is None:
@@ -101,4 +121,6 @@ def detail(reader: Reader,
             raise ValueError("Mismatched submission identity")
         return SubmissionView(**validated.model_dump(), source=source)
     except (ValidationError, ValueError, TypeError) as error:
-        raise HTTPException(502, "提交服务返回的答卷数据不完整，请联系维护者") from error
+        raise HTTPException(
+            502, "提交服务返回的答卷数据不完整，请联系维护者"
+        ) from error

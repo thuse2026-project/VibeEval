@@ -1,14 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, ApiError } from '../../shared/api';
+import { statusLabels, formatTime } from '../../admin/submissions/types';
 
 type EntrySession = {
   session_id: string;
-  status: 'admitted';
+  status: keyof typeof statusLabels;
   candidate: { id: string; name: string };
   exam_info: { id: string; title: string; duration_minutes: number };
   admitted_at: number;
-  started_at: null;
-  deadline_at: null;
+  started_at: number | null;
+  deadline_at: number | null;
 };
 
 function entryRequest(path: string, body?: unknown) {
@@ -55,15 +56,17 @@ export default function Entry() {
       : session ? <section className="home-panel" aria-labelledby="entry-success">
         <div className="section-label">入场确认</div>
         <h1 id="entry-success">已入场，{session.candidate.name}</h1>
-        <p className="notice" role="status">尚未开始计时</p>
+        <p className="notice" role="status">{statusLabels[session.status]}</p>
         <dl>
           <div><dt>考核名称</dt><dd>{session.exam_info.title}</dd></div>
           <div><dt>考生编号</dt><dd>{session.candidate.id}</dd></div>
           <div><dt>作答时长</dt><dd>{session.exam_info.duration_minutes} 分钟</dd></div>
           <div><dt>会话编号</dt><dd>{session.session_id}</dd></div>
+          <div><dt>考试计时</dt><dd>{session.started_at === null ? '尚未开始计时' : `开始于 ${formatTime(session.started_at)}`}</dd></div>
+          {session.deadline_at !== null && <div><dt>截止时间</dt><dd>{formatTime(session.deadline_at)}</dd></div>}
         </dl>
         <p className="login-note">请保留当前浏览器的本站数据。刷新或重新打开本页可恢复原会话，无需再次输入凭证。</p>
-        <p className="login-note">当前仅验证入场与恢复。环境准备和“开始作答”将在后续接入，尚未启动沙箱或考试计时。</p>
+        <p className="login-note">此页面用于入场与恢复，状态来自共享会话。准备环境与开始作答请使用正式工作台；刷新此页不会重新计时。</p>
         <button className="secondary" onClick={() => void restore()}>检查并恢复会话</button>
       </section> : <section className="login-panel" aria-labelledby="entry-title">
         <div className="section-label">考核接入</div>

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.exams.provision import main
 from app.exams.router import COOKIE_NAME
-from app.exams.store import EntryStore, RECOVERY_SECONDS
+from app.exams.store import RECOVERY_SECONDS, EntryStore
 from app.main import create_app
 
 HEADERS = {"X-VibeEval-Request": "1"}
@@ -34,10 +34,14 @@ class CandidateEntryTests(unittest.TestCase):
         return client
 
     def invite(self, candidate="student-01", valid_hours=24):
-        return self.store.invite(candidate, "测试考生", "exam-01", "入场联调考核", 60, valid_hours)
+        return self.store.invite(
+            candidate, "测试考生", "exam-01", "入场联调考核", 60, valid_hours
+        )
 
     def admit(self, client=None, token=None):
-        return (client or self.client).post(BASE + "/verify-token", json={"token": token or self.token})
+        return (client or self.client).post(
+            BASE + "/verify-token", json={"token": token or self.token}
+        )
 
     def test_bootstrap_and_success_do_not_start_exam(self):
         response = self.admit()
@@ -49,12 +53,16 @@ class CandidateEntryTests(unittest.TestCase):
         self.assertIsNone(data["started_at"])
         self.assertIsNone(data["deadline_at"])
         self.assertEqual(self.client.get(BASE + "/current").json(), data)
-        self.assertEqual(self.client.get(BASE + "/" + data["session_id"] + "/status").json(), data)
+        self.assertEqual(
+            self.client.get(BASE + "/" + data["session_id"] + "/status").json(), data
+        )
         public_text = response.text
         self.assertNotIn(self.token, public_text)
         self.assertNotIn("hash", public_text)
         self.assertNotIn(self.token.encode(), self.path.read_bytes())
-        self.assertNotIn(self.client.cookies.get(COOKIE_NAME).encode(), self.path.read_bytes())
+        self.assertNotIn(
+            self.client.cookies.get(COOKIE_NAME).encode(), self.path.read_bytes()
+        )
 
     def test_same_browser_retry_after_lost_response(self):
         first = self.admit().json()
@@ -86,7 +94,10 @@ class CandidateEntryTests(unittest.TestCase):
         with patch("app.exams.store.time.time", return_value=self.expires):
             self.assertEqual(self.admit().status_code, 410)
         self.assertEqual(self.client.get(BASE + "/current").status_code, 401)
-        self.assertEqual(self.client.post(BASE + "/verify-token", json={"token": ""}).status_code, 422)
+        self.assertEqual(
+            self.client.post(BASE + "/verify-token", json={"token": ""}).status_code,
+            422,
+        )
 
     def test_expiry_and_restart_preserve_original_session(self):
         first = self.admit().json()
@@ -101,9 +112,13 @@ class CandidateEntryTests(unittest.TestCase):
         session = self.admit().json()
         other = self.new_browser()
         self.assertEqual(self.admit(other).status_code, 409)
-        self.assertEqual(other.get(BASE + "/" + session["session_id"] + "/status").status_code, 404)
+        self.assertEqual(
+            other.get(BASE + "/" + session["session_id"] + "/status").status_code, 404
+        )
         self.assertEqual(other.get(BASE + "/current").status_code, 401)
-        self.assertEqual(self.client.get(BASE + "/ses_not_mine/status").status_code, 404)
+        self.assertEqual(
+            self.client.get(BASE + "/ses_not_mine/status").status_code, 404
+        )
         self.assertEqual(self.client.get("/api/v1/admin/me").status_code, 401)
 
     def test_lost_cookie_never_reactivates_used_invitation(self):
@@ -114,12 +129,29 @@ class CandidateEntryTests(unittest.TestCase):
 
     def test_recovery_window_enforced_by_server_and_never_reactivates_invitation(self):
         first = self.admit().json()
-        with patch("app.exams.store.time.time", return_value=first["admitted_at"] + RECOVERY_SECONDS):
+        with patch(
+            "app.exams.store.time.time",
+            return_value=first["admitted_at"] + RECOVERY_SECONDS,
+        ):
             # Explicitly resend the secret even after the browser's Cookie timer expires.
-            headers = {"Cookie": f"{COOKIE_NAME}={self.client.cookies.get(COOKIE_NAME)}"}
-            self.assertEqual(self.client.get(BASE + "/current", headers=headers).status_code, 410)
-            self.assertEqual(self.client.get(BASE + "/" + first["session_id"] + "/status", headers=headers).status_code, 410)
-            self.assertEqual(self.client.post(BASE + "/verify-token", json={"token": self.token}, headers=headers).status_code, 410)
+            headers = {
+                "Cookie": f"{COOKIE_NAME}={self.client.cookies.get(COOKIE_NAME)}"
+            }
+            self.assertEqual(
+                self.client.get(BASE + "/current", headers=headers).status_code, 410
+            )
+            self.assertEqual(
+                self.client.get(
+                    BASE + "/" + first["session_id"] + "/status", headers=headers
+                ).status_code,
+                410,
+            )
+            self.assertEqual(
+                self.client.post(
+                    BASE + "/verify-token", json={"token": self.token}, headers=headers
+                ).status_code,
+                410,
+            )
             other = self.new_browser()
             self.assertEqual(self.admit(other).status_code, 409)
 
@@ -134,7 +166,9 @@ class CandidateEntryTests(unittest.TestCase):
         other = self.new_browser()
         with ThreadPoolExecutor(max_workers=2) as executor:
             responses = list(executor.map(self.admit, [self.client, other]))
-        self.assertEqual(sorted(response.status_code for response in responses), [200, 409])
+        self.assertEqual(
+            sorted(response.status_code for response in responses), [200, 409]
+        )
 
     def test_concurrent_same_browser_retries_return_same_session(self):
         other = TestClient(self.app, headers=HEADERS)
@@ -149,7 +183,10 @@ class CandidateEntryTests(unittest.TestCase):
         response = other.get(BASE + "/current")
         self.assertEqual(response.status_code, 403)
         self.assertNotIn("set-cookie", response.headers)
-        self.assertEqual(other.post(BASE + "/verify-token", json={"token": self.token}).status_code, 403)
+        self.assertEqual(
+            other.post(BASE + "/verify-token", json={"token": self.token}).status_code,
+            403,
+        )
         self.assertEqual(self.admit().status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
 
@@ -158,17 +195,35 @@ class CandidateEntryTests(unittest.TestCase):
             self.assertEqual(self.admit(token="wrong").status_code, 401)
         self.assertEqual(self.admit().status_code, 429)
         import time
+
         with patch("app.exams.router.time.time", return_value=time.time() + 61):
             self.assertEqual(self.admit().status_code, 200)
 
     def test_provision_command_and_duplicate_guard(self):
-        arguments = ["provision", "--candidate-id", "student-02", "--name", "李同学",
-                     "--exam-id", "exam-01", "--title", "入场测试"]
+        arguments = [
+            "provision",
+            "--candidate-id",
+            "student-02",
+            "--name",
+            "李同学",
+            "--exam-id",
+            "exam-01",
+            "--title",
+            "入场测试",
+        ]
         output = io.StringIO()
-        with patch.dict("os.environ", {"ENTRY_DB_FILE": str(self.path)}), patch("sys.argv", arguments), redirect_stdout(output):
+        with (
+            patch("app.exams.provision.configured_store", return_value=self.store),
+            patch("sys.argv", arguments),
+            redirect_stdout(output),
+        ):
             main()
-        issued_token = next(line for line in output.getvalue().splitlines() if line.startswith("tok_"))
-        self.assertEqual(self.admit(token=issued_token).json()["candidate"]["name"], "李同学")
+        issued_token = next(
+            line for line in output.getvalue().splitlines() if line.startswith("tok_")
+        )
+        self.assertEqual(
+            self.admit(token=issued_token).json()["candidate"]["name"], "李同学"
+        )
         with self.assertRaises(ValueError):
             self.invite("student-02")
         with self.assertRaises(ValueError):

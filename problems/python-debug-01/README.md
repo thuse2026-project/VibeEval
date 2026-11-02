@@ -46,11 +46,11 @@ python -m unittest discover -s tests -p "test_*.py" -v
 ## 作答范围
 
 - 修改 `src/booking.py`；保留上述类、方法签名、返回字段与既有业务规则。
-- 在 `tests/test_candidate.py` 添加至少一个回归测试，不修改 `tests/test_public.py`、演示脚本或依赖声明。
+- 在预建的空文件 `tests/test_candidate.py` 中添加至少一个回归测试；允许编辑内容，不允许删除重建。不修改 `tests/test_public.py`、演示脚本或依赖声明。
 - 新测试应验证真实业务行为，可以考虑另一方向的相邻预约、取消与其他有效预约组合等尚未充分覆盖的场景。测试使用 `unittest`，不得只调用函数而不检查结果，也不应依赖内部存储方式。
 - 用同一个测试命令运行公开测试及新增测试，再提交修改后的工程。
 
-新建的 `tests/test_candidate.py` 需要独立设置模块路径，不能依赖公开测试先被导入。可用下面的文件开头，再编写自己的 `unittest.TestCase` 和 `test_` 方法：
+`tests/test_candidate.py` 需要独立设置模块路径，不能依赖公开测试先被导入。可用下面的文件开头，再编写自己的 `unittest.TestCase` 和 `test_` 方法：
 
 ```python
 import sys
@@ -72,7 +72,8 @@ python-debug-01/
 │   ├── booking.py
 │   └── main.py
 └── tests/
-    └── test_public.py
+    ├── test_public.py
+    └── test_candidate.py
 ```
 
 此目录内是考生工程；平台发布时只挂载此目录。参考修复和维护者验证工具不属于考生材料，也不应随答题工程或提交快照一起打包。

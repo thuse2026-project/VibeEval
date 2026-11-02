@@ -9,12 +9,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core.security import require_browser_header
-from .store import EntryError, RECOVERY_SECONDS
+from .store import RECOVERY_SECONDS, EntryError
 
 COOKIE_NAME = "vibeeval_candidate"
 COOKIE_SECONDS = RECOVERY_SECONDS
-router = APIRouter(prefix="/api/v1/sessions", tags=["考生入场"],
-                   dependencies=[Depends(require_browser_header)])
+router = APIRouter(
+    prefix="/api/v1/sessions",
+    tags=["考生入场"],
+    dependencies=[Depends(require_browser_header)],
+)
 
 
 class VerifyInput(BaseModel):
@@ -40,11 +43,17 @@ def current(request: Request):
     session = recover(request)
     if session:
         return session
-    response = JSONResponse({"detail": "尚未入场，请输入分配给你的凭证"}, status_code=401)
+    response = JSONResponse(
+        {"detail": "尚未入场，请输入分配给你的凭证"}, status_code=401
+    )
     if browser is None:
         response.set_cookie(
-            COOKIE_NAME, secrets.token_urlsafe(32), max_age=COOKIE_SECONDS,
-            httponly=True, samesite="strict", path="/api/v1/sessions",
+            COOKIE_NAME,
+            secrets.token_urlsafe(32),
+            max_age=COOKIE_SECONDS,
+            httponly=True,
+            samesite="strict",
+            path="/api/v1/sessions",
             secure=os.environ.get("COOKIE_SECURE", "false").lower() == "true",
         )
     return response
@@ -54,17 +63,25 @@ def current(request: Request):
 def verify(body: VerifyInput, request: Request):
     browser = browser_key(request)
     if browser is None:
-        raise HTTPException(428, "请先检查或恢复浏览器会话，再提交入场凭证；请确认浏览器允许本站 Cookie")
+        raise HTTPException(
+            428, "请先检查或恢复浏览器会话，再提交入场凭证；请确认浏览器允许本站 Cookie"
+        )
     now = time.time()
     failures = request.app.state.entry_failures
-    request.app.state.entry_failures = defaultdict(list, {
-        key: [stamp for stamp in attempts if now - stamp < 60]
-        for key, attempts in failures.items() if attempts and now - attempts[-1] < 60
-    })
+    request.app.state.entry_failures = defaultdict(
+        list,
+        {
+            key: [stamp for stamp in attempts if now - stamp < 60]
+            for key, attempts in failures.items()
+            if attempts and now - attempts[-1] < 60
+        },
+    )
     failures = request.app.state.entry_failures
     address = request.client.host if request.client else "unknown"
     if len(failures[address]) >= 10:
-        raise HTTPException(429, "尝试过于频繁，请最多等待 60 秒后重试", headers={"Retry-After": "60"})
+        raise HTTPException(
+            429, "尝试过于频繁，请最多等待 60 秒后重试", headers={"Retry-After": "60"}
+        )
     try:
         return request.app.state.entry.admit(body.token.strip(), browser)
     except EntryError as error:

@@ -19,7 +19,9 @@ def accounts_path() -> Path:
 
 def hash_password(password: str, salt: str | None = None) -> str:
     salt = salt or secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), ITERATIONS)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), bytes.fromhex(salt), ITERATIONS
+    )
     return f"{salt}${digest.hex()}"
 
 
@@ -36,7 +38,9 @@ def load_accounts() -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create or update a local examiner account")
+    parser = argparse.ArgumentParser(
+        description="Create or update a local examiner account"
+    )
     parser.add_argument("username")
     parser.add_argument("--name", required=True, help="Examiner display name")
     args = parser.parse_args()
@@ -53,7 +57,9 @@ def main() -> None:
     path = accounts_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(accounts, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(accounts, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     temporary.replace(path)
     print("Account saved. Restart the backend to apply changes.")
 

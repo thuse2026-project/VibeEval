@@ -3,6 +3,8 @@ export type DataSource = 'live' | 'demo';
 export const statusLabels = {
   invited: '尚未入场', admitted: '已入场，未开始', in_progress: '作答中', submitted: '已交卷',
   invitation_expired: '凭证已过期，未入场', recovery_expired: '恢复期限已过，未交卷',
+  provisioning: '环境准备中', ready: '环境就绪，待开始', provision_failed: '环境准备失败',
+  submitting: '正在交卷', submission_failed: '交卷失败，待重试',
 };
 
 export type OverviewQuery = {

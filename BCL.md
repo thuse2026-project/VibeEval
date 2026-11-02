@@ -65,13 +65,33 @@
 - [x] 完成本人交付清单、组员对接说明和实际可复现验证；监督最终重读最新暂存实现、契约和文档，未发现遗留阻塞问题。
 - [ ] 陈智恒人工验收剩余管理端与样题（待用户确认）。
 
+### 入场接共享 PostgreSQL（2026-11-02）
+
+原始意图：复用赵晨一共享会话，陈弘毅继续沙箱开发；主智能体完成对接、验证并上传后一次性交接。保持 Cookie、权限、期限及一次性兑换语义，不新增沙箱或交卷实现。
+
+- [x] 整合共享底座，默认 CLI/HTTP 入场、恢复、鉴权和总览读取同一 PostgreSQL，不双写或故障回落 SQLite。
+- [x] 独立 PostgreSQL 验证并发兑换、恢复、真实生命周期状态、固定截止时间、权限与提交读取；前端同步状态并通过构建。
+- [x] 预建空回归测试文件，更新题面、接口和迁移交接说明；旧 SQLite 本地数据不自动导入、不删除。
+- [x] 只读监督重读最新差异、状态、测试和交接说明，独立 11 项 PostgreSQL 测试通过；最终 blocking 0、deferred 0、non-blocking style 0，验证及边界已记录。
+- [ ] 陈智恒人工验收入场共享数据库接入，随后与陈弘毅联测真实沙箱（待用户确认）。
+
 ## 待确认
 
 - 当前考官登录采用本地哈希账号文件及单进程内存会话；重启后需重新登录。数据库账号存储、服务器部署和真实提交服务后续接入。
-- 考生入场本地使用 SQLite 原子保存，后续对接 PostgreSQL；恢复 Cookie 最长 30 天，服务端也检查恢复期限。清除 Cookie 后需联系考官。以上是已说明的本地方案限制。
+- 考生入场已改为共享 PostgreSQL；旧 SQLite 数据不自动导入或删除。恢复 Cookie 最长 30 天，服务端也检查恢复期限。清除 Cookie 后需联系考官，沙箱端到端与权限专项仍待双方联测。
 - 用户已通过弹窗明确：只完成陈智恒独立工作，不干预赵晨一的真实交卷/快照/数据库实现，重点保持计划与接口统一。剩余外部依赖必须在交接中列明。
 
 ## 验证记录
+
+### 入场 PostgreSQL 接入（2026-11-02）
+
+- 基于 feat/admin-submission-details 整合赵晨一 feat/submission-coordinator（cc2abb8）；共享模型、迁移、生命周期及提交服务未另行修改。后端原有代码按新合入的 Black/Ruff 规范格式化，旧行为由回归检查。
+- WSL Docker 启动独立 PostgreSQL 16 测试实例，测试类创建随机数据库，迁移 0001 至 0004 后验证并清理。首次 Docker Hub 拉取超时后使用同一公开 postgres 镜像的 ECR 镜像源完成；未使用业务数据库。
+- 完整 `VIBEEVAL_RUN_DB_TESTS=1 python -m coverage run -m unittest discover -s tests -q`：159 项，157 通过、2 跳过，覆盖率 96.0%。该次完整运行后增加数据库故障/无权限不初始化 reader 的两项检查，并修正默认 reader 验证方式，另行定向复测。
+- 定向 PostgreSQL 测试首先 8 项、增加管理端读取后 9 项通过。最终验证不替换 get_submission_reader，仅重定向测试快照目录，确认默认真实提交装配可读取同库固定快照与原始输出。
+- 最终 `VIBEEVAL_RUN_DB_TESTS=1 python -m unittest discover -s tests -p test_entry_postgres.py -q`：11 项全部通过，包括数据库故障安全 503、无权限时不提前初始化数据库 reader。
+- `python -m black --check .`、`python -m ruff check .` 通过；`npm.cmd run build` 通过；维护者样题验证原始 6 通过/2 预期失败、参考 8 通过，原始文件未修改。
+- 本轮没有声明真实 gVisor 冻结/交卷端到端或文件系统权限专项完成；本地旧 Cookie、SQLite 数据和新库分离处理方式见 docs/entry-postgres-handoff.md。人工验收未替用户勾选。
 
 - 已执行 `cd backend; ../.venv/Scripts/python.exe -m unittest discover -s tests -v`：最终 9 项通过，覆盖账号初始化与更新、服务端 3 小时截止、刷新不续期、退出撤销、错误凭证、伪造 Cookie、限流及重启失效。
 - 已执行 `cd frontend; npm.cmd run build`：TypeScript 检查和 Vite 生产构建通过。

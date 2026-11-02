@@ -7,7 +7,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.admin.accounts import hash_password
-from app.exams.store import EntryStore, RECOVERY_SECONDS
+from app.exams.store import RECOVERY_SECONDS, EntryStore
 from app.main import create_app
 
 URL = "/api/v1/admin/overview"
@@ -17,7 +17,12 @@ HEADERS = {"X-VibeEval-Request": "1"}
 class AdminOverviewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.accounts = {"examiner": {"name": "测试考官", "password_hash": hash_password("testing-password")}}
+        cls.accounts = {
+            "examiner": {
+                "name": "测试考官",
+                "password_hash": hash_password("testing-password"),
+            }
+        }
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -26,11 +31,16 @@ class AdminOverviewTests(unittest.TestCase):
         self.store = EntryStore(self.path)
         self.app = create_app(self.accounts, entry_db=self.path)
         self.client = TestClient(self.app, headers=HEADERS)
-        response = self.client.post("/api/v1/admin/login", json={"username": "examiner", "password": "testing-password"})
+        response = self.client.post(
+            "/api/v1/admin/login",
+            json={"username": "examiner", "password": "testing-password"},
+        )
         self.assertEqual(response.status_code, 200)
 
     def invite(self, candidate="s1", exam="e1"):
-        return self.store.invite(candidate, f"考生{candidate}", exam, f"考核{exam}", 60, 1)[0]
+        return self.store.invite(
+            candidate, f"考生{candidate}", exam, f"考核{exam}", 60, 1
+        )[0]
 
     def test_authentication_required_for_live_and_demo(self):
         anonymous = TestClient(self.app)
@@ -47,7 +57,9 @@ class AdminOverviewTests(unittest.TestCase):
         self.assertEqual(data["source"], "live")
         self.assertEqual(data["items"], [])
         self.assertEqual(data["exams"], [])
-        self.assertEqual(data["summary"], {"total": 0, "not_submitted": 0, "submitted": 0})
+        self.assertEqual(
+            data["summary"], {"total": 0, "not_submitted": 0, "submitted": 0}
+        )
         self.assertFalse(data["submission_service_connected"])
         self.assertEqual(response.headers["cache-control"], "no-store")
 
@@ -59,7 +71,12 @@ class AdminOverviewTests(unittest.TestCase):
         self.assertIsNone(invited["items"][0]["admitted_at"])
         candidate = TestClient(self.app, headers=HEADERS)
         candidate.get("/api/v1/sessions/current")
-        self.assertEqual(candidate.post("/api/v1/sessions/verify-token", json={"token": token}).status_code, 200)
+        self.assertEqual(
+            candidate.post(
+                "/api/v1/sessions/verify-token", json={"token": token}
+            ).status_code,
+            200,
+        )
         admitted = self.client.get(URL).json()
         self.assertEqual(admitted["total"], 1)
         row = admitted["items"][0]
@@ -77,23 +94,36 @@ class AdminOverviewTests(unittest.TestCase):
         now = int(time.time())
         with patch("app.admin.overview.time.time", return_value=now + 3601):
             rows = self.client.get(URL).json()["items"]
-        self.assertEqual({row["status"] for row in rows}, {"admitted", "invitation_expired"})
+        self.assertEqual(
+            {row["status"] for row in rows}, {"admitted", "invitation_expired"}
+        )
         # Keep the examiner session alive in this time-shifted check; only overview's provider is called.
         from app.admin.overview import read_live_records
-        with patch("app.admin.overview.time.time", return_value=now + RECOVERY_SECONDS + 1):
+
+        with patch(
+            "app.admin.overview.time.time", return_value=now + RECOVERY_SECONDS + 1
+        ):
             rows = read_live_records(self.store)
-        self.assertEqual({row["status"] for row in rows}, {"recovery_expired", "invitation_expired"})
+        self.assertEqual(
+            {row["status"] for row in rows}, {"recovery_expired", "invitation_expired"}
+        )
 
     def test_demo_filter_statistics_pagination_and_isolation(self):
         demo = self.client.get(URL + "?source=demo").json()
         self.assertEqual(demo["total"], 12)
         self.assertEqual(len(demo["items"]), 10)
-        self.assertEqual(demo["summary"], {"total": 12, "not_submitted": 9, "submitted": 3})
+        self.assertEqual(
+            demo["summary"], {"total": 12, "not_submitted": 9, "submitted": 3}
+        )
         second = self.client.get(URL + "?source=demo&page=2").json()
         self.assertEqual(len(second["items"]), 2)
-        filtered = self.client.get(URL + "?source=demo&exam_id=demo-exam-A&status=submitted").json()
+        filtered = self.client.get(
+            URL + "?source=demo&exam_id=demo-exam-A&status=submitted"
+        ).json()
         self.assertEqual(filtered["total"], 1)
-        self.assertEqual(filtered["summary"], {"total": 6, "not_submitted": 5, "submitted": 1})
+        self.assertEqual(
+            filtered["summary"], {"total": 6, "not_submitted": 5, "submitted": 1}
+        )
         self.assertEqual(filtered["items"][0]["status"], "submitted")
         self.assertIsNotNone(filtered["items"][0]["submission_id"])
         self.assertEqual(self.client.get(URL).json()["items"], [])
@@ -105,7 +135,10 @@ class AdminOverviewTests(unittest.TestCase):
         second = self.client.get(URL + "?page=2").json()
         self.assertEqual(first["total"], 15)
         self.assertEqual(len(second["items"]), 5)
-        keys = lambda data: {(item["exam_id"], item["candidate_id"]) for item in data["items"]}
+
+        def keys(data):
+            return {(item["exam_id"], item["candidate_id"]) for item in data["items"]}
+
         self.assertFalse(keys(first) & keys(second))
         filtered = self.client.get(URL + "?exam_id=e2").json()
         self.assertEqual(filtered["summary"]["total"], 3)
@@ -119,9 +152,16 @@ class AdminOverviewTests(unittest.TestCase):
     def test_read_provider_supports_submission_service_contract(self):
         self.invite()
         record = self.client.get(URL).json()["items"][0]
-        record.update({"status": "submitted", "session_id": "ses_from_service",
-                       "admitted_at": 100, "started_at": 200,
-                       "submitted_at": 300, "submission_id": "sub_from_service"})
+        record.update(
+            {
+                "status": "submitted",
+                "session_id": "ses_from_service",
+                "admitted_at": 100,
+                "started_at": 200,
+                "submitted_at": 300,
+                "submission_id": "sub_from_service",
+            }
+        )
         with patch("app.admin.overview.read_live_records", return_value=[record]):
             result = self.client.get(URL + "?status=submitted").json()
         self.assertEqual(result["summary"]["submitted"], 1)

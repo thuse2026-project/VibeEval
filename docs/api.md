@@ -35,7 +35,7 @@
 | `status` | `all` | `all`、`invited`、`admitted`、`in_progress`、`submitted`、`invitation_expired`、`recovery_expired` |
 | `page` / `page_size` | `1` / `10` | 页码至少 1，单页 1～100 条；超出末页返回末页，无数据返回第 1 页 |
 
-响应：`source`、`items`、筛选后记录数 `total`、实际 `page` / `page_size`、全部场次选项 `exams`、统计 `summary`、读取时间 `updated_at`，及真实提交服务接入标志 `submission_service_connected`（当前 false）。非法查询参数返回 422，所有响应禁止缓存。
+响应：`source`、`items`、筛选后记录数 `total`、实际 `page` / `page_size`、全部场次选项 `exams`、统计 `summary`、读取时间 `updated_at`，及真实提交服务接入标志 `submission_service_connected`（默认真实来源为 true，演示来源和显式 SQLite 回归模式为 false）。非法查询参数返回 422，所有响应禁止缓存。
 
 每条记录字段：`candidate_id`、`candidate_name`、`exam_id`、`exam_title`、`status`、`session_id`（未入场为 null）、`admitted_at`、`started_at`、`submission_id`、`submitted_at`。时间为 Unix 秒，尚未发生的时间为 null；不返回入场或恢复凭证及哈希。
 
@@ -78,7 +78,7 @@ from app.admin.submissions import get_submission_reader
 app.dependency_overrides[get_submission_reader] = lambda: submission_reader
 ```
 
-这里的 `submission_reader` 是队友提供的真实只读实现，目前没有在项目里启用。列表与详情使用同一个 reader，不分别维护两套查询。无 reader 时总览仍展示真实入场，详情明确提示尚未接入。服务异常返回不含内部异常信息的 503；字段缺失、重复文件路径、错误的提交身份或不合法快照路径返回 502。
+默认应用已注入队友的 `SubmissionService`，列表和详情读取同库提交与持久化快照；显式 SQLite 回归模式仍不接 reader。演示来源不会查询真实存储。服务异常返回不含内部异常信息的 503；字段缺失、重复文件路径、错误提交身份或非法路径返回 502。
 
 提交编号为 1～128 位字母、数字、下划线或连字符；其他身份文本长度沿用现有考务字段限制。快照 `path` 为唯一的相对 POSIX 路径，不允许绝对路径、盘符、空路径段或 `..`。`content` 是 UTF-8 解码后的文本，空文本和空文件列表均允许，管理端不根据路径去打开服务器文件。
 
@@ -87,6 +87,8 @@ app.dependency_overrides[get_submission_reader] = lambda: submission_reader
 演示快照是单独保存的固定 JSON 文件，内容来自原始会议室样题；每次请求不重读候选人目录、当前工作区或维护者参考答案。演示测试输出明确标为虚构，不代表真实考试执行结果。真正快照冻结、测试执行和持久化归赵晨一/陈弘毅的模块，本次未新增这些写入逻辑。
 
 ## 考生入场与恢复（已实现）
+
+本分支默认使用共享 PostgreSQL 的 Invitation/ExamSession，CLI 与 HTTP 配置一致，不双写 SQLite。current/status 返回共享生命周期真实状态、真实 started_at/deadline_at，并增加可为 null 的 task_version_id。初次入场仍为 admitted/null；环境准备和开始操作由沙箱接入方调用共享生命周期。状态集合见 sandbox-integration.md，考官总览也接受相同状态筛选。数据库故障返回 503，不回落本地库。启动、旧 Cookie 与回归验证边界见 [入场交接](entry-postgres-handoff.md)。
 
 以下规则更新原始 E.3 的入场与状态草案，题目、沙箱及开始计时不在本轮范围。
 

@@ -71,36 +71,59 @@ def identity(session: Session, auth: AuthState) -> Identity:
     )
 
 
-@router.post("/login", response_model=Identity, dependencies=[Depends(require_browser_header)])
-def login(body: LoginInput, request: Request, response: Response, auth: AuthState = Depends(state)):
+@router.post(
+    "/login", response_model=Identity, dependencies=[Depends(require_browser_header)]
+)
+def login(
+    body: LoginInput,
+    request: Request,
+    response: Response,
+    auth: AuthState = Depends(state),
+):
     if not auth.accounts:
         raise HTTPException(503, "尚未配置考官账号，请联系项目维护者")
     now = time.time()
     # ponytail: per-process throttling; use shared storage when deploying multiple workers.
-    auth.failures = defaultdict(list, {
-        key: [stamp for stamp in attempts if now - stamp < 60]
-        for key, attempts in auth.failures.items() if attempts and now - attempts[-1] < 60
-    })
+    auth.failures = defaultdict(
+        list,
+        {
+            key: [stamp for stamp in attempts if now - stamp < 60]
+            for key, attempts in auth.failures.items()
+            if attempts and now - attempts[-1] < 60
+        },
+    )
     address = request.client.host if request.client else "unknown"
     if len(auth.failures[address]) >= 5:
-        raise HTTPException(429, "尝试过于频繁，请稍后重试（最多等待 60 秒）", headers={"Retry-After": "60"})
+        raise HTTPException(
+            429,
+            "尝试过于频繁，请稍后重试（最多等待 60 秒）",
+            headers={"Retry-After": "60"},
+        )
     username = body.username.strip()
     account = auth.accounts.get(username)
-    valid = verify_password(body.password, account["password_hash"] if account else auth.dummy_hash)
+    valid = verify_password(
+        body.password, account["password_hash"] if account else auth.dummy_hash
+    )
     if not account or not valid:
         auth.failures[address].append(now)
         raise HTTPException(401, "账号或密码错误")
     auth.failures.pop(address, None)
-    auth.sessions = {key: value for key, value in auth.sessions.items() if value.expires_at > now}
+    auth.sessions = {
+        key: value for key, value in auth.sessions.items() if value.expires_at > now
+    }
     old_token = request.cookies.get(COOKIE_NAME, "")
     auth.sessions.pop(token_key(old_token), None)
     token = secrets.token_urlsafe(32)
     session = Session(username=username, expires_at=int(now) + SESSION_SECONDS)
     auth.sessions[token_key(token)] = session
     response.set_cookie(
-        COOKIE_NAME, token, max_age=SESSION_SECONDS, httponly=True,
+        COOKIE_NAME,
+        token,
+        max_age=SESSION_SECONDS,
+        httponly=True,
         secure=os.environ.get("COOKIE_SECURE", "false").lower() == "true",
-        samesite="strict", path="/api/v1/admin",
+        samesite="strict",
+        path="/api/v1/admin",
     )
     return identity(session, auth)
 
