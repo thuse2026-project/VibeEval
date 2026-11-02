@@ -86,6 +86,12 @@ class SandboxRuntime:
     def freeze_and_export(self, view):
         return self._call("freeze_and_export", view)
 
+    def ensure_bound(self, view):
+        return self._call("ensure_bound", view)
+
+    def check_ready(self, view):
+        return self._call("check_ready", view)
+
     def delete_sandbox(self, view):
         return self._call("delete_sandbox", view)
 

@@ -7,6 +7,31 @@ from .submission_bridge import DockerSubmissionBridge
 
 
 class BoundSandboxAdapter(DockerSubmissionBridge):
+    def check_ready(self, view):
+        obj = self._container(view)
+        if obj.status != "running":
+            raise ValueError("sandbox is not running")
+        # Inspect metadata without importing or executing candidate source.
+        script = """import os,sys,stat
+from pathlib import Path
+assert sys.version_info[:2] == (3,12) and os.getuid() == 1000
+root=Path('/workspace')
+editable={'src/booking.py','tests/test_candidate.py'}
+expected=editable|{'README.md','requirements.txt','src/main.py','tests/test_public.py'}
+for name in expected:
+ p=root/name
+ assert not p.is_symlink() and stat.S_ISREG(p.stat().st_mode)
+ assert os.access(p,os.R_OK)
+ assert os.access(p,os.W_OK) == (name in editable)
+for p in [root,root/'src',root/'tests']:
+ assert not p.is_symlink() and not os.access(p,os.W_OK)
+assert not (root/'maintainer').exists()
+"""
+        result = obj.exec_run(["python", "-I", "-c", script], user="1000:1000")
+        if result.exit_code != 0:
+            raise ValueError("template health check failed")
+        return True
+
     def ensure_bound(self, view):
         if view.status != "provisioning":
             raise ValueError("preparation requires provisioning state")

@@ -376,3 +376,11 @@ get_session_receipt(session_id)
 
 
 ---
+
+## 沙箱准备与开始接口（成员 C 开发中）
+
+显式 app.sandbox.http_app:create_app 新增 POST /api/v1/sessions/{session_id}/prepare 和 POST /api/v1/sessions/{session_id}/start。复用 require_candidate_session、Cookie与 X-VibeEval-Request: 1；默认 app.main 未挂载。请求无需body，镜像、宿主和题目版本由后端 SANDBOX_IMAGE_REF / SANDBOX_BACKEND_REF / SANDBOX_TASK_VERSION 指定，禁止浏览器选择镜像。
+
+成功返回 session_id/status/started_at/deadline_at；不返回容器ID。prepare 同步执行有界沙箱调用，耗时可能达数十秒；不是后台排队202。前端应禁用重复按钮，超时后先查询已有status。409表示状态冲突或会话忙，503表示配置或准备失败。start只在共享生命周期允许时开始，重复开始不刷新截止时间。
+
+健康检查只检查Python3.12、非root身份、六文件可读/可写权限与父目录保护，不运行考生代码；两项预期失败测试不作为健康失败。终端就绪、磁盘配额及HTTP真实联合验收尚待完成。文件与PTY入口尚未交付。
