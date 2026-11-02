@@ -1,6 +1,6 @@
 # 沙箱与共享数据库接入约定
 
-本说明对应数据库迁移 `0004`。共享数据库层、提交存储、`SubmissionCoordinator` 交卷协调器及候选人交卷 HTTP 路由已实现；Docker + gVisor 生命周期代码由陈弘毅提供，当前尚未接入其真实代码，未完成真实沙箱端到端联调。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。HTTP 鉴权、错误码和应用注入见 [交卷 HTTP 接入](submission-http-handoff.md)。
+本说明对应数据库迁移 `0004`。共享数据库层、提交存储、`SubmissionCoordinator` 交卷协调器及候选人交卷 HTTP 路由已实现，已接入陈弘毅 `codex/sandbox-lifecycle@761cdc7` 的绑定与提交适配器。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。HTTP 鉴权、错误码和应用注入见 [交卷 HTTP 接入](submission-http-handoff.md)，普通与真实环境验证边界见 [联合验收说明](sandbox-submission-validation.md)。
 
 ## 1. 会话、沙箱和截止时间
 
@@ -139,9 +139,11 @@ for view in coordinator.lifecycle.list_cleanup_candidates():
 
 `submit()` 在提交成功后尝试清理；清理失败仍返回固定提交回执，并尽力记录错误，待清理台账不会消失。单独调用 `cleanup()` 失败抛出 `SandboxCleanupFailed`，也可能透传清理资格错误或 `SessionBusy`；调用方逐条捕获后安排后续重试。当前没有自动重试循环、到期扫描或清理 worker，示例循环是接入方式，并非已启动的后台任务。
 
-## 6. 仍需沙箱侧提供的接入信息
+## 6. 当前沙箱接入与后续范围
 
-需要陈弘毅提供代码分支或方法签名，确认固定资源名/标签查找、不可变镜像解析、归属验证、真正的 pause 与稳定工作区导出接口，并实现第 4 节的 `SubmissionSandbox` 协议。已有创建、状态、停止、删除能力不会自动等于已经完成冻结导出。创建侧 `adapter.*` 调用仍为接口示意；交卷协调器已实现并用沙箱替身与真实 PostgreSQL 验证事务和重试。真实 Docker + gVisor 联调、截止自动交卷和后台清理在后续阶段完成。
+成员 C 已提供 `BoundSandboxAdapter.ensure_bound`、`freeze_and_export`、`delete_sandbox`，通过固定资源名、标签和实际镜像 ID 核验绑定。`SandboxRuntime` 在独立 spawn 子进程建立 Docker 客户端，提供请求与操作等待超时；显式 HTTP 工厂为 `app.sandbox.http_app:create_app`。导出为内存中的稳定文本元组，公开测试输出当前为 `None`。
+
+文件 HTTP、WebSocket PTY、健康检查及准备/开始路由尚未交付，不能仅凭容器 running 进入可答题状态。保存与终端输入后续仍须使用共享写入门禁；截止自动交卷、后台清理与完整工作台验收继续留待后续阶段。新增联合测试及 Linux/gVisor 环境配置见联合验收说明，普通 CI 跳过的真实用例不计为通过。
 
 ## 7. Windows 快照并发兼容修复
 

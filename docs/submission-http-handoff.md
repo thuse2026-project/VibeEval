@@ -33,6 +33,8 @@ from app.submissions.storage import SnapshotFile
 
 ## 应用装配
 
+已接入成员 C 的 `SandboxRuntime`，可使用 `python -m uvicorn app.sandbox.http_app:create_app --factory` 显式装配。环境、镜像构建与普通/真实测试的区别见 [联合验收说明](sandbox-submission-validation.md)。下述注入接口继续支持可信后端自行构造适配器；文件 HTTP、PTY 和正式工作台仍需后续接入。
+
 `create_app` 新增两个只用于可信后端代码的关键字参数：
 
 ```python
@@ -60,4 +62,4 @@ $env:VIBEEVAL_RUN_DB_TESTS = "1"
 
 本阶段新增 20 项 HTTP 测试；完整回归在 Windows / Python 3.13 与 Linux 容器 / Python 3.12 均为 181 项全部通过，覆盖率分别为 96.3% 和 96.5%。Black、Ruff 通过，Linux 的 Alembic 升级、当前版本及模型一致性检查通过（`0004`，无新增迁移）。这些是本地验证，GitHub CI 以提交推送后的实际结果为准。
 
-到期自动交卷、后台重试/清理 worker、真实适配器装配和前端提交交互仍待后续阶段。没有新增候选人可调用的清理、删除、任意文件导出或快照写入 HTTP 接口。
+真实适配器已通过显式工厂装配，联合验证记录见新说明；到期自动交卷、后台重试/清理 worker、生产宿主部署和前端提交交互仍待后续阶段。没有新增候选人可调用的清理、删除、任意文件导出或快照写入 HTTP 接口。
