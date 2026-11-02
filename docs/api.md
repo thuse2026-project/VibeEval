@@ -10,7 +10,7 @@
 - 工作区文件、PTY 与正式工作台的整体联调；沙箱提交适配器已接入，联合验收记录见下文。
 - 会话状态、开始计时与截止后的处理方式。
 - 公开测试的执行入口，以及结果如何保存并关联提交。
-- 到期自动交卷、后台重试与清理调度（主动交卷的同步回执、失败和重复请求语义见下文）。
+- 生产截止冻结精度与定期处理部署（到期扫描、恢复和清理命令已实现，见提交定期处理说明）。
 - 文件版本冲突、越界路径、只读文件和冻结后操作的错误约定。
 - 终端退出、断开及错误消息的约定。
 
@@ -143,7 +143,7 @@ app.dependency_overrides[get_submission_reader] = lambda: submission_reader
 
 成功入库后会尝试清理容器。清理失败仍返回同一份 202 回执，清理待办继续保存在共享台账，不要求考生重复提交。冻结或持久化失败时保持写入门禁，尽力记录 `submission_failed`；数据库暂时不可用时也可能仍为 `submitting`，后续重试使用同一容器和原截止时间。
 
-实际沙箱在应用构建时注入 `create_app(submission_sandbox=adapter)`，已提供成员 C 的显式入口 `app.sandbox.http_app:create_app`，使用带超时的 `SandboxRuntime`。默认 `app.main:app` 未配置真实适配器，对没有最终答卷的交卷请求明确返回 503，不会调用空冻结或生成演示答卷。普通 CI 用 Docker 替身，真实 runsc 联合测试需显式开启；环境和实际验证记录见 [联合验收说明](sandbox-submission-validation.md)。候选人工作台、文件/PTY 接口及后台任务仍待后续接入。
+实际沙箱在应用构建时注入 `create_app(submission_sandbox=adapter)`，已提供成员 C 的显式入口 `app.sandbox.http_app:create_app`，使用带超时的 `SandboxRuntime`。默认 `app.main:app` 未配置真实适配器，对没有最终答卷的交卷请求明确返回 503，不会调用空冻结或生成演示答卷。普通 CI 用 Docker 替身，真实 runsc 联合测试需显式开启；环境和实际验证记录见 [联合验收说明](sandbox-submission-validation.md)。候选人工作台和文件/PTY 接口仍待后续接入，定期处理命令须由部署方显式启动。
 
 ## 提交持久化内部契约
 
@@ -153,7 +153,7 @@ app.dependency_overrides[get_submission_reader] = lambda: submission_reader
 
 `backend/app/submissions/coordinator.py` 的 `SubmissionCoordinator(sandbox_adapter)` 是交卷编排入口，提供 `submit(session_id, idempotency_key)` 和 `cleanup(session_id)`。调用方先验证会话归属，再由协调器提交 `submitting` 门禁、调用注入适配器的 `freeze_and_export(view)`、核验导出的会话与容器身份、持久化答卷、事务提交后尝试 `delete_sandbox(view)`。适配器返回 `FrozenWorkspace(session_id, sandbox_id, files, public_test_output=None)`；具体冻结、超时、保留文件要求见沙箱接入约定。已接入 `SandboxRuntime`；普通 CI 保留替身测试，真实验收另行开启。
 
-`submit()` 返回下述固定回执，重复请求直接返回第一份已提交答卷。冻结、导出或持久化失败抛出带安全 `code` 的 `SubmissionAttemptFailed`，保留原环境及禁止写入状态供重试；并发锁冲突透传 `SessionBusy`。提交已成功时，清理失败不撤销回执，继续出现在 `lifecycle.list_cleanup_candidates()`；后续单独 `cleanup()` 失败可抛出 `SandboxCleanupFailed`。数据库异常后的回执恢复、错误代码和无自动 worker 的边界见沙箱接入约定；HTTP 映射见上一节，清理没有公开的候选人 HTTP 接口。
+`submit()` 返回下述固定回执，重复请求直接返回第一份已提交答卷。冻结、导出或持久化失败抛出带安全 `code` 的 `SubmissionAttemptFailed`，保留原环境及禁止写入状态供重试；并发锁冲突透传 `SessionBusy`。提交已成功时，清理失败不撤销回执，继续出现在 `lifecycle.list_cleanup_candidates()`；后续单独 `cleanup()` 失败可抛出 `SandboxCleanupFailed`。已实现独立的 `SubmissionMaintenance.run_once()` 和 CLI 持续模式，按宿主扫描到期与未完成提交、重试清理，不依赖浏览器在线；共享重试间隔、启动方式及延迟边界见 [提交定期处理](submission-maintenance.md)。这些内部处理不新增候选人 HTTP 清理接口，也不会在 API 导入时自动启动。
 
 `backend/app/submissions/service.py` 中的 `SubmissionService` 提供：
 

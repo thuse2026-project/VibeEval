@@ -20,12 +20,13 @@
 - [交卷 HTTP 接入](docs/submission-http-handoff.md)：原浏览器鉴权、提交回执、沙箱注入与错误处理。
 - [CI 与 PR 合并检查](docs/ci-and-pr-checks.md)：前后端检查命令、汇总检查和主分支规则配置。
 - [沙箱与交卷联合验收](docs/sandbox-submission-validation.md)：真实适配器启动、可信题目镜像构建和 opt-in gVisor 验收。
+- [提交定期处理](docs/submission-maintenance.md)：到期自动提交、进程中断恢复和失败清理重试。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
 ## 开发前需要知道
 
-- 技术基线：前端 React + TypeScript + Vite，后端 Python + FastAPI，数据库 PostgreSQL。沙箱通过适配器接入，当前协作按 Docker + gVisor 生命周期模块对接，尚未完成真实联调；原需求中的 E2B 保留为背景方案。
+- 技术基线：前端 React + TypeScript + Vite，后端 Python + FastAPI，数据库 PostgreSQL。沙箱通过适配器接入，Docker + gVisor 的交卷链路已通过真实联合验证，文件/PTY 和完整工作台仍待联调；原需求中的 E2B 保留为背景方案。
 - 前端负责交互；身份权限、会话状态和考试截止时间由后端决定，`session_id` 本身不等于访问凭证。
 - 考生代码在独立沙箱运行，平台后端负责管理沙箱；不在平台后端直接执行考生代码。
 - 交卷后以固定快照为准，后台调阅读取提交快照。
@@ -248,7 +249,7 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 
 服务位于 `backend/app/submissions/`，内部契约及 HTTP 接口见 [docs/api.md](docs/api.md#主动交卷-http已实现)。`POST /api/v1/sessions/{session_id}/submit` 复用原浏览器 Cookie 和会话归属校验，需要 `X-VibeEval-Request: 1` 与 `Idempotency-Key`；只在最终答卷成功入库后返回 202 回执。文件和已有公开测试输出由服务端沙箱适配器提供，不接受浏览器上传作为答卷来源，也不在平台后端执行考生代码或测试。
 
-交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。已接入成员 C 的 `SandboxRuntime`，显式启动方式为 `uvicorn app.sandbox.http_app:create_app --factory`，配置及测试见联合验收说明。默认应用未配置适配器，尚未交卷的请求明确返回 503，已有答卷仍可恢复回执。到期自动提交和后台清理仍待接入；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
+交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。已接入成员 C 的 `SandboxRuntime`，显式启动方式为 `uvicorn app.sandbox.http_app:create_app --factory`，配置及测试见联合验收说明。默认应用未配置适配器，尚未交卷的请求明确返回 503，已有答卷仍可恢复回执。到期提交和清理重试已提供独立命令，部署时须显式启动；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
 
 调用方须先完成会话归属校验，将会话置为 `submitting`，禁止新写入并等待进行中的保存结束，停止仍会写文件的进程，再导出固定文件集。之后调用 `persist_frozen_submission()`：服务锁定会话行，落盘并校验快照，在同一数据库事务写入快照元数据、最终提交及会话的提交时间和 `submitted` 状态。重复请求（包括更换幂等键）始终返回首份已提交答卷，不读取或覆盖新传入的文件。
 
@@ -257,6 +258,10 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 默认限制为：最多 1000 个文件、UTF-8 文件内容合计 10 MiB、公开测试输出 1 MiB、序列化快照 16 MiB。文件名须为不含越界片段的相对 POSIX 路径，最多 500 字符；重复路径、文件/目录冲突、二进制内容及超限输入会明确失败，不静默丢弃。空文件和空文件列表允许保存；公开测试输出的 `null` 表示未提供，空字符串表示输出为空，都不表示测试通过。
 
 文件系统与 PostgreSQL 不共享事务。若文件已经落盘但数据库提交失败，数据库记录和会话提交时间会回滚，文件可能作为未引用对象保留；此类文件不会出现在提交查询中，重试可安全复用。当前没有自动垃圾回收，避免误删被其他提交复用的对象。读取损坏或缺失快照时明确失败，不回退到活动工作区。
+
+### 到期与恢复处理
+
+已提供独立命令 `python -m app.submissions.maintenance`，扫描 PostgreSQL 中到期、正在提交/提交失败及待清理的会话，复用原沙箱和最终答卷语义。默认处理一轮，可通过 `--watch --interval 5` 持续运行，按 `SANDBOX_BACKEND_REF` 限定宿主；没有在 HTTP 导入时自动启动。命令、共享重试间隔及实际暂停延迟的边界见 [提交定期处理](docs/submission-maintenance.md)。
 
 ### 数据库测试
 
