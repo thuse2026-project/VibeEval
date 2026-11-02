@@ -1,0 +1,105 @@
+# Standalone application stack. Keep the root development Compose unchanged.
+x-backend: &backend
+  image: vibeeval-backend:${VIBEEVAL_IMAGE_TAG:?Set VIBEEVAL_IMAGE_TAG to the reviewed revision}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.backend
+    args:
+      VCS_REF: ${VIBEEVAL_IMAGE_TAG}
+  environment:
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: ${POSTGRES_DB:-vibeeval}
+    POSTGRES_USER: ${POSTGRES_USER:-vibeeval}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment env file}
+    COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ADMIN_ACCOUNTS_FILE: /opt/vibeeval/runtime/admin-accounts.json
+  volumes:
+    - app_data:/opt/vibeeval/runtime
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777,size=67108864
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  init: true
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vibeeval}
+      POSTGRES_USER: ${POSTGRES_USER:-vibeeval}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment env file}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 1m
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+    command: [redis-server, --appendonly, 'yes', --appendfsync, everysec]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    command: [python, -m, alembic, upgrade, head]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/openapi.json", timeout=2).close()']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 5m
+    restart: unless-stopped
+
+  web:
+    image: vibeeval-web:${VIBEEVAL_IMAGE_TAG:?Set VIBEEVAL_IMAGE_TAG to the reviewed revision}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        VCS_REF: ${VIBEEVAL_IMAGE_TAG}
+    ports:
+      - "127.0.0.1:${VIBEEVAL_HTTP_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1:8080/healthz']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=67108864
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_data:
