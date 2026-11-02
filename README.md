@@ -18,6 +18,7 @@
 
 - [沙箱与共享数据库接入](docs/sandbox-integration.md)：会话映射、数据库锁、统一状态及交卷/清理边界。
 - [交卷 HTTP 接入](docs/submission-http-handoff.md)：原浏览器鉴权、提交回执、沙箱注入与错误处理。
+- [CI 与 PR 合并检查](docs/ci-and-pr-checks.md)：前后端检查命令、汇总检查和主分支规则配置。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
@@ -275,7 +276,7 @@ Remove-Item Env:VIBEEVAL_RUN_DB_TESTS
 
 集成测试使用当前连接配置，在 `postgres` 管理库中创建随机命名的 `vibeeval_test_*` 临时数据库，验证迁移、约束与事务后自动删除；账号需有创建数据库权限（本地 Compose 默认账号具备）。测试不会在业务数据库执行迁移回退或清空数据。Linux/macOS 可在 `backend` 目录执行 `VIBEEVAL_RUN_DB_TESTS=1 ../.venv/bin/python -m unittest discover -s tests -v`。
 
-### 后端代码检查与 CI
+### 代码检查与 CI
 
 开发检查依赖固定在 `backend/requirements-dev.txt`，Black、Ruff 和覆盖率配置统一维护在 `backend/pyproject.toml`。从仓库根目录安装开发依赖，再进入 `backend` 检查：
 
@@ -298,15 +299,28 @@ Remove-Item Env:VIBEEVAL_RUN_DB_TESTS
 
 覆盖率统计 `backend/app` 的代码行，最低为 80%，不把测试文件纳入统计。未开启数据库测试时不能代替这组完整检查。Linux/macOS 换用 `../.venv/bin/python` 并通过 `VIBEEVAL_RUN_DB_TESTS=1` 设置环境变量。
 
-GitHub Actions 工作流为 `.github/workflows/backend-ci.yml`，在 push、PR 和手动触发时运行：
+前端要求 Node.js 22.13+（22.x）或 24+。安装依赖、执行 ESLint 和类型/构建检查：
+
+```powershell
+cd frontend
+npm.cmd ci --no-audit --no-fund
+npm.cmd run lint
+npm.cmd run build
+```
+
+ESLint 使用 JavaScript 与 TypeScript 推荐规则及 React Hooks 核心规则，错误和警告都会使检查失败。现有界面无需修改即可通过。`build` 包含 `tsc --noEmit` 和 Vite 生产构建；不启动后端或执行考生题目。
+
+GitHub Actions 工作流仍为 `.github/workflows/backend-ci.yml`，显示名为 `Project CI`，在 push、PR 和手动触发时运行：
 
 | 检查 | 内容 |
 | --- | --- |
 | Linux / Python 3.12 与 3.13 | Black、Ruff、真实 PostgreSQL 完整测试、最低 80% 行覆盖率、迁移升级及模型一致性 |
+| Linux / Node 22 | `npm ci`、ESLint（零警告）、TypeScript 检查和 Vite 构建 |
 | Windows / Python 3.13 | 配置单元测试、快照并发及路径校验，不启动 PostgreSQL 服务容器 |
 | Linux / Compose | 启动 PostgreSQL 16 和 Redis，验证健康状态、数据库查询和 Redis PING，结束后清理本次 CI 的容器与卷 |
+| `Required checks` | 汇总前述全部任务；失败、取消或跳过都会使汇总失败，只有全部成功才通过 |
 
-CI 使用独立临时数据库和固定测试密码，不需要额外配置仓库 Secret。检查失败会返回失败状态；是否禁止合并失败 PR 取决于团队另外配置的分支保护，本工作流不修改合并规则。GitHub 实际执行结果以 Actions 和 PR 检查页为准，本地验证不替代远程执行记录。当前工作流检查后端；前端已有依赖清单并可本地构建，前端 CI 仍待工程底座统一补齐。
+CI 使用独立临时数据库和固定测试密码，不需要额外配置仓库 Secret。所有 PR 都运行完整检查，未按目录跳过。主分支规则配置保存在 `.github/main-ruleset.json`，要求 `Required checks` 来自 GitHub Actions、至少另一位成员复查、解决评审讨论并保持分支最新，同时禁止强推和删除 `main`。配置文件须另行应用到 GitHub 才生效，实际启用状态以仓库设置和 API 为准；流程见 CI 文档。GitHub 实际执行结果以 Actions 和 PR 检查页为准，本地验证不替代远程执行记录。
 
 ### 前后端应用
 
