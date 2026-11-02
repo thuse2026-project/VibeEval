@@ -14,6 +14,29 @@
 - 文件版本冲突、越界路径、只读文件和冻结后操作的错误约定。
 - 终端退出、断开及错误消息的约定。
 
+## 提交持久化内部契约
+
+以下为当前分支已实现的 Python 内部服务，HTTP 交卷和沙箱冻结尚未接入，下方 E.3 仍是 HTTP 草案。
+
+`backend/app/submissions/service.py` 中的 `SubmissionService` 提供：
+
+```python
+persist_frozen_submission(session_id, idempotency_key, files, *, public_test_output=None)
+list_submissions()
+get_submission(submission_id)
+```
+
+- `files` 是 `SnapshotFile(path, content)` 的可迭代对象；路径是相对 POSIX 路径，内容为 UTF-8 文本。公开测试输出由调用方提供，服务不执行命令。
+- 写入前置条件：调用方已校验归属、完成真正的沙箱写入冻结和进程协调；会话已开始，数据库状态为 `submitting`。仅修改状态字段不能替代冻结沙箱。
+- 成功写入后会话状态为 `submitted`，返回 `{submission_id, session_id, snapshot_id, submitted_at, status: "frozen"}`。这里 `frozen` 是提交回执状态。响应只在数据库事务成功提交后交给调用方。
+- 同一会话只有一个最终提交。并发请求串行处理，重复请求使用原幂等键或新键均返回首份答卷，不重新消费 `files`。幂等键接受 1～128 位字母、数字、下划线或连字符，前端可使用 UUID。
+- `list_submissions()` 返回已持久化摘要：`submission_id`、`session_id`、`candidate_id`、`candidate_name`、`exam_id`、`exam_title`、`admitted_at`、`started_at`、`submitted_at`。
+- `get_submission(id)` 查无记录返回 `None`，否则在摘要上增加 `snapshot_id`、`files[{path, content}]` 与 `public_test_output`。身份与时间取自提交当时保存的数据，文件及测试输出仅从固定快照读取。`public_test_output` 为 `None` 和空字符串时保留区别。
+- 返回字段对齐队友 `feat/admin-submission-details` 分支的 `SubmissionReader`，尚未注入管理端路由；返回值不包含幂等键、凭据哈希、内部磁盘路径或内容存储摘要。
+- 未知会话抛出 `SubmissionNotFound`；未开始或状态不正确抛出 `InvalidSubmissionState`；快照输入不合法抛出 `SnapshotValidationError`；文件丢失、损坏或存储不可用抛出 `SnapshotStorageError`。HTTP 状态映射和冻结失败后的会话恢复策略在路由接入时对齐。
+
+数据库错误会回滚提交、快照元数据和会话更新。文件系统中可能保留未引用对象，查询不会将其显示为成功提交；当前未实现垃圾回收。存储位置与大小限制见根 README。
+
 ---
 ### E\.3 核心联调接口契约 \(v1\.0\-draft\)
 

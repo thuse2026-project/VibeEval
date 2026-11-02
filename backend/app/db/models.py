@@ -6,6 +6,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
@@ -87,3 +88,55 @@ class ExamSession(Base):
     submitted_at: Mapped[int | None] = mapped_column(BigInteger)
     sandbox_id: Mapped[str | None] = mapped_column(String(255))
     invitation: Mapped[Invitation] = relationship(back_populates="session")
+
+
+class Snapshot(Base):
+    __tablename__ = "snapshots"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "session_id", name="uq_snapshots_id_session"),
+        CheckConstraint("content_sha256 ~ '^[0-9a-f]{64}$'", name="digest_format"),
+        CheckConstraint("size_bytes > 0", name="size_positive"),
+        CheckConstraint("file_count >= 0", name="file_count_nonnegative"),
+        CheckConstraint("created_at >= 0", name="created_nonnegative"),
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("exam_sessions.session_id"))
+    content_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    file_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class Submission(Base):
+    __tablename__ = "submissions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["snapshot_id", "session_id"],
+            ["snapshots.snapshot_id", "snapshots.session_id"],
+        ),
+        UniqueConstraint(
+            "exam_id", "candidate_id", name="uq_submissions_exam_candidate"
+        ),
+        CheckConstraint(
+            "idempotency_key ~ '^[A-Za-z0-9_-]{1,128}$'", name="idempotency_format"
+        ),
+        CheckConstraint(
+            "admitted_at >= 0 AND started_at >= admitted_at AND submitted_at >= started_at",
+            name="timeline_order",
+        ),
+    )
+
+    submission_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id"), unique=True
+    )
+    snapshot_id: Mapped[str] = mapped_column(String(128))
+    idempotency_key: Mapped[str] = mapped_column(String(128))
+    candidate_id: Mapped[str] = mapped_column(String(120))
+    candidate_name: Mapped[str] = mapped_column(String(120))
+    exam_id: Mapped[str] = mapped_column(String(120))
+    exam_title: Mapped[str] = mapped_column(String(120))
+    admitted_at: Mapped[int] = mapped_column(BigInteger)
+    started_at: Mapped[int] = mapped_column(BigInteger)
+    submitted_at: Mapped[int] = mapped_column(BigInteger, index=True)

@@ -10,7 +10,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from app.db.config import get_database_url
-from app.db.models import Base, ExamSession, Invitation
+from app.db.models import Base, ExamSession, Invitation, Snapshot, Submission
 from app.db.session import create_db_engine, session_scope
 from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.exc import IntegrityError
@@ -49,6 +49,8 @@ class PostgreSQLTests(unittest.TestCase):
 
     def setUp(self):
         with self.engine.begin() as connection:
+            connection.execute(Submission.__table__.delete())
+            connection.execute(Snapshot.__table__.delete())
             connection.execute(ExamSession.__table__.delete())
             connection.execute(Invitation.__table__.delete())
 
@@ -82,7 +84,13 @@ class PostgreSQLTests(unittest.TestCase):
     def test_migration_matches_models(self):
         self.assertEqual(
             set(inspect(self.engine).get_table_names()),
-            {"invitations", "exam_sessions", "alembic_version"},
+            {
+                "invitations",
+                "exam_sessions",
+                "snapshots",
+                "submissions",
+                "alembic_version",
+            },
         )
         with self.engine.connect() as connection:
             context = MigrationContext.configure(
