@@ -16,6 +16,8 @@
 
 ## 提交持久化内部契约
 
+共享会话、容器映射、跨进程行锁、状态集合及提交失败后的恢复规则见 [沙箱接入约定](sandbox-integration.md)，对应迁移 `0003`。已有 HTTP 草案仍待对齐这些内部状态和鉴权方式。
+
 以下为当前分支已实现的 Python 内部服务，HTTP 交卷和沙箱冻结尚未接入，下方 E.3 仍是 HTTP 草案。
 
 `backend/app/submissions/service.py` 中的 `SubmissionService` 提供：
@@ -24,6 +26,7 @@
 persist_frozen_submission(session_id, idempotency_key, files, *, public_test_output=None)
 list_submissions()
 get_submission(submission_id)
+get_session_receipt(session_id)
 ```
 
 - `files` 是 `SnapshotFile(path, content)` 的可迭代对象；路径是相对 POSIX 路径，内容为 UTF-8 文本。公开测试输出由调用方提供，服务不执行命令。
@@ -32,6 +35,8 @@ get_submission(submission_id)
 - 同一会话只有一个最终提交。并发请求串行处理，重复请求使用原幂等键或新键均返回首份答卷，不重新消费 `files`。幂等键接受 1～128 位字母、数字、下划线或连字符，前端可使用 UUID。
 - `list_submissions()` 返回已持久化摘要：`submission_id`、`session_id`、`candidate_id`、`candidate_name`、`exam_id`、`exam_title`、`admitted_at`、`started_at`、`submitted_at`。
 - `get_submission(id)` 查无记录返回 `None`，否则在摘要上增加 `snapshot_id`、`files[{path, content}]` 与 `public_test_output`。身份与时间取自提交当时保存的数据，文件及测试输出仅从固定快照读取。`public_test_output` 为 `None` 和空字符串时保留区别。
+- `get_session_receipt(session_id)` 返回该会话已提交的固定回执，尚未提交时为 `None`，用于重试和不确定提交结果的恢复。
+- 持有生命周期锁时，使用 `locked.persist_frozen_submission(service, key, files, ...)` 复用当前事务，不能另起普通提交事务。块内返回值须等待锁上下文成功退出后才可响应；清理必须另开锁上下文，通过 `require_cleanup()` 后进行，禁止在尚未提交的事务内删容器。
 - 返回字段对齐队友 `feat/admin-submission-details` 分支的 `SubmissionReader`，尚未注入管理端路由；返回值不包含幂等键、凭据哈希、内部磁盘路径或内容存储摘要。
 - 未知会话抛出 `SubmissionNotFound`；未开始或状态不正确抛出 `InvalidSubmissionState`；快照输入不合法抛出 `SnapshotValidationError`；文件丢失、损坏或存储不可用抛出 `SnapshotStorageError`。HTTP 状态映射和冻结失败后的会话恢复策略在路由接入时对齐。
 

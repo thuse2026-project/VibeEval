@@ -61,6 +61,28 @@ class ExamSession(Base):
         CheckConstraint("length(btrim(session_id)) > 0", name="session_id_not_blank"),
         CheckConstraint("browser_hash ~ '^[0-9a-f]{64}$'", name="browser_hash_format"),
         CheckConstraint("length(btrim(status)) > 0", name="status_not_blank"),
+        CheckConstraint(
+            "status IN ('admitted', 'provisioning', 'ready', 'in_progress', "
+            "'provision_failed', 'submitting', 'submission_failed', 'submitted')",
+            name="known_status",
+        ),
+        CheckConstraint(
+            "(sandbox_resource_key IS NULL AND sandbox_image_ref IS NULL AND sandbox_backend_ref IS NULL) OR "
+            "(sandbox_resource_key IS NOT NULL AND sandbox_image_ref IS NOT NULL AND sandbox_backend_ref IS NOT NULL "
+            "AND length(btrim(sandbox_resource_key)) > 0 AND length(btrim(sandbox_image_ref)) > 0 "
+            "AND length(btrim(sandbox_backend_ref)) > 0)",
+            name="sandbox_plan_complete",
+        ),
+        CheckConstraint(
+            "sandbox_deleted_at IS NULL OR (sandbox_id IS NOT NULL AND submitted_at IS NOT NULL "
+            "AND sandbox_deleted_at >= submitted_at)",
+            name="cleanup_after_submission",
+        ),
+        CheckConstraint(
+            "(lifecycle_error_code IS NULL AND lifecycle_error_at IS NULL) OR "
+            "(lifecycle_error_code IS NOT NULL AND lifecycle_error_at IS NOT NULL AND lifecycle_error_at >= 0)",
+            name="lifecycle_error_complete",
+        ),
         CheckConstraint("admitted_at >= 0", name="admitted_nonnegative"),
         CheckConstraint(
             "(started_at IS NULL AND deadline_at IS NULL) OR "
@@ -87,6 +109,12 @@ class ExamSession(Base):
     deadline_at: Mapped[int | None] = mapped_column(BigInteger)
     submitted_at: Mapped[int | None] = mapped_column(BigInteger)
     sandbox_id: Mapped[str | None] = mapped_column(String(255))
+    sandbox_resource_key: Mapped[str | None] = mapped_column(String(64), unique=True)
+    sandbox_image_ref: Mapped[str | None] = mapped_column(String(512))
+    sandbox_backend_ref: Mapped[str | None] = mapped_column(String(128))
+    sandbox_deleted_at: Mapped[int | None] = mapped_column(BigInteger)
+    lifecycle_error_code: Mapped[str | None] = mapped_column(String(64))
+    lifecycle_error_at: Mapped[int | None] = mapped_column(BigInteger)
     invitation: Mapped[Invitation] = relationship(back_populates="session")
 
 

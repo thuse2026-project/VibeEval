@@ -27,7 +27,7 @@ class SubmissionService:
         store: SnapshotStore | None = None,
         factory: sessionmaker[Session] | None = None,
         *,
-        clock: Callable[[], float] = time.time
+        clock: Callable[[], float] = time.time,
     ):
         self.store = store if store is not None else SnapshotStore()
         self.factory = factory if factory is not None else get_session_factory()
@@ -66,13 +66,34 @@ class SubmissionService:
         idempotency_key: str,
         files: Iterable[SnapshotFile],
         *,
-        public_test_output: str | None = None
+        public_test_output: str | None = None,
     ) -> dict:
         """The session must be submitting and its workspace must already be frozen.
 
         A replay always returns the first committed submission, even with a new key.
         No sandbox, authentication or HTTP operation is performed by this method.
         """
+        with session_scope(self.factory) as session:
+            return self.persist_in_transaction(
+                session,
+                session_id,
+                idempotency_key,
+                files,
+                public_test_output=public_test_output,
+            )
+
+    def persist_in_transaction(
+        self,
+        session: Session,
+        session_id: str,
+        idempotency_key: str,
+        files: Iterable[SnapshotFile],
+        *,
+        public_test_output: str | None = None,
+    ) -> dict:
+        """Join a lifecycle transaction; its owner must commit before returning a receipt."""
+        if not session.in_transaction():
+            raise RuntimeError("An active caller-owned transaction is required")
         if (
             not isinstance(idempotency_key, str)
             or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", idempotency_key) is None
@@ -80,58 +101,64 @@ class SubmissionService:
             raise ValueError(
                 "Idempotency key must contain 1 to 128 letters, digits, underscores or hyphens"
             )
-        with session_scope(self.factory) as session:
-            exam = session.scalar(
-                select(ExamSession)
-                .where(ExamSession.session_id == session_id)
-                .with_for_update()
+        exam = session.scalar(
+            select(ExamSession)
+            .where(ExamSession.session_id == session_id)
+            .with_for_update()
+        )
+        if exam is None:
+            raise SubmissionNotFound("Exam session was not found")
+        existing = session.scalar(
+            select(Submission).where(Submission.session_id == session_id)
+        )
+        if existing is not None:
+            return self._receipt(existing)
+        if exam.status != "submitting" or exam.started_at is None:
+            raise InvalidSubmissionState(
+                "Session must be started and submitting before persistence"
             )
-            if exam is None:
-                raise SubmissionNotFound("Exam session was not found")
-            existing = session.scalar(
+        submitted_at = int(self.clock())
+        if submitted_at < exam.started_at:
+            raise InvalidSubmissionState("Submission time cannot precede exam start")
+        identity = session.get(Invitation, exam.invitation_hash)
+        stored = self.store.write(files, public_test_output)
+        snapshot = Snapshot(
+            snapshot_id="snp_" + uuid.uuid4().hex,
+            session_id=session_id,
+            content_sha256=stored.content_sha256,
+            size_bytes=stored.size_bytes,
+            file_count=stored.file_count,
+            created_at=submitted_at,
+        )
+        session.add(snapshot)
+        session.flush()
+        record = Submission(
+            submission_id="sub_" + uuid.uuid4().hex,
+            session_id=session_id,
+            snapshot_id=snapshot.snapshot_id,
+            idempotency_key=idempotency_key,
+            candidate_id=identity.candidate_id,
+            candidate_name=identity.candidate_name,
+            exam_id=identity.exam_id,
+            exam_title=identity.exam_title,
+            admitted_at=exam.admitted_at,
+            started_at=exam.started_at,
+            submitted_at=submitted_at,
+        )
+        session.add(record)
+        exam.status = "submitted"
+        exam.submitted_at = submitted_at
+        exam.lifecycle_error_code = None
+        exam.lifecycle_error_at = None
+        session.flush()
+        return self._receipt(record)
+
+    def get_session_receipt(self, session_id: str) -> dict | None:
+        with session_scope(self.factory) as session:
+            record = session.scalar(
                 select(Submission).where(Submission.session_id == session_id)
             )
-            if existing is not None:
-                return self._receipt(existing)
-            if exam.status != "submitting" or exam.started_at is None:
-                raise InvalidSubmissionState(
-                    "Session must be started and submitting before persistence"
-                )
-            submitted_at = int(self.clock())
-            if submitted_at < exam.started_at:
-                raise InvalidSubmissionState(
-                    "Submission time cannot precede exam start"
-                )
-            identity = session.get(Invitation, exam.invitation_hash)
-            stored = self.store.write(files, public_test_output)
-            snapshot = Snapshot(
-                snapshot_id="snp_" + uuid.uuid4().hex,
-                session_id=session_id,
-                content_sha256=stored.content_sha256,
-                size_bytes=stored.size_bytes,
-                file_count=stored.file_count,
-                created_at=submitted_at,
-            )
-            session.add(snapshot)
-            session.flush()
-            record = Submission(
-                submission_id="sub_" + uuid.uuid4().hex,
-                session_id=session_id,
-                snapshot_id=snapshot.snapshot_id,
-                idempotency_key=idempotency_key,
-                candidate_id=identity.candidate_id,
-                candidate_name=identity.candidate_name,
-                exam_id=identity.exam_id,
-                exam_title=identity.exam_title,
-                admitted_at=exam.admitted_at,
-                started_at=exam.started_at,
-                submitted_at=submitted_at,
-            )
-            session.add(record)
-            exam.status = "submitted"
-            exam.submitted_at = submitted_at
-            session.flush()
-            return self._receipt(record)
+            return self._receipt(record) if record is not None else None
 
     def list_submissions(self) -> list[dict]:
         with session_scope(self.factory) as session:

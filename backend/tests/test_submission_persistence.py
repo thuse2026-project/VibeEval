@@ -167,7 +167,14 @@ class SubmissionPersistenceTests(unittest.TestCase):
         self.assertFalse(self.root.exists())
 
     def test_active_or_unstarted_sessions_cannot_be_persisted(self):
-        for status in ("admitted", "ready", "in_progress", "failed", "submitted"):
+        for status in (
+            "admitted",
+            "ready",
+            "in_progress",
+            "provision_failed",
+            "submission_failed",
+            "submitted",
+        ):
             with self.subTest(status=status):
                 with session_scope(self.factory) as session:
                     session.get(ExamSession, "ses_1").status = status
