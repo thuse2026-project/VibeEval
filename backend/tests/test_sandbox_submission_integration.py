@@ -23,6 +23,7 @@ from app.main import create_app
 from app.sandbox.bound_adapter import BoundSandboxAdapter, prepare_bound
 from app.sandbox.runtime import SandboxRuntime
 from app.submissions.coordinator import SandboxCleanupFailed, SubmissionCoordinator
+from app.submissions.maintenance import SubmissionMaintenance
 from app.submissions.service import SubmissionService
 from app.submissions.storage import SnapshotStorageError, SnapshotStore
 
@@ -198,6 +199,62 @@ class SubmissionRoundTrip:
                 if attempt == 2:
                     raise
                 time.sleep(1)
+
+    def maintenance_runner(self, timestamp):
+        when = [timestamp]
+        clock = lambda: when[0]  # noqa: E731
+        self.lifecycle = SessionLifecycle(self.factory, clock=clock)
+        self.service = SubmissionService(self.snapshots, self.factory, clock=clock)
+        coordinator = SubmissionCoordinator(
+            self.sandbox, lifecycle=self.lifecycle, submissions=self.service
+        )
+        return SubmissionMaintenance(coordinator, self.backend_ref), when
+
+    def test_maintenance_submits_at_deadline_without_a_browser_request(self):
+        self.client.close()
+        runner, _ = self.maintenance_runner(self.started.deadline_at)
+        result = runner.run_once()
+        self.assertEqual((result.submitted, result.failed), (1, 0))
+        receipt = self.service.get_session_receipt(self.sid)
+        self.assertEqual(receipt["submitted_at"], self.started.deadline_at)
+        self.assertEqual(
+            self.lifecycle.get_session(self.sid).deadline_at, self.started.deadline_at
+        )
+        files = {
+            entry["path"]: entry["content"]
+            for entry in self.service.get_submission(receipt["submission_id"])["files"]
+        }
+        self.assertIn(MARKER, files["src/booking.py"])
+        self.finish_cleanup()
+
+    def test_maintenance_retries_committed_cleanup_with_original_receipt(self):
+        with (
+            patch.object(
+                self.sandbox,
+                "delete_sandbox",
+                side_effect=TimeoutError("injected timeout"),
+            ),
+            self.assertLogs("app.submissions.coordinator", level="WARNING"),
+        ):
+            response = self.submit()
+        self.assertEqual(response.status_code, 202, response.text)
+        receipt = response.json()
+        failed_at = self.lifecycle.get_session(self.sid).lifecycle_error_at
+        self.client.close()
+        runner, when = self.maintenance_runner(failed_at + 30)
+        for attempt in range(3):
+            result = runner.run_once()
+            self.assertEqual(result.submitted, 0)
+            if result.cleaned == 1:
+                break
+            self.assertEqual(result.failed, 1)
+            self.assertEqual(self.service.get_session_receipt(self.sid), receipt)
+            when[0] += 30
+        else:
+            self.fail("Bounded maintenance retries did not record sandbox cleanup")
+        self.assertEqual(self.service.get_session_receipt(self.sid), receipt)
+        self.assertIsNotNone(self.lifecycle.get_session(self.sid).sandbox_deleted_at)
+        self.driver.volumes.get(self.resource_key + "-data")
 
     def test_round_trip_is_fixed_and_visible_to_examiner(self):
         response = self.submit()
