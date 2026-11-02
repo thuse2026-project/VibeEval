@@ -104,8 +104,10 @@ class SessionLifecycleTests(unittest.TestCase):
             SnapshotStore(Path(directory.name)), self.factory, clock=lambda: self.now
         )
 
-    def ready(self):
-        self.lifecycle.prepare_sandbox("ses_1", IMAGE, backend_ref=BACKEND)
+    def ready(self, *, task_version_id=None):
+        self.lifecycle.prepare_sandbox(
+            "ses_1", IMAGE, backend_ref=BACKEND, task_version_id=task_version_id
+        )
         with self.lifecycle.lock_session("ses_1") as locked:
             locked.bind_sandbox("abc123", image_ref=IMAGE)
             locked.mark_ready()
@@ -158,6 +160,74 @@ class SessionLifecycleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.lifecycle.prepare_sandbox("ses_1", "python:latest")
         self.assertEqual(self.lifecycle.get_session("ses_1").status, "admitted")
+
+    def test_task_version_and_image_are_stored_separately_across_reconnect(self):
+        self.ready(task_version_id="python-debug-01:v1")
+        restored = SessionLifecycle(self.factory).get_session("ses_1")
+        self.assertEqual(restored.task_version_id, "python-debug-01:v1")
+        self.assertEqual(restored.sandbox_image_ref, IMAGE)
+
+    def test_task_version_is_pinned_and_cannot_change_during_an_exam(self):
+        self.ready(task_version_id="python-debug-01:v1")
+        started = self.lifecycle.start_exam("ses_1")
+        replay = self.lifecycle.prepare_sandbox(
+            "ses_1", IMAGE, backend_ref=BACKEND, task_version_id="python-debug-01:v1"
+        )
+        self.assertEqual(replay.deadline_at, started.deadline_at)
+        with self.assertRaises(LifecycleConflict):
+            self.lifecycle.prepare_sandbox(
+                "ses_1",
+                IMAGE,
+                backend_ref=BACKEND,
+                task_version_id="python-debug-01:v2",
+            )
+        self.assertEqual(
+            self.lifecycle.get_session("ses_1").task_version_id, "python-debug-01:v1"
+        )
+
+    def test_unknown_legacy_task_version_is_not_guessed_after_exam_start(self):
+        self.running()
+        self.assertIsNone(self.lifecycle.get_session("ses_1").task_version_id)
+        with self.assertRaises(LifecycleConflict):
+            self.lifecycle.prepare_sandbox(
+                "ses_1",
+                IMAGE,
+                backend_ref=BACKEND,
+                task_version_id="python-debug-01:v1",
+            )
+        self.assertIsNone(self.lifecycle.get_session("ses_1").task_version_id)
+
+    def test_known_task_version_can_be_filled_before_exam_start(self):
+        self.ready()
+        view = self.lifecycle.prepare_sandbox(
+            "ses_1", IMAGE, backend_ref=BACKEND, task_version_id="python-debug-01:v1"
+        )
+        self.assertEqual(
+            (view.task_version_id, view.status), ("python-debug-01:v1", "ready")
+        )
+
+    def test_final_submission_keeps_its_original_task_and_image_references(self):
+        self.ready(task_version_id="python-debug-01:v1")
+        self.lifecycle.start_exam("ses_1")
+        self.lifecycle.begin_submission("ses_1")
+        with self.lifecycle.lock_session("ses_1") as locked:
+            receipt = locked.persist_frozen_submission(self.submissions, "key", [])
+        with session_scope(self.factory) as session:
+            row = session.get(ExamSession, "ses_1")
+            row.task_version_id = "later-metadata-edit"
+            row.sandbox_image_ref = "sha256:" + "b" * 64
+        with session_scope(self.factory) as session:
+            saved = session.get(Submission, receipt["submission_id"])
+            self.assertEqual(
+                (saved.task_version_id, saved.sandbox_image_ref),
+                ("python-debug-01:v1", IMAGE),
+            )
+
+    def test_invalid_task_version_identifier_is_rejected(self):
+        for version in ("", " ", "line\nbreak", "a" * 129):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                self.lifecycle.prepare_sandbox("ses_1", IMAGE, task_version_id=version)
+        self.assertIsNone(self.lifecycle.get_session("ses_1").task_version_id)
 
     def test_create_then_database_rollback_is_recovered_by_stable_resource_key(self):
         plan = self.lifecycle.prepare_sandbox("ses_1", IMAGE, backend_ref=BACKEND)
@@ -387,6 +457,7 @@ class SessionLifecycleTests(unittest.TestCase):
     def test_database_enforces_canonical_states_complete_plans_and_cleanup_order(self):
         for changes in (
             {"status": "invented"},
+            {"task_version_id": " "},
             {"sandbox_image_ref": IMAGE},
             {"lifecycle_error_code": "ERROR_WITHOUT_TIME"},
             {"sandbox_deleted_at": 1200},

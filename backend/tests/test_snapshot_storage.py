@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 from app.submissions.storage import (
@@ -9,6 +9,7 @@ from app.submissions.storage import (
     SnapshotStorageError,
     SnapshotStore,
     SnapshotValidationError,
+    _windows_comparison_path,
 )
 
 
@@ -159,12 +160,71 @@ class SnapshotStorageTests(unittest.TestCase):
         def write(_):
             return self.store.write([SnapshotFile("a.py", "complete content")])
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(write, range(8)))
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            results = list(executor.map(write, range(128)))
         self.assertTrue(all(result == results[0] for result in results))
         self.assertEqual(self.read(results[0]).files[0].content, "complete content")
         self.assertEqual(len(list(self.root.rglob("*.json"))), 1)
         self.assertEqual(list(self.root.rglob(".tmp-*")), [])
+
+    def test_hard_link_leaf_namespace_alias_does_not_reject_a_valid_object(self):
+        original_resolve = Path.resolve
+
+        def windows_hard_link_alias(path, *args, **kwargs):
+            if path.suffix == ".json":
+                return self.root.parent / "alternate-hard-link-name.json"
+            return original_resolve(path, *args, **kwargs)
+
+        with patch("app.submissions.storage.Path.resolve", new=windows_hard_link_alias):
+            stored = self.store.write([SnapshotFile("a.py", "safe content")])
+            self.assertEqual(self.read(stored).files[0].content, "safe content")
+
+    def test_directory_escape_is_still_rejected(self):
+        original_resolve = Path.resolve
+
+        def escaped_directory(path, *args, **kwargs):
+            if path.parent == self.root:
+                return self.root.parent / "outside"
+            return original_resolve(path, *args, **kwargs)
+
+        with patch("app.submissions.storage.Path.resolve", new=escaped_directory):
+            with self.assertRaises(SnapshotStorageError):
+                self.store.write([SnapshotFile("a.py", "safe content")])
+        self.assertFalse((self.root.parent / "outside").exists())
+
+    def test_windows_dos_and_extended_namespaces_have_the_same_containment(self):
+        for ordinary, extended in (
+            (r"C:\cache\snapshots", r"\\?\C:\cache\snapshots"),
+            (r"\\server\share\snapshots", r"\\?\UNC\server\share\snapshots"),
+        ):
+            with self.subTest(ordinary=ordinary):
+                root = _windows_comparison_path(PureWindowsPath(ordinary))
+                self.assertEqual(
+                    root, _windows_comparison_path(PureWindowsPath(extended))
+                )
+                self.assertTrue(
+                    _windows_comparison_path(
+                        PureWindowsPath(extended) / "ab"
+                    ).is_relative_to(root)
+                )
+                self.assertFalse(
+                    _windows_comparison_path(
+                        PureWindowsPath(extended).parent / "outside"
+                    ).is_relative_to(root)
+                )
+
+    def test_leaf_symbolic_link_is_still_rejected(self):
+        stored = self.store.write([SnapshotFile("a.py", "safe content")])
+        destination = self.object_path(stored)
+        outside = self.root.parent / "outside.json"
+        outside.write_bytes(destination.read_bytes())
+        destination.unlink()
+        try:
+            destination.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("Creating symbolic links is unavailable for this account")
+        with self.assertRaises(SnapshotStorageError):
+            self.read(stored)
 
     def test_invalid_limit_configuration_is_rejected(self):
         for limit in (0, -1, True, "100"):

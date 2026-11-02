@@ -126,7 +126,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini check
 ```
 
-Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动数据库；迁移完成后版本应为 `0003 (head)`，`check` 应提示没有新的迁移差异。启动应用时不自动建表，结构变更统一通过 Alembic 管理。
+Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动数据库；迁移完成后版本应为 `0004 (head)`，`check` 应提示没有新的迁移差异。启动应用时不自动建表，结构变更统一通过 Alembic 管理。
 
 连接配置从仓库根目录 `.env` 读取，不依赖当前工作目录；同名环境变量优先。默认使用 `POSTGRES_HOST`（`127.0.0.1`）、`POSTGRES_PORT`、`POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD`。可用 `DATABASE_URL` 整体覆盖连接配置，支持 `postgresql://` 或 `postgresql+psycopg://`；直接填写 URL 时须对账号和密码中的特殊字符进行 URL 编码，使用分项配置时无需编码。
 
@@ -138,6 +138,8 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 | `exam_sessions` | 关联邀请，保存浏览器凭据哈希、状态、沙箱引用及入场/开始/截止/提交时间；邀请和浏览器哈希分别唯一 |
 | `snapshots` | 保存快照所属会话、内容摘要、字节数、文件数和创建时间；文件正文放持久文件存储 |
 | `submissions` | 每会话唯一的最终提交，记录幂等键、固定快照引用及当时的考生/场次身份和时间；禁止引用其他会话的快照 |
+
+`ExamSession.task_version_id` 保存逻辑题目发布版本，`sandbox_image_ref` 保存不可变镜像引用；两者在最终提交时复制到 `Submission`。新接入通过 `prepare_sandbox(..., task_version_id=...)` 固定题目版本，未知旧记录不自动回填。具体调用及 Windows 快照并发修复说明见沙箱接入文档。
 
 时间统一使用 UTC Unix 秒（`BIGINT`）。会话默认状态为 `admitted`，入场时开始、截止、提交时间均为空；开始时间与截止时间必须同时设置，时间顺序由数据库约束保护。`session_scope()` 在成功时提交，异常时回滚并关闭会话。迁移 `0003` 固定了状态集合，新增不可变镜像引用、宿主标识、稳定资源名、清理时间及安全错误台账；`SessionLifecycle` 提供跨进程行锁、绑定读写、幂等开考、写入门禁和清理资格检查。
 

@@ -62,6 +62,10 @@ class ExamSession(Base):
         CheckConstraint("browser_hash ~ '^[0-9a-f]{64}$'", name="browser_hash_format"),
         CheckConstraint("length(btrim(status)) > 0", name="status_not_blank"),
         CheckConstraint(
+            "task_version_id IS NULL OR length(btrim(task_version_id)) > 0",
+            name="task_version_not_blank",
+        ),
+        CheckConstraint(
             "status IN ('admitted', 'provisioning', 'ready', 'in_progress', "
             "'provision_failed', 'submitting', 'submission_failed', 'submitted')",
             name="known_status",
@@ -109,6 +113,7 @@ class ExamSession(Base):
     deadline_at: Mapped[int | None] = mapped_column(BigInteger)
     submitted_at: Mapped[int | None] = mapped_column(BigInteger)
     sandbox_id: Mapped[str | None] = mapped_column(String(255))
+    task_version_id: Mapped[str | None] = mapped_column(String(128))
     sandbox_resource_key: Mapped[str | None] = mapped_column(String(64), unique=True)
     sandbox_image_ref: Mapped[str | None] = mapped_column(String(512))
     sandbox_backend_ref: Mapped[str | None] = mapped_column(String(128))
@@ -153,6 +158,10 @@ class Submission(Base):
             "admitted_at >= 0 AND started_at >= admitted_at AND submitted_at >= started_at",
             name="timeline_order",
         ),
+        CheckConstraint(
+            "task_version_id IS NULL OR length(btrim(task_version_id)) > 0",
+            name="task_version_not_blank",
+        ),
     )
 
     submission_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -168,3 +177,5 @@ class Submission(Base):
     admitted_at: Mapped[int] = mapped_column(BigInteger)
     started_at: Mapped[int] = mapped_column(BigInteger)
     submitted_at: Mapped[int] = mapped_column(BigInteger, index=True)
+    task_version_id: Mapped[str | None] = mapped_column(String(128))
+    sandbox_image_ref: Mapped[str | None] = mapped_column(String(512))

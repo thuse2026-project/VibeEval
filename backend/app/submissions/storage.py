@@ -7,7 +7,19 @@ import re
 import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+
+def _windows_comparison_path(path: PureWindowsPath) -> PureWindowsPath:
+    """Use one namespace for lexical containment; keep actual I/O paths unchanged."""
+    value = str(path)
+    if value.startswith("\\\\?\\"):
+        return path
+    if value.startswith("\\\\"):
+        return PureWindowsPath("\\\\?\\UNC\\" + value[2:])
+    if path.is_absolute() and len(path.drive) == 2 and path.drive.endswith(":"):
+        return PureWindowsPath("\\\\?\\" + value)
+    return path
 
 
 class SnapshotValidationError(ValueError):
@@ -144,7 +156,15 @@ class SnapshotStore:
         if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise SnapshotStorageError("Invalid snapshot content reference")
         path = self.root / digest[:2] / (digest + ".json")
-        if not path.resolve().is_relative_to(self.root) or path.is_symlink():
+        # A published leaf is a hard link. Windows may resolve it using a
+        # transient \\?\ spelling while another writer removes a temporary link.
+        # Resolve the directory boundary instead; reject leaf symlinks separately.
+        parent = path.parent.resolve()
+        root = self.root
+        if os.name == "nt":
+            parent = _windows_comparison_path(PureWindowsPath(parent))
+            root = _windows_comparison_path(PureWindowsPath(root))
+        if not parent.is_relative_to(root) or path.is_symlink():
             raise SnapshotStorageError("Invalid snapshot content location")
         return path
 

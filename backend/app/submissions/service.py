@@ -144,6 +144,8 @@ class SubmissionService:
             admitted_at=exam.admitted_at,
             started_at=exam.started_at,
             submitted_at=submitted_at,
+            task_version_id=exam.task_version_id,
+            sandbox_image_ref=exam.sandbox_image_ref,
         )
         session.add(record)
         exam.status = "submitted"

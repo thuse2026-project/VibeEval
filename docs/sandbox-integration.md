@@ -1,6 +1,6 @@
 # 沙箱与共享数据库接入约定
 
-本说明对应数据库迁移 `0003`。共享数据库层和提交存储已实现；Docker + gVisor 生命周期代码由陈弘毅提供，当前尚未接入其真实代码，也未完成沙箱冻结或 HTTP 交卷的端到端联调。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。
+本说明对应数据库迁移 `0004`。共享数据库层和提交存储已实现；Docker + gVisor 生命周期代码由陈弘毅提供，当前尚未接入其真实代码，也未完成沙箱冻结或 HTTP 交卷的端到端联调。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。
 
 ## 1. 会话、沙箱和截止时间
 
@@ -9,6 +9,7 @@
 | 字段 | 含义 |
 | --- | --- |
 | `sandbox_id` | 已绑定的真实容器/沙箱 ID；绑定后不自动替换，清理后仍保留历史 ID |
+| `task_version_id` | 逻辑题目发布版本，如 `python-debug-01:v1`；与运行环境的镜像版本分开记录 |
 | `sandbox_resource_key` | 提前持久化的固定资源名/去重标识；创建或恢复时必须使用 |
 | `sandbox_image_ref` | 固定的不可变镜像引用，支持本地 `sha256:<64位摘要>` 或 `仓库@sha256:<64位摘要>` |
 | `sandbox_backend_ref` | 稳定的沙箱引擎/宿主配置标识，如 `docker-gvisor:exam-node-01`；不存连接密码 |
@@ -17,6 +18,8 @@
 | `lifecycle_error_code`、`lifecycle_error_at` | 安全的错误代码和发生时间，不存原始异常、凭据或内部路径 |
 
 只读查询：`lifecycle.get_session(session_id)` 返回不可变 `SessionView`，未知会话返回 `None`。后端重启后仍从 PostgreSQL 读取这些字段。
+
+新接入在 `prepare_sandbox(..., task_version_id="python-debug-01:v1")` 中传入题目配置里的确切发布版本，也可在拿锁后调用 `locked.pin_task_version(...)`。发布版本 ID 由题目维护方定义并保持不可变，本阶段保存引用，不新增题库管理平台。版本一旦记录便不能更换；未知旧记录保留 `None`，仅允许在开考前登记经确认的实际版本，禁止开考后把“当前版本”猜作历史版本。旧调用可不传此参数以兼容既有接口，新场次应显式传入。提交时 `Submission` 同时保存题目版本和镜像引用副本，方便后续追溯；现有管理端 `SubmissionReader` 返回字段保持不变。
 
 `prepare_sandbox(session_id, image_ref, backend_ref=...)` 在创建容器前提交固定计划，返回的 `sandbox_resource_key`、镜像和宿主之后不变。仅有浮动 tag 时，先由沙箱模块解析成不可变镜像引用；直接传 `python:latest` 等 tag 会被拒绝。本地 Docker 可使用已解析的镜像 ID；使用仓库 digest 时，需由适配器按相同标识验证实际镜像。
 
@@ -42,7 +45,8 @@ from app.db.lifecycle import SessionLifecycle
 
 lifecycle = SessionLifecycle()
 plan = lifecycle.prepare_sandbox(session_id, resolved_image_ref,
-                                 backend_ref="docker-gvisor:exam-node-01")
+                                 backend_ref="docker-gvisor:exam-node-01",
+                                 task_version_id="python-debug-01:v1")
 
 with lifecycle.lock_session(session_id) as locked:
     view = locked.view
@@ -107,3 +111,9 @@ with lifecycle.lock_session(session_id) as locked:
 ## 6. 仍需沙箱侧提供的接入信息
 
 需要陈弘毅提供代码分支或方法签名，确认固定资源名/标签查找、不可变镜像解析、归属验证、真正的 pause 与稳定工作区导出接口。已有创建、状态、停止、删除能力不会自动等于已经完成冻结导出。上述适配器调用仍为接口示意，当前测试使用替身；真实 Docker + gVisor 联调、截止自动交卷和后台清理在后续阶段完成。
+
+## 7. Windows 快照并发兼容修复
+
+已复现 `test_concurrent_writers_publish_one_complete_object` 的路径误判：Windows 并发发布硬链接和创建目录时，`Path.resolve()` 偶尔保留 `\\?\` 命名空间前缀，使同一快照根目录的合法路径与普通盘符路径比较失败。现在仅解析父目录边界，并将 Windows 普通盘符、UNC 与扩展命名空间转换成一致的比较表示；实际读写路径不改写，快照文件符号链接仍被拒绝，读取仍校验摘要。
+
+修复后本地 Windows 16 线程累计 5,120 次写入无误；Linux 容器中的 19 项快照测试全部通过，包括并发、目录越界和符号链接拒绝。合入修复无需改动调用方，也不改变快照格式。涉及新版本字段时，再执行 Alembic `upgrade head` 到 `0004`。

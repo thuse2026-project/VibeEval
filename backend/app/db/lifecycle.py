@@ -39,6 +39,7 @@ class LifecycleConflict(ValueError):
 class SessionView:
     session_id: str
     status: str
+    task_version_id: str | None
     sandbox_id: str | None
     sandbox_resource_key: str | None
     sandbox_image_ref: str | None
@@ -107,8 +108,40 @@ class LockedSession:
         self._record.lifecycle_error_code = code
         self._record.lifecycle_error_at = self._now()
 
-    def prepare_sandbox(self, image_ref: str, backend_ref: str) -> SessionView:
+    def pin_task_version(self, task_version_id: str) -> SessionView:
         self._active()
+        if (
+            not isinstance(task_version_id, str)
+            or not 1 <= len(task_version_id) <= 128
+            or task_version_id != task_version_id.strip()
+            or any(ord(char) < 32 or ord(char) == 127 for char in task_version_id)
+        ):
+            raise ValueError(
+                "Task version must be a nonblank release identifier of at most 128 characters"
+            )
+        row = self._record
+        if row.task_version_id is not None:
+            if row.task_version_id != task_version_id:
+                raise LifecycleConflict("The task version is fixed for this session")
+            return self.view
+        if row.started_at is not None or row.status not in (
+            Status.ADMITTED,
+            Status.PROVISIONING,
+            Status.PROVISION_FAILED,
+            Status.READY,
+        ):
+            raise LifecycleConflict(
+                "An unknown task version cannot be inferred after exam start"
+            )
+        row.task_version_id = task_version_id
+        return self.view
+
+    def prepare_sandbox(
+        self, image_ref: str, backend_ref: str, *, task_version_id: str | None = None
+    ) -> SessionView:
+        self._active()
+        if task_version_id is not None:
+            self.pin_task_version(task_version_id)
         if (
             not isinstance(image_ref, str)
             or len(image_ref) > 512
@@ -288,7 +321,7 @@ class LockedSession:
         idempotency_key: str,
         files: "Iterable[SnapshotFile]",
         *,
-        public_test_output: str | None = None
+        public_test_output: str | None = None,
     ) -> dict:
         """Return only after the surrounding lock context commits successfully."""
         self._active()
@@ -342,7 +375,7 @@ class SessionLifecycle:
         self,
         factory: sessionmaker[Session] | None = None,
         *,
-        clock: Callable[[], float] = time.time
+        clock: Callable[[], float] = time.time,
     ):
         self.factory = factory if factory is not None else get_session_factory()
         self.clock = clock
@@ -381,10 +414,13 @@ class SessionLifecycle:
         session_id: str,
         image_ref: str,
         *,
-        backend_ref: str = "docker-gvisor:default"
+        backend_ref: str = "docker-gvisor:default",
+        task_version_id: str | None = None,
     ) -> SessionView:
         with self.lock_session(session_id) as locked:
-            return locked.prepare_sandbox(image_ref, backend_ref)
+            return locked.prepare_sandbox(
+                image_ref, backend_ref, task_version_id=task_version_id
+            )
 
     def start_exam(self, session_id: str) -> SessionView:
         with self.lock_session(session_id) as locked:
