@@ -4,7 +4,7 @@
 
 当前开发 **Release 1.0 MVP**：先完成无 AI 辅助的「凭证入场 → 独立沙箱准备 → 多文件编辑与终端操作 → 交卷冻结 → 考官调阅」闭环。AI 辅助、隐藏测试和能力画像留待后续版本。
 
-当前 `main` 的前后端仍以目录骨架为主；已提供 PostgreSQL 与 Redis 本地开发环境，前后端服务及数据库迁移待接入。
+已提供 PostgreSQL 与 Redis 本地开发环境、共享数据库模型和首版迁移；业务前后端仍待接入。
 
 ## 文档入口
 
@@ -113,9 +113,55 @@ docker compose exec redis redis-cli ping
 
 此配置供本地开发使用，端口只绑定本机；Redis 未配置认证。PostgreSQL 保存业务数据，Redis 用于缓存与通知，不能作为业务数据的唯一持久化来源。这两个基础服务不需要 E2B 账号。
 
-### 前后端与数据库迁移
+### 数据库模型与迁移
 
-前后端依赖、应用入口、数据库模型与 Alembic 迁移尚未在当前分支接入，暂不提供应用启动和业务测试命令。添加运行能力时同步补充启动、测试、代码检查命令与配置示例；沙箱联调需要 E2B 账号。
+需要 Python 3.12 或以上版本，本地已在 Python 3.13 与 PostgreSQL 16 验证。下面的 PowerShell 命令均从仓库根目录执行，已有 `.venv` 时跳过创建步骤：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-db.txt
+.\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini upgrade head
+.\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini current
+.\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini check
+```
+
+Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动数据库；迁移完成后版本应为 `0001 (head)`，`check` 应提示没有新的迁移差异。启动应用时不自动建表，结构变更统一通过 Alembic 管理。
+
+连接配置从仓库根目录 `.env` 读取，不依赖当前工作目录；同名环境变量优先。默认使用 `POSTGRES_HOST`（`127.0.0.1`）、`POSTGRES_PORT`、`POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD`。可用 `DATABASE_URL` 整体覆盖连接配置，支持 `postgresql://` 或 `postgresql+psycopg://`；直接填写 URL 时须对账号和密码中的特殊字符进行 URL 编码，使用分项配置时无需编码。
+
+首版模型位于 `backend/app/db/models.py`：
+
+| 表 | 用途与约束 |
+| --- | --- |
+| `invitations` | 保存考生、场次和入场期限；凭证仅保存 SHA-256 哈希，同一考生同一场次只能有一条邀请 |
+| `exam_sessions` | 关联邀请，保存浏览器凭据哈希、状态、沙箱引用及入场/开始/截止/提交时间；邀请和浏览器哈希分别唯一 |
+
+时间统一使用 UTC Unix 秒（`BIGINT`）。会话默认状态为 `admitted`，入场时开始、截止、提交时间均为空；开始时间与截止时间必须同时设置，时间顺序由数据库约束保护。`session_scope()` 在成功时提交，异常时回滚并关闭会话。
+
+这些模型为后续接入提供持久化基础，尚未替换队友分支里的 SQLite 入场实现，也未新增 HTTP 接口。业务模块负责状态流转、鉴权与一次性凭证兑换；完整状态机、交卷冻结和快照表随相应功能接入。考官账号持久化与既有服务集成也在后续阶段完成。
+
+### 数据库测试
+
+数据库测试沿用标准库 `unittest`。从仓库根目录进入 `backend` 后运行配置测试（无需数据库，集成测试默认跳过）：
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+要验证真实 PostgreSQL，先启动 Compose，再在同一目录执行：
+
+```powershell
+$env:VIBEEVAL_RUN_DB_TESTS = "1"
+..\.venv\Scripts\python.exe -m unittest discover -s tests -v
+Remove-Item Env:VIBEEVAL_RUN_DB_TESTS
+```
+
+集成测试使用当前连接配置，在 `postgres` 管理库中创建随机命名的 `vibeeval_test_*` 临时数据库，验证迁移、约束与事务后自动删除；账号需有创建数据库权限（本地 Compose 默认账号具备）。测试不会在业务数据库执行迁移回退或清空数据。Linux/macOS 可在 `backend` 目录执行 `VIBEEVAL_RUN_DB_TESTS=1 ../.venv/bin/python -m unittest discover -s tests -v`。
+
+### 前后端应用
+
+应用入口和业务前后端仍待接入，暂不提供网页启动命令。新增运行能力时同步补充依赖、启动、测试和代码检查命令与配置示例；沙箱联调需要 E2B 账号。
 
 ## 开发与部署流程
 
