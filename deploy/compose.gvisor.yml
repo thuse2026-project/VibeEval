@@ -1,0 +1,40 @@
+# Linux only. Both trusted control processes use the same local daemon and data.
+services:
+  backend:
+    command: [python, -m, uvicorn, 'app.sandbox.http_app:create_app', --factory, --host, '0.0.0.0', --port, '8000', --workers, '1', --proxy-headers, --forwarded-allow-ips, '*', --no-access-log]
+    environment:
+      SANDBOX_BACKEND_REF: ${SANDBOX_BACKEND_REF:?Set a stable sandbox backend identity}
+      SANDBOX_DOCKER_URL: unix:///var/run/docker.sock
+      SANDBOX_REQUEST_TIMEOUT: ${SANDBOX_REQUEST_TIMEOUT:-20}
+      SANDBOX_OPERATION_TIMEOUT: ${SANDBOX_OPERATION_TIMEOUT:-45}
+    group_add:
+      - ${SANDBOX_DOCKER_GID:?Set the local Docker socket group id}
+    volumes:
+      - type: bind
+        source: ${SANDBOX_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        read_only: true
+        bind:
+          create_host_path: false
+
+  maintenance:
+    extends:
+      file: compose.yml
+      service: backend
+    command: [python, -m, app.submissions.maintenance, --watch, --interval, '5', --batch-size, '20', --retry-delay, '30']
+    environment:
+      SANDBOX_BACKEND_REF: ${SANDBOX_BACKEND_REF:?Set a stable sandbox backend identity}
+      SANDBOX_DOCKER_URL: unix:///var/run/docker.sock
+      SANDBOX_REQUEST_TIMEOUT: ${SANDBOX_REQUEST_TIMEOUT:-20}
+      SANDBOX_OPERATION_TIMEOUT: ${SANDBOX_OPERATION_TIMEOUT:-45}
+    group_add:
+      - ${SANDBOX_DOCKER_GID:?Set the local Docker socket group id}
+    volumes:
+      - type: bind
+        source: ${SANDBOX_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      disable: true

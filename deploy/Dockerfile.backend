@@ -1,0 +1,19 @@
+FROM python:3.12-alpine@sha256:e6dae589c1c05976188fd3bd019afd091445fc533ed2ea29001beddc7368a9c8
+
+ARG VCS_REF=local
+LABEL org.opencontainers.image.source="https://github.com/thuse2026-project/VibeEval" \
+      org.opencontainers.image.revision=$VCS_REF
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONUTF8=1
+WORKDIR /opt/vibeeval/backend
+COPY backend/requirements*.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt -r requirements-gvisor.txt \
+    && addgroup -g 1000 vibeeval \
+    && adduser -D -u 1000 -G vibeeval vibeeval \
+    && mkdir -p /opt/vibeeval/runtime \
+    && chown vibeeval:vibeeval /opt/vibeeval/runtime
+COPY backend/app ./app
+COPY backend/migrations ./migrations
+COPY backend/alembic.ini ./
+USER 1000:1000
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*", "--no-access-log"]
