@@ -22,6 +22,16 @@ class InvalidSubmissionState(ValueError):
     pass
 
 
+def validate_idempotency_key(idempotency_key: str) -> None:
+    if (
+        not isinstance(idempotency_key, str)
+        or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", idempotency_key) is None
+    ):
+        raise ValueError(
+            "Idempotency key must contain 1 to 128 letters, digits, underscores or hyphens"
+        )
+
+
 class SubmissionService:
     def __init__(
         self,
@@ -95,13 +105,7 @@ class SubmissionService:
         """Join a lifecycle transaction; its owner must commit before returning a receipt."""
         if not session.in_transaction():
             raise RuntimeError("An active caller-owned transaction is required")
-        if (
-            not isinstance(idempotency_key, str)
-            or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", idempotency_key) is None
-        ):
-            raise ValueError(
-                "Idempotency key must contain 1 to 128 letters, digits, underscores or hyphens"
-            )
+        validate_idempotency_key(idempotency_key)
         exam = session.scalar(
             select(ExamSession)
             .where(ExamSession.session_id == session_id)

@@ -149,6 +149,8 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 
 内部服务位于 `backend/app/submissions/`，接入契约见 [docs/api.md](docs/api.md#提交持久化内部契约)。当前实现接收调用方已冻结的 UTF-8 文件和已有公开测试输出，不调用 E2B、不停止终端进程、不执行测试，也未开放交卷 HTTP 路由。
 
+交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。真实沙箱适配器、HTTP 鉴权入口、到期自动提交和后台清理仍待接入；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
+
 调用方须先完成会话归属校验，将会话置为 `submitting`，禁止新写入并等待进行中的保存结束，停止仍会写文件的进程，再导出固定文件集。之后调用 `persist_frozen_submission()`：服务锁定会话行，落盘并校验快照，在同一数据库事务写入快照元数据、最终提交及会话的提交时间和 `submitted` 状态。重复请求（包括更换幂等键）始终返回首份已提交答卷，不读取或覆盖新传入的文件。
 
 快照以格式版本为 1 的 JSON 保存，默认位置为被 Git 忽略的 `runtime/snapshots/<摘要前两位>/<SHA-256>.json`。写入使用同目录临时文件、文件同步与硬链接发布，已有对象不会被覆盖，读取时检查摘要、字节数及文件数。目标文件系统需支持硬链接；部署时须使用后端独占的持久存储，可通过 `SnapshotStore(root=...)` 指定位置。

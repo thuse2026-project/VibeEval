@@ -1,6 +1,6 @@
 # 沙箱与共享数据库接入约定
 
-本说明对应数据库迁移 `0004`。共享数据库层和提交存储已实现；Docker + gVisor 生命周期代码由陈弘毅提供，当前尚未接入其真实代码，也未完成沙箱冻结或 HTTP 交卷的端到端联调。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。
+本说明对应数据库迁移 `0004`。共享数据库层、提交存储及 `SubmissionCoordinator` 交卷协调器已实现；Docker + gVisor 生命周期代码由陈弘毅提供，当前尚未接入其真实代码，也未完成沙箱冻结或 HTTP 交卷的端到端联调。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。
 
 ## 1. 会话、沙箱和截止时间
 
@@ -88,6 +88,22 @@ with lifecycle.lock_session(session_id) as locked:
 
 ## 4. 交卷顺序与事务边界
 
+统一入口在 `backend/app/submissions/coordinator.py`，由调用方注入实现 `SubmissionSandbox` 协议的真实适配器，没有默认的空冻结实现：
+
+```python
+from app.submissions.coordinator import SubmissionCoordinator
+
+# sandbox_adapter 由沙箱模块实现；调用前须已校验浏览器凭据和会话归属。
+coordinator = SubmissionCoordinator(sandbox_adapter)
+receipt = coordinator.submit(session_id, idempotency_key)
+
+# 后续运维/调度可重试清理；重复 submit 仅返回原回执，不重做导出或清理。
+for view in coordinator.lifecycle.list_cleanup_candidates():
+    coordinator.cleanup(view.session_id)
+```
+
+可显式注入 `lifecycle=...` 和 `submissions=...`，两者必须共享同一个 SQLAlchemy `sessionmaker` 实例；仅注入其中一个时，协调器用其工厂和时钟构建另一个。幂等键在更改状态或调用沙箱前验证。协调器执行以下顺序，底层方法仍供内部使用：
+
 由赵晨一的提交侧协调重试与后续调度，沙箱侧提供禁止写入、真正暂停和稳定导出能力。顺序如下：
 
 1. 提交入口先校验考生归属，并通过 `SubmissionService.get_session_receipt(session_id)` 检查是否已有已提交回执；有则直接返回。
@@ -99,6 +115,15 @@ with lifecycle.lock_session(session_id) as locked:
 
 不要在持有 `lock_session` 时调用普通 `SubmissionService.persist_frozen_submission()`，它会另开事务锁同一会话；必须使用 `locked.persist_frozen_submission()`。底层 `persist_in_transaction()` 供内部复用，事务所有者负责提交后才响应。
 
+适配器需要提供两个同步、有界超时、可重复调用的方法；这两个方法在会话行锁内执行，不能另起事务修改同一会话，也不能在内部再次进入 `write_guard` 取得同一行锁：
+
+| 方法 | 实现要求 |
+| --- | --- |
+| `freeze_and_export(view: SessionView) -> FrozenWorkspace` | 核验原容器归属、宿主和镜像；关闭文件/PTY 新写入，等待已接受保存，暂停整个环境，再导出稳定数据。重试连接原暂停环境。失败时保留环境和文件，不自动恢复编辑 |
+| `delete_sandbox(view: SessionView) -> None` | 只删除 `view.sandbox_id` 对应的原容器，保留考生文件；容器已不存在视为成功。若删除成功但数据库清理标记未提交，再次删除仍须成功 |
+
+`FrozenWorkspace(session_id, sandbox_id, files, public_test_output=None)` 是协调器模块里的不可变数据类。会话 ID 和容器 ID 必须与当前锁内视图完全一致，否则拒绝入库。`files` 使用 `SnapshotFile` 可迭代对象，惰性导出的数据源须在整个持久化期间保持可读且稳定，读到一半失败也不能发布最终答卷。公开测试输出为已取得的结果；暂停后不再启动测试进程。适配器自身负责 SDK 超时和连接配置，协调器不内置 Docker 客户端或后台线程超时取消。
+
 ## 5. 失败、重试与清理归属
 
 - 暂停/导出/快照/数据库失败：沙箱侧保留环境和文件，不自动恢复编辑或删除容器。错误处理应在失败的锁上下文退出、事务回滚之后执行。
@@ -108,9 +133,15 @@ with lifecycle.lock_session(session_id) as locked:
 - 只有确认数据库提交成功后，提交侧才发起清理通知；本阶段提供待清理台账 `list_cleanup_candidates(limit=...)`，尚未启动后台清理 worker。沙箱侧执行删除，保留工作区文件；容器已不存在时应按幂等成功处理。
 - 清理失败调用 `locked.mark_cleanup_failed("SANDBOX_CLEANUP_FAILED")`，会话仍是 `submitted`，答卷成功不撤销。待清理记录继续可查；后续清理必须再次拿锁、核对原 ID。清理后保留历史映射，不创建新空环境。
 
+协调器已实现上述回执恢复、交卷失败记录与成功后的清理尝试。冻结/导出失败抛出 `SubmissionAttemptFailed`，安全代码为 `SANDBOX_FREEZE_EXPORT_FAILED`；导出身份不匹配为 `SANDBOX_EXPORT_MISMATCH`；快照校验、存储或最终数据库事务失败为 `SNAPSHOT_PERSIST_FAILED`。错误消息及日志不包含沙箱 SDK 原始异常。适配器冻结失败时，数据库门禁仍禁止编辑；真正暂停是否成功须由适配器确认，失败不能被当作已有稳定快照。
+
+`SessionBusy` 表示已有保存、交卷或清理持有数据库锁；本次请求不调用沙箱，应轮询或有界重试。未知会话和不允许的起始状态分别保留 `LifecycleNotFound`、`LifecycleConflict`。提交事务失败后，协调器先查询已提交回执再记录失败；数据库不可用或锁冲突可能使错误台账暂时无法写入，此时已提交的 `submitting` 门禁继续生效，重试仍使用原会话。进程退出同样可能留下 `submitting`，由后续调用重试恢复。
+
+`submit()` 在提交成功后尝试清理；清理失败仍返回固定提交回执，并尽力记录错误，待清理台账不会消失。单独调用 `cleanup()` 失败抛出 `SandboxCleanupFailed`，也可能透传清理资格错误或 `SessionBusy`；调用方逐条捕获后安排后续重试。当前没有自动重试循环、到期扫描或清理 worker，示例循环是接入方式，并非已启动的后台任务。
+
 ## 6. 仍需沙箱侧提供的接入信息
 
-需要陈弘毅提供代码分支或方法签名，确认固定资源名/标签查找、不可变镜像解析、归属验证、真正的 pause 与稳定工作区导出接口。已有创建、状态、停止、删除能力不会自动等于已经完成冻结导出。上述适配器调用仍为接口示意，当前测试使用替身；真实 Docker + gVisor 联调、截止自动交卷和后台清理在后续阶段完成。
+需要陈弘毅提供代码分支或方法签名，确认固定资源名/标签查找、不可变镜像解析、归属验证、真正的 pause 与稳定工作区导出接口，并实现第 4 节的 `SubmissionSandbox` 协议。已有创建、状态、停止、删除能力不会自动等于已经完成冻结导出。创建侧 `adapter.*` 调用仍为接口示意；交卷协调器已实现并用沙箱替身与真实 PostgreSQL 验证事务和重试。真实 Docker + gVisor 联调、截止自动交卷和后台清理在后续阶段完成。
 
 ## 7. Windows 快照并发兼容修复
 

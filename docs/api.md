@@ -20,6 +20,10 @@
 
 以下为当前分支已实现的 Python 内部服务，HTTP 交卷和沙箱冻结尚未接入，下方 E.3 仍是 HTTP 草案。
 
+`backend/app/submissions/coordinator.py` 的 `SubmissionCoordinator(sandbox_adapter)` 是交卷编排入口，提供 `submit(session_id, idempotency_key)` 和 `cleanup(session_id)`。调用方先验证会话归属，再由协调器提交 `submitting` 门禁、调用注入适配器的 `freeze_and_export(view)`、核验导出的会话与容器身份、持久化答卷、事务提交后尝试 `delete_sandbox(view)`。适配器返回 `FrozenWorkspace(session_id, sandbox_id, files, public_test_output=None)`；具体冻结、超时、保留文件要求见沙箱接入约定。当前只以替身验证该接口，尚无真实沙箱适配器或 HTTP 路由。
+
+`submit()` 返回下述固定回执，重复请求直接返回第一份已提交答卷。冻结、导出或持久化失败抛出带安全 `code` 的 `SubmissionAttemptFailed`，保留原环境及禁止写入状态供重试；并发锁冲突透传 `SessionBusy`。提交已成功时，清理失败不撤销回执，继续出现在 `lifecycle.list_cleanup_candidates()`；后续单独 `cleanup()` 失败可抛出 `SandboxCleanupFailed`。数据库异常后的回执恢复、错误代码和无自动 worker 的边界见沙箱接入约定；这些内部异常暂不规定 HTTP 状态码。
+
 `backend/app/submissions/service.py` 中的 `SubmissionService` 提供：
 
 ```python
