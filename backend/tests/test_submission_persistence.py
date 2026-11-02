@@ -8,6 +8,10 @@ from unittest.mock import patch
 
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.db.config import get_database_url
 from app.db.models import ExamSession, Invitation, Snapshot, Submission
 from app.db.session import create_db_engine, session_scope
@@ -22,9 +26,6 @@ from app.submissions.storage import (
     SnapshotStore,
     SnapshotValidationError,
 )
-from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
 
 
 @unittest.skipUnless(

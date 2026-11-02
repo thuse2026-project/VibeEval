@@ -5,10 +5,11 @@ import time
 import uuid
 from collections.abc import Callable, Iterable
 
-from app.db.models import ExamSession, Invitation, Snapshot, Submission
-from app.db.session import get_session_factory, session_scope
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+
+from app.db.models import ExamSession, Invitation, Snapshot, Submission
+from app.db.session import get_session_factory, session_scope
 
 from .storage import SnapshotFile, SnapshotStore
 

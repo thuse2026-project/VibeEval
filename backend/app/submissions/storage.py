@@ -57,7 +57,7 @@ class SnapshotStore:
         max_files: int = 1000,
         max_source_bytes: int = 10 * 1024 * 1024,
         max_output_bytes: int = 1024 * 1024,
-        max_blob_bytes: int = 16 * 1024 * 1024
+        max_blob_bytes: int = 16 * 1024 * 1024,
     ):
         self.root = (
             Path(root)

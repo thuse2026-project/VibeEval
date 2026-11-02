@@ -9,12 +9,13 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from app.db.config import get_database_url
-from app.db.models import Base, ExamSession, Invitation, Snapshot, Submission
-from app.db.session import create_db_engine, session_scope
 from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+
+from app.db.config import get_database_url
+from app.db.models import Base, ExamSession, Invitation, Snapshot, Submission
+from app.db.session import create_db_engine, session_scope
 
 
 @unittest.skipUnless(
@@ -195,9 +196,11 @@ class PostgreSQLTests(unittest.TestCase):
             },
         )
         for changes in cases:
-            with self.subTest(changes=changes), self.assertRaises(
-                IntegrityError
-            ), session_scope(self.factory) as session:
+            with (
+                self.subTest(changes=changes),
+                self.assertRaises(IntegrityError),
+                session_scope(self.factory) as session,
+            ):
                 session.add(self.exam_session(**changes))
 
     def test_transaction_rolls_back_when_work_fails(self):

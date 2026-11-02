@@ -29,7 +29,7 @@ class SnapshotStorageTests(unittest.TestCase):
             **(
                 {"size_bytes": stored.size_bytes, "file_count": stored.file_count}
                 | changes
-            )
+            ),
         )
 
     def test_unicode_and_empty_files_round_trip_in_stable_order(self):

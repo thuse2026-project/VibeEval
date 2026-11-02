@@ -176,6 +176,39 @@ Remove-Item Env:VIBEEVAL_RUN_DB_TESTS
 
 集成测试使用当前连接配置，在 `postgres` 管理库中创建随机命名的 `vibeeval_test_*` 临时数据库，验证迁移、约束与事务后自动删除；账号需有创建数据库权限（本地 Compose 默认账号具备）。测试不会在业务数据库执行迁移回退或清空数据。Linux/macOS 可在 `backend` 目录执行 `VIBEEVAL_RUN_DB_TESTS=1 ../.venv/bin/python -m unittest discover -s tests -v`。
 
+### 后端代码检查与 CI
+
+开发检查依赖固定在 `backend/requirements-dev.txt`，Black、Ruff 和覆盖率配置统一维护在 `backend/pyproject.toml`。从仓库根目录安装开发依赖，再进入 `backend` 检查：
+
+```powershell
+$env:PYTHONUTF8 = "1"
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
+cd backend
+..\.venv\Scripts\python.exe -m black --check .
+..\.venv\Scripts\python.exe -m ruff check .
+```
+
+需要自动整理格式时，在 `backend` 目录运行 `..\.venv\Scripts\python.exe -m black .`。先按前文启动 PostgreSQL，再执行完整测试和覆盖率检查：
+
+```powershell
+$env:VIBEEVAL_RUN_DB_TESTS = "1"
+..\.venv\Scripts\python.exe -m coverage run -m unittest discover -s tests -v
+..\.venv\Scripts\python.exe -m coverage report
+Remove-Item Env:VIBEEVAL_RUN_DB_TESTS
+```
+
+覆盖率统计 `backend/app` 的代码行，最低为 80%，不把测试文件纳入统计。未开启数据库测试时不能代替这组完整检查。Linux/macOS 换用 `../.venv/bin/python` 并通过 `VIBEEVAL_RUN_DB_TESTS=1` 设置环境变量。
+
+GitHub Actions 工作流为 `.github/workflows/backend-ci.yml`，在 push、PR 和手动触发时运行：
+
+| 检查 | 内容 |
+| --- | --- |
+| Linux / Python 3.12 与 3.13 | Black、Ruff、真实 PostgreSQL 完整测试、最低 80% 行覆盖率、迁移升级及模型一致性 |
+| Windows / Python 3.13 | 配置单元测试、快照并发及路径校验，不启动 PostgreSQL 服务容器 |
+| Linux / Compose | 启动 PostgreSQL 16 和 Redis，验证健康状态、数据库查询和 Redis PING，结束后清理本次 CI 的容器与卷 |
+
+CI 使用独立临时数据库和固定测试密码，不需要额外配置仓库 Secret。检查失败会返回失败状态；是否禁止合并失败 PR 取决于团队另外配置的分支保护，本工作流不修改合并规则。GitHub 实际执行结果以 Actions 和 PR 检查页为准，本地验证不替代远程执行记录。前端尚无依赖清单，ESLint 与构建检查在前端工程接入后补齐。
+
 ### 前后端应用
 
 应用入口和业务前后端仍待接入，暂不提供网页启动命令。新增运行能力时同步补充依赖、启动、测试和代码检查命令与配置示例；真实沙箱联调需要对应适配器、宿主和运行环境，本地 Docker Desktop 不表示已经具备 gVisor 沙箱能力。

@@ -11,6 +11,10 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
+
 from app.db.config import get_database_url
 from app.db.lifecycle import (
     LifecycleConflict,
@@ -22,9 +26,6 @@ from app.db.models import ExamSession, Invitation, Snapshot, Submission
 from app.db.session import create_db_engine, session_scope
 from app.submissions.service import SubmissionService
 from app.submissions.storage import SnapshotFile, SnapshotStore
-from sqlalchemy import create_engine
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
 
 IMAGE = "registry.example/problems/python-debug-01@sha256:" + "a" * 64
 BACKEND = "docker-gvisor:exam-node-01"
@@ -147,13 +148,15 @@ class SessionLifecycleTests(unittest.TestCase):
         for image, backend in (("sha256:" + "b" * 64, BACKEND), (IMAGE, "other-node")):
             with self.assertRaises(LifecycleConflict):
                 self.lifecycle.prepare_sandbox("ses_1", image, backend_ref=backend)
-        with self.assertRaises(LifecycleConflict), self.lifecycle.lock_session(
-            "ses_1"
-        ) as locked:
+        with (
+            self.assertRaises(LifecycleConflict),
+            self.lifecycle.lock_session("ses_1") as locked,
+        ):
             locked.bind_sandbox("different-id", image_ref=IMAGE)
-        with self.assertRaises(LifecycleConflict), self.lifecycle.lock_session(
-            "ses_1"
-        ) as locked:
+        with (
+            self.assertRaises(LifecycleConflict),
+            self.lifecycle.lock_session("ses_1") as locked,
+        ):
             locked.bind_sandbox("abc123", image_ref="sha256:" + "b" * 64)
 
     def test_mutable_image_tag_is_rejected(self):
@@ -386,9 +389,10 @@ class SessionLifecycleTests(unittest.TestCase):
                 raise RuntimeError("rollback outer transaction")
         self.assertIsNone(self.submissions.get_session_receipt("ses_1"))
         self.assertEqual(self.lifecycle.get_session("ses_1").status, "submitting")
-        with self.assertRaises(LifecycleConflict), self.lifecycle.lock_session(
-            "ses_1"
-        ) as locked:
+        with (
+            self.assertRaises(LifecycleConflict),
+            self.lifecycle.lock_session("ses_1") as locked,
+        ):
             locked.require_cleanup()
 
     def test_cleanup_is_forbidden_inside_the_uncommitted_submission_transaction(self):
@@ -417,23 +421,26 @@ class SessionLifecycleTests(unittest.TestCase):
             (cleaned.sandbox_id, cleaned.sandbox_deleted_at), ("abc123", self.now)
         )
         self.assertEqual(self.lifecycle.list_cleanup_candidates(), [])
-        with self.assertRaises(LifecycleConflict), self.lifecycle.lock_session(
-            "ses_1"
-        ) as locked:
+        with (
+            self.assertRaises(LifecycleConflict),
+            self.lifecycle.lock_session("ses_1") as locked,
+        ):
             locked.bind_sandbox("new-empty-environment", image_ref=IMAGE)
 
     def test_cleanup_before_commit_or_for_wrong_container_is_rejected(self):
         self.running()
-        with self.assertRaises(LifecycleConflict), self.lifecycle.lock_session(
-            "ses_1"
-        ) as locked:
+        with (
+            self.assertRaises(LifecycleConflict),
+            self.lifecycle.lock_session("ses_1") as locked,
+        ):
             locked.mark_sandbox_deleted("abc123")
         self.lifecycle.begin_submission("ses_1")
         with self.lifecycle.lock_session("ses_1") as locked:
             locked.persist_frozen_submission(self.submissions, "key", [])
-        with self.assertRaises(LifecycleConflict), self.lifecycle.lock_session(
-            "ses_1"
-        ) as locked:
+        with (
+            self.assertRaises(LifecycleConflict),
+            self.lifecycle.lock_session("ses_1") as locked,
+        ):
             locked.mark_sandbox_deleted("wrong-container")
 
     def test_handles_cannot_be_used_after_context_end(self):
@@ -444,14 +451,16 @@ class SessionLifecycleTests(unittest.TestCase):
 
     def test_unknown_session_and_invalid_failure_code_are_explicit(self):
         self.assertIsNone(self.lifecycle.get_session("missing"))
-        with self.assertRaises(LifecycleNotFound), self.lifecycle.lock_session(
-            "missing"
+        with (
+            self.assertRaises(LifecycleNotFound),
+            self.lifecycle.lock_session("missing"),
         ):
             pass
         self.lifecycle.prepare_sandbox("ses_1", IMAGE)
-        with self.assertRaises(ValueError), self.lifecycle.lock_session(
-            "ses_1"
-        ) as locked:
+        with (
+            self.assertRaises(ValueError),
+            self.lifecycle.lock_session("ses_1") as locked,
+        ):
             locked.mark_provision_failed("private key or raw traceback")
 
     def test_database_enforces_canonical_states_complete_plans_and_cleanup_order(self):
@@ -462,9 +471,11 @@ class SessionLifecycleTests(unittest.TestCase):
             {"lifecycle_error_code": "ERROR_WITHOUT_TIME"},
             {"sandbox_deleted_at": 1200},
         ):
-            with self.subTest(changes=changes), self.assertRaises(
-                IntegrityError
-            ), session_scope(self.factory) as session:
+            with (
+                self.subTest(changes=changes),
+                self.assertRaises(IntegrityError),
+                session_scope(self.factory) as session,
+            ):
                 row = session.get(ExamSession, "ses_1")
                 for field, value in changes.items():
                     setattr(row, field, value)
