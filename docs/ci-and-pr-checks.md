@@ -6,6 +6,8 @@
 
 后端开发依赖及命令见根 README。开启 `VIBEEVAL_RUN_DB_TESTS=1` 后，完整 unittest 在随机 PostgreSQL 数据库运行；CI 继续检查 Black、Ruff、最低 80% 行覆盖率及迁移一致性。
 
+覆盖率同时纳入没有 `__init__.py` 的 namespace 目录，尚未被测试导入的模块也统计为未覆盖，避免遗漏沙箱构建工具或工厂入口；配置依据见 [Coverage.py 说明](https://coverage.readthedocs.io/en/latest/config.html#report-include-namespace-packages)。
+
 前端使用 Node.js 22.13+（22.x）或 24+，CI 固定使用 Node 22。进入 `frontend` 执行：
 
 ```powershell

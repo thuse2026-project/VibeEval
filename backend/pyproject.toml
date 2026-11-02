@@ -19,6 +19,7 @@ relative_files = true
 
 [tool.coverage.report]
 fail_under = 80
+include_namespace_packages = true
 show_missing = true
 skip_empty = true
 precision = 1

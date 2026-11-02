@@ -19,6 +19,7 @@
 - [沙箱与共享数据库接入](docs/sandbox-integration.md)：会话映射、数据库锁、统一状态及交卷/清理边界。
 - [交卷 HTTP 接入](docs/submission-http-handoff.md)：原浏览器鉴权、提交回执、沙箱注入与错误处理。
 - [CI 与 PR 合并检查](docs/ci-and-pr-checks.md)：前后端检查命令、汇总检查和主分支规则配置。
+- [沙箱与交卷联合验收](docs/sandbox-submission-validation.md)：真实适配器启动、可信题目镜像构建和 opt-in gVisor 验收。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
@@ -247,7 +248,7 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 
 服务位于 `backend/app/submissions/`，内部契约及 HTTP 接口见 [docs/api.md](docs/api.md#主动交卷-http已实现)。`POST /api/v1/sessions/{session_id}/submit` 复用原浏览器 Cookie 和会话归属校验，需要 `X-VibeEval-Request: 1` 与 `Idempotency-Key`；只在最终答卷成功入库后返回 202 回执。文件和已有公开测试输出由服务端沙箱适配器提供，不接受浏览器上传作为答卷来源，也不在平台后端执行考生代码或测试。
 
-交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。真实适配器通过 `create_app(submission_sandbox=adapter)` 接入；默认应用未配置适配器，尚未交卷的请求明确返回 503，已有答卷仍可恢复回执。到期自动提交和后台清理仍待接入；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
+交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。已接入成员 C 的 `SandboxRuntime`，显式启动方式为 `uvicorn app.sandbox.http_app:create_app --factory`，配置及测试见联合验收说明。默认应用未配置适配器，尚未交卷的请求明确返回 503，已有答卷仍可恢复回执。到期自动提交和后台清理仍待接入；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
 
 调用方须先完成会话归属校验，将会话置为 `submitting`，禁止新写入并等待进行中的保存结束，停止仍会写文件的进程，再导出固定文件集。之后调用 `persist_frozen_submission()`：服务锁定会话行，落盘并校验快照，在同一数据库事务写入快照元数据、最终提交及会话的提交时间和 `submitted` 状态。重复请求（包括更换幂等键）始终返回首份已提交答卷，不读取或覆盖新传入的文件。
 
