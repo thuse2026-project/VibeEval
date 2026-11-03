@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { WorkspaceScreen } from './WorkspaceScreen';
 import { GradingScreen } from './GradingScreen';
+import { PreparationScreen } from './PreparationScreen';
 import { workspaceApi, workspaceRequest, type CandidateSession } from './api';
 import { SaveQueue } from './SaveQueue';
 import type { FileContentResponse, FileEntry, SubmitResponse } from '../../shared/types';
@@ -149,17 +150,9 @@ export default function CandidateWorkspace() {
   }
 
   if (receipt) return <div className="candidate-workspace"><GradingScreen submissionId={receipt.submission_id} snapshotId={receipt.snapshot_id} /></div>;
-  if (!session || session.status !== 'in_progress') return <section className="home-panel workspace-entry">
-    <h1>{session?.exam_info.title ?? '恢复工作台'}</h1>
-    <p>当前状态：{session?.status ?? '尚未恢复'}。准备环境不会开始计时。</p>
-    {error && <p role="alert" className="error">{error}</p>}
-    <p><a href="/entry">返回入场与会话恢复</a></p>
-    <label><input type="checkbox" checked={rules} onChange={event => setRules(event.target.checked)} /> 我已阅读题目与规则：本期无 AI 辅助；只编辑允许文件，交卷后不可修改。</label>
-    {session && ['admitted', 'provision_failed'].includes(session.status) && <button className="primary" disabled={busy || !rules} onClick={() => void transition('prepare')}>{busy ? '正在准备…' : '准备环境'}</button>}
-    {session?.status === 'ready' && <button className="primary" disabled={busy || !rules} onClick={() => void transition('start')}>确认开始作答并计时</button>}
-    {session && ['submitted', 'submitting', 'submission_failed'].includes(session.status) && <button className="primary" disabled={busy} onClick={() => void submit().catch(failure => setError(failure.message))}>恢复 / 重试交卷回执</button>}
-    {sidRef.current && <button className="secondary" disabled={busy} onClick={() => void refresh()}>查询当前状态</button>}
-  </section>;
+  if (!session || session.status !== 'in_progress') return <PreparationScreen session={session} busy={busy} rules={rules} error={error}
+    onRules={setRules} onTransition={action => void transition(action)} onRefresh={() => void refresh()}
+    onReceipt={() => void submit().catch(failure => setError(failure.message))} />;
 
   const current = active ? queue.drafts[active] : undefined;
   const drafts = Object.values(queue.drafts);
