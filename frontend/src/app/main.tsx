@@ -1,12 +1,13 @@
-import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Login from '../admin/login/Login';
 import Entry from '../candidate/entry/Entry';
-import CandidateApp from './App';
 import Overview from '../admin/submissions/Overview';
 import Detail from '../admin/submissions/Detail';
 import { api, ApiError, type Examiner } from '../shared/api';
 import './style.css';
+
+const CandidateWorkspace = lazy(() => import('../candidate/workspace/CandidateWorkspace'));
 
 function App() {
   const [user, setUser] = useState<Examiner | null>(null);
@@ -112,6 +113,6 @@ function App() {
   </div>;
 }
 
-const candidateEntry = window.location.pathname === '/entry' || window.location.pathname === '/entry/';
-const workspace = window.location.pathname === '/' || window.location.pathname.startsWith('/workspace');
-createRoot(document.getElementById('root')!).render(workspace ? <CandidateApp /> : candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);
+const candidateEntry = window.location.pathname === '/' || window.location.pathname === '/entry' || window.location.pathname === '/entry/';
+const workspace = window.location.pathname === '/workspace' || window.location.pathname === '/workspace/';
+createRoot(document.getElementById('root')!).render(workspace ? <Suspense fallback={<p role="status">正在加载工作台…</p>}><CandidateWorkspace /></Suspense> : candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);

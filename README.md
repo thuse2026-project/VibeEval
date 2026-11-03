@@ -2,7 +2,7 @@
 
 面向 AI Coding 能力考核的软件工程课程项目。
 
-统一联测使用 `integration/release1`，包含真实候选人工作台、共享会话、gVisor 文件/终端及交卷链路。服务器预览入口、固定后端基线、实际验证和已知边界见 [一期整合说明](docs/release1-integration.md)。不要将默认的管理端开发入口当作已注入真实沙箱的应用。
+Release 1 候选版本集中在 `integration/release1`（PR #8），新版交互由用户人工验收后再合入 `main`；包含真实候选人工作台、共享会话、gVisor 文件/终端、交卷链路和考官客观评测。服务器预览入口、固定后端基线、实际验证和运行边界见 [一期整合说明](docs/release1-integration.md)。不要将默认的管理端开发入口当作已注入真实沙箱的应用。
 
 当前开发 **Release 1.0 MVP**：先完成无 AI 辅助的「凭证入场 → 独立沙箱准备 → 多文件编辑与终端操作 → 交卷冻结 → 考官调阅」闭环。AI 辅助、隐藏测试和能力画像留待后续版本。
 
@@ -58,7 +58,7 @@ VibeEval/
 │   │   ├── exams/               # 考务、入场凭证校验
 │   │   ├── admin/               # 考官登录与管理端接口
 │   │   ├── workspace/           # 文件接口、终端网关
-│   │   ├── sandbox/             # E2B 操作封装
+│   │   ├── sandbox/             # Docker + gVisor 操作封装
 │   │   ├── submissions/         # 交卷、快照、提交查询
 │   │   └── db/                  # 数据库连接与模型
 │   ├── migrations/             # 数据库迁移

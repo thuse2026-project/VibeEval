@@ -4,7 +4,6 @@ type Props = {
   files: FileEntry[]
   activePath: string | null
   onSelect: (path: string) => void
-  busy?: boolean
 }
 
 function sortFiles(files: FileEntry[]): FileEntry[] {
@@ -14,13 +13,12 @@ function sortFiles(files: FileEntry[]): FileEntry[] {
   })
 }
 
-export function FileTree({ files, activePath, onSelect, busy = false }: Props) {
+export function FileTree({ files, activePath, onSelect }: Props) {
   return (
     <div className="file-tree">
       {sortFiles(files).map((f) => (
         <button
           key={f.path}
-          disabled={busy}
           className={`file ${f.path === activePath ? 'active' : ''} ${f.readonly ? 'locked' : ''}`}
           onClick={() => !f.is_dir && onSelect(f.path)}
           title={f.readonly ? `${f.path}（只读）` : f.path}

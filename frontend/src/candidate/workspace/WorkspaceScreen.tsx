@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { CodeEditor } from '../../shared/components/Editor'
 import { FileTree } from '../../shared/components/FileTree'
-import { TerminalPane } from '../../shared/components/Terminal'
+import { TerminalPane } from '../../shared/components/TerminalGateway'
 import { formatRemaining } from '../../shared/format'
 import type { FileEntry, SaveState } from '../../shared/types'
 
@@ -9,20 +9,17 @@ type Props = {
   title: string
   remaining: number
   files: FileEntry[]
+  openFiles: Array<{ path: string; readonly: boolean; dirty: boolean }>
   activePath: string | null
   content: string
+  editorRevision: number
   activeReadonly: boolean
   saveState: SaveState
+  sessionId: string | null
   busy: boolean
-  sessionId: string
-  command: {id:number;text:string}|null
-  terminalEnabled: boolean
-  onTerminalConnection: (connected:boolean)=>void
-  terminalConnected: boolean
   onSelectFile: (path: string) => void
   onEdit: (path: string, content: string) => void
-  onRunTests: () => void
-  onSubmit: () => void
+  onSubmit: () => Promise<void>
 }
 
 const saveLabel: Record<SaveState, string> = {
@@ -37,41 +34,53 @@ export function WorkspaceScreen({
   title,
   remaining,
   files,
+  openFiles,
   activePath,
   content,
+  editorRevision,
   activeReadonly,
   saveState,
+  sessionId,
   busy,
-  sessionId, command, terminalEnabled, onTerminalConnection,
-  terminalConnected,
   onSelectFile,
   onEdit,
-  onRunTests,
   onSubmit,
 }: Props) {
   const [leftTab, setLeftTab] = useState<'files' | 'problem'>('files')
-  const [aiOpen, setAiOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(true)
+  const [confirmSubmit, setConfirmSubmit] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const submit = async () => {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      await onSubmit()
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '交卷失败，请重试')
+      setSubmitting(false)
+    }
+  }
 
   return (
-    <div className={`ide ${termOpen ? '' : 'terminal-collapsed'}`}>
+    <div className="ide">
       <div className="ide-topbar">
+        <span className="brand-mark" aria-hidden="true">&lt;/&gt;</span>
         <span className="logo">VibeEval</span>
         <span className="task">{title}</span>
-        <span className="timer mono">{formatRemaining(remaining)}</span>
+        <span className="timer mono"><small>剩余 </small>{formatRemaining(remaining)}</span>
         <span className={`save-state ${saveState}`}>
           <span className="save-dot" />
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
-        {busy && <span role="status">正在处理，请稍候…</span>}
-        <button disabled={busy || !terminalConnected || !terminalEnabled} onClick={onRunTests}>运行测试</button>
-        <button className="submit" disabled={busy || !terminalEnabled} onClick={onSubmit}>
-          {busy ? '正在处理…' : '提交答卷'}
+        <button className="submit" disabled={busy || remaining<=0} onClick={() => { setSubmitError(null); setConfirmSubmit(true) }}>
+          提交答卷
         </button>
       </div>
 
-      <div className={`ide-main ${aiOpen ? '' : 'without-ai'}`}>
+      <div className="ide-main has-no-ai">
         <aside className="sidebar">
           <div className="tabs">
             <button className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>
@@ -82,49 +91,35 @@ export function WorkspaceScreen({
             </button>
           </div>
           {leftTab === 'files' ? (
-            <FileTree files={files} activePath={activePath} onSelect={onSelectFile} busy={busy} />
+            <FileTree files={files} activePath={activePath} onSelect={onSelectFile} />
           ) : (
             <div className="problem-pane">
-              <p>修复 src/booking.py 的会议室预约缺陷：允许首尾相接预约，取消后释放时段。完整题面见 README.md。</p>
-              <p className="muted">完成后运行公开测试验证，再提交答卷。</p>
+              <span className="pane-caption">任务说明</span>
+              <h2>会议室预约缺陷修复</h2>
+              <p>修复会议室预约的首尾相接冲突、取消后仍占用时段两个缺陷，并补充回归测试。</p>
+              <button onClick={() => onSelectFile('README.md')}>打开完整题目说明</button>
+              <h3>公开测试</h3><code className="test-command">python -m unittest discover -s tests -p 'test_*.py' -v</code>
+              <p className="muted">原始题目有两项预期失败；实际结果以终端为准。</p>
             </div>
           )}
         </aside>
 
         <CodeEditor
+          tabs={openFiles}
+          busy={busy}
+          loadRevision={editorRevision}
           path={activePath ?? '选择文件'}
           value={content}
           readOnly={activeReadonly}
+          onSelect={onSelectFile}
           onChange={onEdit}
         />
-
-        {aiOpen && (
-          <aside className="ai-panel">
-            <div className="ai-head">
-              <span>AI 结对助手</span>
-              <div className="ai-actions">
-                <span className="tag gray">Release 2</span>
-                <button className="icon-btn" onClick={() => setAiOpen(false)} title="折叠">
-                  ×
-                </button>
-              </div>
-            </div>
-            <div className="ai-msg">
-              选择文件或代码片段后，输入问题开始与 AI 协作。本期为无 AI MVP，此处为后续版本预留。
-            </div>
-            <div className="ai-input">
-              <textarea placeholder="描述你要完成的任务…" disabled />
-              <button className="btn primary" disabled>
-                发送
-              </button>
-            </div>
-          </aside>
-        )}
       </div>
 
-      {termOpen ? (
-        <TerminalPane sessionId={sessionId} enabled={terminalEnabled} command={command} onConnection={onTerminalConnection}/>
-      ) : (
+      <div hidden={!termOpen}>
+        <TerminalPane sessionId={sessionId} inputEnabled={!busy} />
+      </div>
+      {!termOpen && (
         <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
           展开终端
         </button>
@@ -133,6 +128,33 @@ export function WorkspaceScreen({
         <button className="terminal-close" onClick={() => setTermOpen(false)} title="折叠终端">
           折叠
         </button>
+      )}
+      <footer className="ide-statusbar"><span>{activePath ?? '请选择文件'}{activeReadonly ? ' · 只读' : ' · 可编辑'}</span><span>5 秒自动保存 · Python 3.12 · UTF-8</span></footer>
+      {confirmSubmit && (
+        <div className="modal-backdrop">
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="submit-title" onKeyDown={event => {
+            if (event.key === 'Escape' && !submitting) setConfirmSubmit(false);
+            if (event.key === 'Tab') {
+              const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+              const first = buttons[0], last = buttons[buttons.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }
+          }}>
+            <span className="section-icon" aria-hidden="true">↑</span>
+            <h2 id="submit-title">确认提交答卷？</h2>
+            <p className="muted">提交前请核对以下信息</p>
+            <dl className="submission-summary"><div><dt>剩余时间</dt><dd className="mono">{formatRemaining(remaining)}</dd></div><div><dt>文件状态</dt><dd>{saveLabel[saveState]}</dd></div></dl>
+            <p>提交前会保存全部修改并冻结快照；提交后不能继续编辑。</p>
+            {submitError && <div className="banner banner-error">{submitError}</div>}
+            <div className="modal-actions">
+              <button className="btn" autoFocus disabled={submitting} onClick={() => setConfirmSubmit(false)}>返回工作台</button>
+              <button className="btn primary" disabled={submitting || remaining<=0} onClick={() => void submit()}>
+                {submitting ? '提交中…' : '确认提交'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

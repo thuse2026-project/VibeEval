@@ -1,11 +1,17 @@
 import { useLayoutEffect, useRef } from 'react'
-import * as monaco from 'monaco-editor'
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
+import * as monaco from 'monaco-editor/editor/editor.api.js'
+import 'monaco-editor/languages/definitions/python/register.js'
+import 'monaco-editor/languages/definitions/markdown/register.js'
+import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import { languageFromPath } from '../format'
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
 
 type Props = {
+  tabs: {path:string;readonly:boolean;dirty:boolean}[]
+  onSelect: (path:string)=>void
+  busy: boolean
+  loadRevision: number
   path: string
   value: string
   readOnly: boolean
@@ -72,16 +78,19 @@ export function CodeEditor(props: Props) {
     } finally {
       switching.current = false
     }
-  }, [props.path, props.value])
+  }, [props.path, props.loadRevision])
 
   useLayoutEffect(() => {
     editor.current?.updateOptions({ readOnly: props.readOnly })
   }, [props.readOnly])
 
   return <div className="editor-area">
-    <div className="editor-tabs"><span className="etab active">
-      {props.path}{props.readOnly && <span className="tag gray">只读</span>}
-    </span></div>
+    <nav className="editor-tabs" aria-label="已打开文件">
+      {props.tabs.map(tab=><button type="button" key={tab.path} aria-pressed={tab.path===props.path}
+        disabled={props.busy} className={`etab ${tab.path===props.path?'active':''}`} onClick={()=>props.onSelect(tab.path)}>
+        {tab.path}{tab.dirty&&<span aria-label="未保存修改">●</span>}{tab.readonly&&<span className="tag gray">只读</span>}
+      </button>)}
+    </nav>
     <div className="editor-host" ref={host} />
   </div>
 }
