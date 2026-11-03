@@ -383,4 +383,12 @@ get_session_receipt(session_id)
 
 成功返回 session_id/status/started_at/deadline_at；不返回容器ID。prepare 同步执行有界沙箱调用，耗时可能达数十秒；不是后台排队202。前端应禁用重复按钮，超时后先查询已有status。409表示状态冲突或会话忙，503表示配置或准备失败。start只在共享生命周期允许时开始，重复开始不刷新截止时间。
 
-健康检查只检查Python3.12、非root身份、六文件可读/可写权限与父目录保护，不运行考生代码；两项预期失败测试不作为健康失败。终端就绪、磁盘配额及HTTP真实联合验收尚待完成。文件与PTY入口尚未交付。
+健康检查只检查Python3.12、非root身份、六文件可读/可写权限与父目录保护，不运行考生代码；两项预期失败测试不作为健康失败。磁盘配额和完整前端联合验收尚待完成。
+
+## 工作区读取与 PTY（成员 C）
+
+显式沙箱入口已挂载 WS `/api/v1/sessions/{session_id}/terminal`：原浏览器 Cookie 鉴权，精确 Origin 允许名单，只有 `in_progress` 且未到截止时间才能连接、输入或 resize。协议沿用上述 input/output/resize；Ctrl+C 原样发送 `\u0003`。完整配置、限制、关闭码、断线语义和真实验证命令见 [终端与文件交接](workspace-terminal-handoff.md)。
+
+GET `/files` 和 GET `/file?path=...` 已提供路由及读取业务，但等待赵晨一提供 `LockedSession.observe_file_revision` 和持久版本表。缺失时返回 503 `{"detail":{"code":"FILE_REVISIONS_UNAVAILABLE","message":"文件版本服务尚未接入"}}`，不会返回虚构版本号。接入后响应结构沿用附录 E；会话忙返回 409 与 `Retry-After: 1`，未开考/已结束返回 409，非法路径返回 422，归属不符返回 404。PUT `/file` 尚未提供。
+
+本期固定六文件，只有 `src/booking.py`、预建的 `tests/test_candidate.py` 可编辑；草案中 `src/main.py` 的可写示例已被陈智恒确认的会议室题目权限取代。只读文件不能由终端删除或替换。

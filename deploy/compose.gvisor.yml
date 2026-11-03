@@ -1,12 +1,15 @@
 # Linux only. Both trusted control processes use the same local daemon and data.
 services:
   backend:
-    command: [python, -m, uvicorn, 'app.sandbox.http_app:create_app', --factory, --host, '0.0.0.0', --port, '8000', --workers, '1', --proxy-headers, --forwarded-allow-ips, '*', --no-access-log]
+    command: [python, -m, uvicorn, 'app.sandbox.http_app:create_app', --factory, --host, '0.0.0.0', --port, '8000', --workers, '1', --proxy-headers, --forwarded-allow-ips, '*', --no-access-log, --ws, websockets, --ws-max-size, '16384', --ws-max-queue, '4']
     environment:
       SANDBOX_BACKEND_REF: ${SANDBOX_BACKEND_REF:?Set a stable sandbox backend identity}
       SANDBOX_DOCKER_URL: unix:///var/run/docker.sock
       SANDBOX_REQUEST_TIMEOUT: ${SANDBOX_REQUEST_TIMEOUT:-20}
       SANDBOX_OPERATION_TIMEOUT: ${SANDBOX_OPERATION_TIMEOUT:-45}
+      SANDBOX_IMAGE_REF: ${SANDBOX_IMAGE_REF:-}
+      SANDBOX_TASK_VERSION: ${SANDBOX_TASK_VERSION:-python-debug-01:f898a77}
+      SANDBOX_TERMINAL_ORIGINS: ${SANDBOX_TERMINAL_ORIGINS:-}
     group_add:
       - ${SANDBOX_DOCKER_GID:?Set the local Docker socket group id}
     volumes:

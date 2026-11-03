@@ -22,6 +22,7 @@
 - [沙箱与交卷联合验收](docs/sandbox-submission-validation.md)：真实适配器启动、可信题目镜像构建和 opt-in gVisor 验收。
 - [提交定期处理](docs/submission-maintenance.md)：到期自动提交、进程中断恢复和失败清理重试。
 - [应用容器部署](docs/application-deployment.md)：前后端打包、共享持久卷、可选 gVisor 维护进程及升级回退。
+- [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读取、版本表待接入接口及联合测试。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 

@@ -7,6 +7,24 @@ from .submission_bridge import DockerSubmissionBridge
 
 
 class BoundSandboxAdapter(DockerSubmissionBridge):
+    def read_files(self, view):
+        from app.workspace.files import ALLOWED_FILES
+
+        return {path: self.read_file(view, path) for path in sorted(ALLOWED_FILES)}
+
+    def read_file(self, view, path):
+        from app.workspace.archive import read_file_archive
+        from app.workspace.files import validate_path
+
+        validate_path(path)
+        if view.status != "in_progress":
+            raise ValueError("active exam required")
+        obj = self._container(view)
+        if obj.status != "running":
+            raise ValueError("sandbox is not running")
+        stream, _ = obj.get_archive("/workspace/" + path)
+        return read_file_archive(stream, path)
+
     def check_ready(self, view):
         obj = self._container(view)
         if obj.status != "running":

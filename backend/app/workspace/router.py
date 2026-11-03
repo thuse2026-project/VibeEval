@@ -12,6 +12,8 @@ from app.db.lifecycle import (
 )
 from app.exams.router import require_candidate_session
 from app.sandbox.preparation import PreparationService
+from app.workspace.files import InvalidFilePath
+from app.workspace.service import RevisionStoreUnavailable, WorkspaceReader
 
 router = APIRouter(
     prefix="/api/v1/sessions", dependencies=[Depends(require_browser_header)]
@@ -60,3 +62,47 @@ def prepare(request: Request, owned: dict = Depends(require_candidate_session)):
 @router.post("/{session_id}/start")
 def start(request: Request, owned: dict = Depends(require_candidate_session)):
     return execute(request, owned, False)
+
+
+def read_workspace(request, owned, path=None):
+    try:
+        factory = getattr(request.app.state.entry, "factory", None)
+        if factory is None:
+            raise RevisionStoreUnavailable()
+        reader = WorkspaceReader(
+            SessionLifecycle(factory), request.app.state.submission_sandbox
+        )
+        return (
+            reader.tree(owned["session_id"])
+            if path is None
+            else reader.read(owned["session_id"], path)
+        )
+    except InvalidFilePath:
+        raise HTTPException(422, "文件路径不属于当前题目") from None
+    except SessionBusy:
+        raise HTTPException(
+            409, "会话正在处理，请稍后重试", headers={"Retry-After": "1"}
+        ) from None
+    except LifecycleNotFound:
+        raise HTTPException(404, "会话不存在") from None
+    except LifecycleConflict:
+        raise HTTPException(409, "请先开始作答；考试结束后不能访问工作区") from None
+    except RevisionStoreUnavailable:
+        raise HTTPException(
+            503,
+            {"code": "FILE_REVISIONS_UNAVAILABLE", "message": "文件版本服务尚未接入"},
+        ) from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, "暂时无法读取文件，请稍后重试") from None
+
+
+@router.get("/{session_id}/files")
+def files(request: Request, owned: dict = Depends(require_candidate_session)):
+    return read_workspace(request, owned)
+
+
+@router.get("/{session_id}/file")
+def file(request: Request, path: str, owned: dict = Depends(require_candidate_session)):
+    return read_workspace(request, owned, path)
