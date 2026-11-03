@@ -47,3 +47,16 @@ python -m app.submissions.maintenance --watch --interval 5 --batch-size 20 --ret
 本机 WSL2 的 systrap 存在 seccomp notify 冲突；ptrace 的 PTY 用例失败，不能视为通过。真实验收使用课程服务器 systrap，不能混用这两份结果。完整回归、监督复查及最终提交号更新于根 BCL。
 
 用户尚未人工验收整合后的完整网页流程，不自动合并 main。服务器预览是联测环境，不代表公网生产部署、正式账号持久化或所有后续迭代功能已交付。
+
+## 重复执行浏览器验收
+
+先在测试库用现有 `app.exams.provision` 分别生成普通时长和一分钟的全新 Token；已兑换 Token 不能用于新浏览器再次执行。仅在明确选择的测试环境运行，不使用真实考生账号。
+
+在 `frontend` 设置以下私有进程环境变量，再运行 `npm.cmd run test:integration`：
+
+- `VIBEEVAL_E2E_BASE_URL`：受控联测入口，默认 `http://127.0.0.1:5181`。
+- `VIBEEVAL_E2E_TOKEN`：普通测试场次全新 Token。
+- `VIBEEVAL_E2E_DEADLINE_TOKEN`：一分钟测试场次全新 Token。
+- `VIBEEVAL_E2E_ADMIN_USER` / `VIBEEVAL_E2E_ADMIN_PASSWORD`：预配置测试考官账号和密码。
+
+需要本机 Chrome；脚本使用已有浏览器，不要求服务器安装浏览器或 Node。两条测试涵盖真实保存、版本冲突、PTY 测试、交卷与考官快照，以及截止自动交卷后的未保存草稿复制。缺少凭据时明确跳过，不能计作验收通过；失败时的截图和 trace 留在被忽略的 `frontend/test-results/`。
