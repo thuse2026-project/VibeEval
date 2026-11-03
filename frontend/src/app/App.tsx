@@ -4,7 +4,7 @@ import { ProvisioningScreen } from '../candidate/entry/ProvisioningScreen';
 import { WorkspaceScreen } from '../candidate/workspace/WorkspaceScreen';
 import { GradingScreen } from '../candidate/workspace/GradingScreen';
 import type { FileEntry, SaveState, SubmitResponse } from '../shared/types';
-import { candidateRequest as request, CandidateError } from '../shared/api/client';
+import { candidateRequest as request, CandidateError, serverNow } from '../shared/api/client';
 import './styles.css';
 
 type Session = {session_id:string; status:string; started_at:number|null; deadline_at:number|null;
@@ -28,7 +28,7 @@ export default function CandidateApp() {
   const chain = useRef<Promise<void>>(Promise.resolve());
   const timer = useRef<ReturnType<typeof setTimeout>|null>(null);
   const locked = useRef(false);
-  const [now,setNow] = useState(Date.now());
+  const [now,setNow] = useState(serverNow());
   const [receipt,setReceipt] = useState<SubmitResponse|null>(null);
   const [command,setCommand] = useState<{id:number;text:string}|null>(null);
   const [connected,setConnected] = useState(false);
@@ -66,7 +66,7 @@ export default function CandidateApp() {
   }
   const initialRestore=useRef(restore);
   useEffect(()=>{document.title='考生工作台 · VibeEval';void initialRestore.current();},[]);
-  useEffect(()=>{const id=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(id);},[]);
+  useEffect(()=>{const id=setInterval(()=>setNow(serverNow()),1000);return()=>clearInterval(id);},[]);
   useEffect(()=>{
     if(!sid) return;
     let cancelled=false;
@@ -75,7 +75,7 @@ export default function CandidateApp() {
       setSession(value);
       if(value.status==='submitted'&&!receipt) void getReceipt(value).catch(e=>setError(e.message));
       else if(['submitting','submission_failed'].includes(value.status)) setPhase('frozen');
-    }).catch(e=>{if(!cancelled)setError(e.message);});},5000);
+    }).catch(e=>{if(!cancelled){setError(e.message);if(e instanceof CandidateError&&[401,404,410].includes(e.status)){setPhase('frozen');setSession(value=>value?{...value,status:'unauthorized'}:value);}}});},5000);
     return()=>{cancelled=true;clearInterval(id);};
   },[sid,receipt]);
   useEffect(()=>{
@@ -132,6 +132,10 @@ export default function CandidateApp() {
     await act(async()=>{await flush();if(dirty.current.size)throw new Error('仍有未保存修改，请先保存。');if(session)await getReceipt(session);});
   }
   return <div className="candidate-app">
+    {phase!=='workspace'&&dirty.current.size>0&&<section className="candidate-error" aria-label="未保存草稿">
+      <h2>以下本地草稿尚未确认保存，不属于已提交答卷</h2><p>考试结束或会话失效后不能补写答卷，但可复制草稿留存。</p>
+      {[...dirty.current].map(name=><label key={name}>{name}<textarea readOnly aria-label={`未保存草稿 ${name}`} value={drafts.current.get(name)??''}/></label>)}
+    </section>}
     {error&&<div className="candidate-error" role="alert">{error}<button disabled={busy||dirty.current.size>0} onClick={()=>void restore()}>重新检查状态</button>
       {dirty.current.size>0&&<><button disabled={busy} onClick={()=>void act(flush)}>重试保存</button><button disabled={busy} onClick={()=>{
         if(window.confirm('放弃当前未保存修改，重新读取服务器文件？')){dirty.current.clear();drafts.current.clear();setSaveState('saved');void restore();}

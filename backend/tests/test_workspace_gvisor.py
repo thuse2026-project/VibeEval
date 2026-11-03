@@ -146,7 +146,12 @@ class WorkspaceRealTests(unittest.TestCase):
         import docker
 
         image = os.environ["SANDBOX_IMAGE_REF"]
-        runtime = SandboxRuntime(backend_ref="workspace-test")
+        runtime = SandboxRuntime(
+            backend_ref="workspace-test",
+            docker_url=os.environ.get(
+                "SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"
+            ),
+        )
         entry = PostgresEntryStore(factory=self.factory)
         lifecycle = SessionLifecycle(self.factory)
         token, _ = entry.invite(
