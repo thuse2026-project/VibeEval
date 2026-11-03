@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { CodeEditor } from '../../shared/components/Editor'
 import { FileTree } from '../../shared/components/FileTree'
-import { TerminalPane } from '../../shared/components/Terminal'
+import { TerminalPane } from '../../shared/components/TerminalGateway'
 import { formatRemaining } from '../../shared/format'
 import type { FileEntry, SaveState } from '../../shared/types'
 
@@ -9,16 +9,17 @@ type Props = {
   title: string
   remaining: number
   files: FileEntry[]
+  openFiles: Array<{ path: string; readonly: boolean; dirty: boolean }>
   activePath: string | null
   content: string
   activeReadonly: boolean
   saveState: SaveState
-  terminalOutput: string
-  terminalConnected: boolean
+  sessionId: string | null
+  terminalCommand: { id: number; data: string } | null
   onSelectFile: (path: string) => void
   onEdit: (content: string) => void
   onRunTests: () => void
-  onSubmit: () => void
+  onSubmit: () => Promise<void>
 }
 
 const saveLabel: Record<SaveState, string> = {
@@ -33,28 +34,34 @@ export function WorkspaceScreen({
   title,
   remaining,
   files,
+  openFiles,
   activePath,
   content,
   activeReadonly,
   saveState,
-  terminalOutput,
-  terminalConnected,
+  sessionId,
+  terminalCommand,
   onSelectFile,
   onEdit,
   onRunTests,
   onSubmit,
 }: Props) {
   const [leftTab, setLeftTab] = useState<'files' | 'problem'>('files')
-  const [aiOpen, setAiOpen] = useState(true)
   const [termOpen, setTermOpen] = useState(true)
-  const pendingRef = useRef<string | null>(null)
+  const [confirmSubmit, setConfirmSubmit] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (pendingRef.current !== null) {
-      onEdit(pendingRef.current)
-      pendingRef.current = null
+  const submit = async () => {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      await onSubmit()
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '交卷失败，请重试')
+      setSubmitting(false)
     }
-  }, [onEdit])
+  }
 
   return (
     <div className="ide">
@@ -68,12 +75,12 @@ export function WorkspaceScreen({
         </span>
         <span className="spacer" />
         <button onClick={onRunTests}>运行测试</button>
-        <button className="submit" onClick={onSubmit}>
+        <button className="submit" onClick={() => setConfirmSubmit(true)}>
           提交答卷
         </button>
       </div>
 
-      <div className="ide-main">
+      <div className="ide-main has-no-ai">
         <aside className="sidebar">
           <div className="tabs">
             <button className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>
@@ -94,41 +101,17 @@ export function WorkspaceScreen({
         </aside>
 
         <CodeEditor
+          tabs={openFiles}
           path={activePath ?? '选择文件'}
           value={content}
           readOnly={activeReadonly}
-          onChange={(v) => {
-            pendingRef.current = v
-            onEdit(v)
-          }}
+          onSelect={onSelectFile}
+          onChange={onEdit}
         />
-
-        {aiOpen && (
-          <aside className="ai-panel">
-            <div className="ai-head">
-              <span>AI 结对助手</span>
-              <div className="ai-actions">
-                <span className="tag gray">Release 2</span>
-                <button className="icon-btn" onClick={() => setAiOpen(false)} title="折叠">
-                  ×
-                </button>
-              </div>
-            </div>
-            <div className="ai-msg">
-              选择文件或代码片段后，输入问题开始与 AI 协作。本期为无 AI MVP，此处为后续版本预留。
-            </div>
-            <div className="ai-input">
-              <textarea placeholder="描述你要完成的任务…" disabled />
-              <button className="btn primary" disabled>
-                发送
-              </button>
-            </div>
-          </aside>
-        )}
       </div>
 
       {termOpen ? (
-        <TerminalPane connected={terminalConnected} output={terminalOutput} />
+        <TerminalPane sessionId={sessionId} command={terminalCommand} />
       ) : (
         <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
           展开终端
@@ -138,6 +121,21 @@ export function WorkspaceScreen({
         <button className="terminal-close" onClick={() => setTermOpen(false)} title="折叠终端">
           折叠
         </button>
+      )}
+      {confirmSubmit && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !submitting && setConfirmSubmit(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="submit-title" onMouseDown={(event) => event.stopPropagation()}>
+            <h2 id="submit-title">确认提交答卷？</h2>
+            <p>提交前会保存全部修改并冻结快照；提交后不能继续编辑。</p>
+            {submitError && <div className="banner banner-error">{submitError}</div>}
+            <div className="modal-actions">
+              <button className="btn" disabled={submitting} onClick={() => setConfirmSubmit(false)}>继续作答</button>
+              <button className="btn primary" disabled={submitting} onClick={() => void submit()}>
+                {submitting ? '提交中…' : '确认提交'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

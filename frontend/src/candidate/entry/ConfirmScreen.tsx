@@ -29,7 +29,7 @@ export function ConfirmScreen({ examInfo, error, onConfirm }: Props) {
         <div className="rule-group">
           <h3>允许操作</h3>
           <div className="rule-card">
-            编辑允许路径内的文件、运行公开测试、使用 AI 助手、执行终端命令、提交答卷。
+            编辑允许路径内的文件、运行公开测试、执行终端命令、提交答卷。
           </div>
         </div>
         <div className="rule-group">
@@ -41,7 +41,7 @@ export function ConfirmScreen({ examInfo, error, onConfirm }: Props) {
         <div className="rule-group">
           <h3>数据采集说明</h3>
           <div className="rule-card">
-            平台记录 AI 对话、代码变更、Diff、终端命令、测试和提交事件。异常信号仅待人工核查，不自动判定作弊。
+            平台记录进场、开始答题与最终提交时间，用于本场考务台账。
           </div>
         </div>
       </main>

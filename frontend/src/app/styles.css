@@ -129,7 +129,8 @@ body {
 
 .editor-area { display: flex; flex-direction: column; min-width: 0; background: var(--editor); }
 .editor-tabs { display: flex; background: #252526; border-bottom: 1px solid #333; }
-.editor-tabs .etab { padding: 8px 14px; font-size: 12px; color: #d4d4d4; border-right: 1px solid #333; display: flex; align-items: center; gap: 6px; }
+.editor-tabs .etab { padding: 8px 14px; font-size: 12px; color: #d4d4d4; border: 0; border-right: 1px solid #333; background: #252526; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.editor-tabs .etab.active { background: var(--editor); color: #fff; }
 .editor-area > div:last-child { flex: 1; min-height: 0; }
 
 .ai-panel { background: #fff; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
@@ -150,6 +151,13 @@ body {
 .terminal-body { flex: 1; min-height: 0; }
 .terminal-toggle, .terminal-close { position: fixed; right: 16px; bottom: 16px; z-index: 10; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
 .terminal-close { bottom: 200px; }
+
+.modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: rgb(17 24 39 / 55%); }
+.modal { width: min(440px, calc(100vw - 32px)); padding: 24px; border-radius: 10px; background: #fff; box-shadow: 0 18px 48px rgb(0 0 0 / 25%); }
+.modal h2 { margin-bottom: 10px; font-size: 20px; }
+.modal p { margin-bottom: 20px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.modal .banner { margin-bottom: 16px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 /* 评测进度 */
 .grading-body { flex: 1; padding: 48px 140px; }

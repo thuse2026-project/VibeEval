@@ -14,13 +14,13 @@ npm install
 npm run dev
 ```
 
-打开 http://localhost:5173 。
+打开 `http://localhost:5173/?token=考务Token`。Mock 模式可省略 Token。
 
 ## 后端切换
 
 复制 `.env.example` 为 `.env`，按需修改：
 
 - `VITE_USE_MOCK=true`：使用内存 mock，无需后端即可跑通全流程。
-- `VITE_USE_MOCK=false`：切换到真实后端，访问 `VITE_API_BASE_URL`。
+- `VITE_USE_MOCK=false`：切换到真实后端，访问 `VITE_API_BASE_URL`，终端连接 `VITE_WS_BASE_URL`。
 
-接口契约见需求文档 E.3。开发预览：URL 加 `?screen=workspace|grading|report` 可直达对应界面。
+接口契约见需求文档 E.3。Mock 开发预览：URL 加 `?screen=workspace|grading` 可直达对应界面。
