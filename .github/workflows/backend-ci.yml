@@ -95,6 +95,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Lint frontend source and configuration
         run: npm run lint
+      - name: Check workspace save and API contracts
+        run: npm test
       - name: Type check and build frontend
         run: npm run build
 

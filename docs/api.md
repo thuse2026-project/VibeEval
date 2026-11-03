@@ -1,5 +1,9 @@
 # Release 1.0 接口草案
 
+## 候选人工作台接入（2026-11-03）
+
+前端 `/entry` 复用下述 Cookie 入场恢复；`/workspace` 接入已实现的 prepare/start/status、文件 GET/PUT、同源 PTY 和交卷回执。没有新增后端契约。开发 Vite `/api` 开启 WebSocket 转发，Token 不放 URL；状态与截止时间取共享会话，不读取原始草案的 `time_remaining_seconds`。保存冲突保留本地编辑并显式比较恢复，交卷前串行 flush。详情与验收边界见 [候选人工作台交接](candidate-workspace-handoff.md)。
+
 本页从原始需求文档附录 E.3 提取，保留原始示例供组内讨论，不表示接口已实现或已确认。
 
 一期范围与分工见 [原始需求文档](requirements/VibeEval-AICoding%20平台.md) 附录 E。确认后的联调契约统一更新本页，原始文档保留讨论背景。

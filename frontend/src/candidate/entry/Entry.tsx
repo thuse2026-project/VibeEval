@@ -66,7 +66,8 @@ export default function Entry() {
           {session.deadline_at !== null && <div><dt>截止时间</dt><dd>{formatTime(session.deadline_at)}</dd></div>}
         </dl>
         <p className="login-note">请保留当前浏览器的本站数据。刷新或重新打开本页可恢复原会话，无需再次输入凭证。</p>
-        <p className="login-note">此页面用于入场与恢复，状态来自共享会话。准备环境与开始作答请使用正式工作台；刷新此页不会重新计时。</p>
+        <p className="login-note">状态来自共享会话；刷新此页不会重新计时。</p>
+        <p><a href="/workspace">进入工作台 / 恢复答卷</a></p>
         <button className="secondary" onClick={() => void restore()}>检查并恢复会话</button>
       </section> : <section className="login-panel" aria-labelledby="entry-title">
         <div className="section-label">考核接入</div>

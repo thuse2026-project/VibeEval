@@ -1,0 +1,53 @@
+.workspace-entry { margin: 48px auto; }
+.workspace-entry input[type=checkbox] { width: 18px; height: 18px; vertical-align: middle; }
+.candidate-workspace { color: #d4d4d4; background: #1e1e1e; min-height: 100vh; }
+.candidate-workspace button { font-size: 13px; border: 1px solid #516071; border-radius: 5px; color: inherit; background: #253345; padding: 7px 12px; }
+.candidate-workspace button:disabled { opacity: .5; cursor: not-allowed; }
+.candidate-workspace .ide { display: flex; flex-direction: column; height: 100vh; min-width: 650px; }
+.candidate-workspace .ide-topbar { display: flex; align-items: center; gap: 16px; padding: 12px 18px; background: #182536; flex: none; }
+.candidate-workspace .logo { font-weight: 700; }
+.candidate-workspace .spacer { flex: 1; }
+.candidate-workspace .timer { font-variant-numeric: tabular-nums; color: #fbbf24; }
+.candidate-workspace .save-state { font-size: 12px; }
+.candidate-workspace .save-state.error, .candidate-workspace .save-state.conflict { color: #fca5a5; }
+.candidate-workspace .save-state.idle, .candidate-workspace .save-state.saving { color: #fcd34d; }
+.candidate-workspace .ide-main { display: grid; grid-template-columns: 230px minmax(0, 1fr); flex: 1; min-height: 180px; }
+.candidate-workspace .sidebar { overflow: auto; background: #202934; border-right: 1px solid #46505c; }
+.candidate-workspace .tabs { display: flex; gap: 6px; padding: 8px; }
+.candidate-workspace .file-tree { padding: 8px; }
+.candidate-workspace .file { display: flex; align-items: center; gap: 7px; text-align: left; width: 100%; margin: 3px 0; background: transparent; border: 0; padding: 7px 4px; }
+.candidate-workspace .file-name { flex: 1; overflow-wrap: anywhere; }
+.candidate-workspace .file.active, .candidate-workspace .tab.active { background: #334a66; }
+.candidate-workspace .lock { font-size: 11px; color: #b0bac6; }
+.candidate-workspace .problem-pane { padding: 16px; font-size: 13px; line-height: 1.8; }
+.candidate-workspace .editor-area { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.candidate-workspace .editor-tabs { display: flex; overflow-x: auto; background: #252526; flex: none; }
+.candidate-workspace .editor-tabs .etab { border: 0; border-right: 1px solid #444; border-radius: 0; white-space: nowrap; background: #252526; }
+.candidate-workspace .editor-tabs .etab.active { background: #1e1e1e; color: #fff; }
+.candidate-workspace .editor-area > div:last-child { flex: 1; min-height: 0; }
+.candidate-workspace .tag { font-size: 11px; margin-left: 8px; color: #cbd5e1; }
+.candidate-workspace .terminal { height: 220px; display: flex; flex-direction: column; background: #111827; }
+.candidate-workspace .terminal-head { display: flex; justify-content: space-between; align-items: center; padding: 5px 18px; font-size: 12px; }
+.candidate-workspace .terminal-body { flex: 1; min-height: 0; overflow: hidden; }
+.candidate-workspace .terminal-toggle, .candidate-workspace .terminal-close { position: fixed; right: 16px; bottom: 225px; z-index: 2; }
+.candidate-workspace .terminal-toggle { bottom: 14px; }
+.candidate-workspace .modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: #0009; }
+.candidate-workspace .modal { width: min(460px, calc(100vw - 32px)); padding: 26px; background: #fff; color: #192b35; border-radius: 10px; }
+.candidate-workspace .modal p { line-height: 1.7; }
+.candidate-workspace .modal button { color: #fff; }
+.candidate-workspace .modal-actions { display: flex; justify-content: flex-end; gap: 12px; }
+.candidate-workspace .banner-error { color: #a11b20; margin-bottom: 14px; }
+.candidate-workspace .workspace-alert { padding: 12px 20px; background: #643524; color: #fff; }
+.candidate-workspace .workspace-alert button { margin-left: 12px; }
+.candidate-workspace .workspace-recovery { padding: 20px; background: #26364a; }
+.candidate-workspace .workspace-recovery pre { max-height: 240px; overflow: auto; white-space: pre-wrap; }
+.candidate-workspace .workspace-recovery button { margin: 4px; }
+.candidate-workspace .grading-body { display: block; padding: 48px; }
+.candidate-workspace .grading-body h1 { color: #fff; }
+.candidate-workspace .submission-id { overflow-wrap: anywhere; }
+.candidate-workspace .note { border: 1px solid #516071; padding: 20px; }
+@media (max-width: 760px) {
+  .candidate-workspace { overflow-x: auto; }
+  .candidate-workspace .ide-topbar { gap: 8px; flex-wrap: wrap; }
+  .candidate-workspace .ide-main { grid-template-columns: 180px minmax(0, 1fr); }
+}

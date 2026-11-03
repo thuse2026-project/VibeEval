@@ -1,4 +1,4 @@
-import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Login from '../admin/login/Login';
 import Entry from '../candidate/entry/Entry';
@@ -6,6 +6,8 @@ import Overview from '../admin/submissions/Overview';
 import Detail from '../admin/submissions/Detail';
 import { api, ApiError, type Examiner } from '../shared/api';
 import './style.css';
+
+const CandidateWorkspace = lazy(() => import('../candidate/workspace/CandidateWorkspace'));
 
 function App() {
   const [user, setUser] = useState<Examiner | null>(null);
@@ -112,4 +114,5 @@ function App() {
 }
 
 const candidateEntry = window.location.pathname === '/entry' || window.location.pathname === '/entry/';
-createRoot(document.getElementById('root')!).render(candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);
+const workspace = window.location.pathname === '/workspace' || window.location.pathname === '/workspace/';
+createRoot(document.getElementById('root')!).render(workspace ? <Suspense fallback={<p role="status">正在加载工作台…</p>}><CandidateWorkspace /></Suspense> : candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);
