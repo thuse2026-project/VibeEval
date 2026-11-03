@@ -4,7 +4,7 @@
 
 ## 接入与启动
 
-在已注册 `runsc` 的 Linux Docker 环境，安装 `backend/requirements.txt` 和 `backend/requirements-gvisor.txt`，或直接安装 `requirements-dev.txt`。数据库配置沿用根 `.env`，运行 Alembic `upgrade head` 到 `0004`。进程环境设置：
+在已注册 `runsc` 的 Linux Docker 环境，安装 `backend/requirements.txt` 和 `backend/requirements-gvisor.txt`，或直接安装 `requirements-dev.txt`。数据库配置沿用根 `.env`，运行 Alembic `upgrade head` 到当前版本（现为 `0005`，包括工作区文件版本表）。进程环境设置：
 
 ```sh
 export SANDBOX_BACKEND_REF=docker-gvisor:exam-node-01
@@ -45,9 +45,9 @@ export VIBEEVAL_RUN_GVISOR_TESTS=1
 python -m unittest discover -s tests -p test_sandbox_submission_integration.py -v
 ```
 
-两组分别覆盖四条路径：正常交卷后恢复固定回执并从考官后台读取；快照写入失败保持暂停、原 ID 与原截止时间，随后重试成功；删除超时保留成功答卷和清理待办，单独重试；资源身份不匹配拒绝导出，修正后重试原环境。真实测试核对六文件集、考生写入标记、空考生测试文件及未提供公开测试输出时的 `null`。
+两组现在分别覆盖六条路径：正常交卷后恢复固定回执并从考官后台读取；快照写入失败保持暂停、原 ID 与原截止时间，随后重试成功；删除超时保留成功答卷和清理待办，单独重试；资源身份不匹配拒绝导出，修正后重试原环境；浏览器关闭后由维护命令触发到期交卷；维护命令按共享间隔重试已提交答卷的清理。真实测试核对六文件集、考生写入标记、空考生测试文件及未提供公开测试输出时的 `null`。
 
-测试会创建随机数据库和带随机会话标签的容器/卷。先断言生产清理保留工作区卷，再由验收夹具删除它自己创建的测试资源；不会清理开发数据库或真实考生答卷。普通 CI 未开启真实 gVisor 时，四个真实用例明确标为 skipped，不计作已通过。
+测试会创建随机数据库和带随机会话标签的容器/卷。先断言生产清理保留工作区卷，再由验收夹具删除它自己创建的测试资源；不会清理开发数据库或真实考生答卷。普通 CI 未开启真实 gVisor 时，六个真实用例明确标为 skipped，不计作已通过。
 
 ## 本地验证环境与范围
 
@@ -55,7 +55,7 @@ python -m unittest discover -s tests -p test_sandbox_submission_integration.py -
 
 gVisor bundle 校验值：`26e4a327565f5da0f73261a6387e2c20f4695a232e330095a3111b70efd604fdf09d734e8cc8f714dbb5c5607ce8c87ea80b26df549d83a146f2efd5a1af448a`。记录具体测试结果时区分普通 CI、Docker 替身和真实运行，不能据文件/终端接口尚未交付的本批代码宣称整个平台闭环完成。
 
-2026-11-02 验证结果：
+2026-11-02 初次沙箱接入阶段（`3f2f1f8`，增加维护命令前）的验证结果：
 
 | 环境 | 结果 |
 | --- | --- |
@@ -66,5 +66,7 @@ gVisor bundle 校验值：`26e4a327565f5da0f73261a6387e2c20f4695a232e330095a3111
 | 题目构建命令 | CLI 输出 tar 与原受控构建函数的 SHA-256 相同 |
 
 完整回归负载下实际观察到删除容器请求超时：答卷与待清理台账保持不变，按原 ID 有限重试后成功记录清理完成，工作区卷在生产删除调用后仍存在。验收用例最多尝试三次清理，每次受适配器超时限制；这不是已启动的生产重试 worker。不要把清理超时改成自动恢复编辑或撤销答卷。
+
+同日增加维护命令后，Linux 再次完成 224 项全量测试，含 6 项真实 gVisor 用例，零跳过；维护阶段的覆盖率、CLI 和 Windows 验证见 [提交定期处理](submission-maintenance.md#验证)。
 
 本次仅证明提交侧与该批沙箱适配器的联合链路；文件 HTTP、PTY、准备/开始路由、正式工作台与生产部署仍需后续交付。临时 Docker/数据库服务验收后清理，官方安装包和测试镜像保留作本地缓存；主开发数据库不参与这些清理操作。

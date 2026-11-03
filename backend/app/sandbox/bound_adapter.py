@@ -7,6 +7,54 @@ from .submission_bridge import DockerSubmissionBridge
 
 
 class BoundSandboxAdapter(DockerSubmissionBridge):
+    def save_file(self, view, path, expected_digest, content):
+        from .safe_save import save_file
+
+        return save_file(self, view, path, expected_digest, content)
+
+    def read_files(self, view):
+        from app.workspace.files import ALLOWED_FILES
+
+        return {path: self.read_file(view, path) for path in sorted(ALLOWED_FILES)}
+
+    def read_file(self, view, path):
+        from app.workspace.archive import read_file_archive
+        from app.workspace.files import validate_path
+
+        validate_path(path)
+        if view.status != "in_progress":
+            raise ValueError("active exam required")
+        obj = self._container(view)
+        if obj.status not in {"running", "paused"}:
+            raise ValueError("sandbox is not running")
+        stream, _ = obj.get_archive("/workspace/" + path)
+        return read_file_archive(stream, path)
+
+    def check_ready(self, view):
+        obj = self._container(view)
+        if obj.status != "running":
+            raise ValueError("sandbox is not running")
+        # Inspect metadata without importing or executing candidate source.
+        script = """import os,sys,stat
+from pathlib import Path
+assert sys.version_info[:2] == (3,12) and os.getuid() == 1000
+root=Path('/workspace')
+editable={'src/booking.py','tests/test_candidate.py'}
+expected=editable|{'README.md','requirements.txt','src/main.py','tests/test_public.py'}
+for name in expected:
+ p=root/name
+ assert not p.is_symlink() and stat.S_ISREG(p.stat().st_mode)
+ assert os.access(p,os.R_OK)
+ assert os.access(p,os.W_OK) == (name in editable)
+for p in [root,root/'src',root/'tests']:
+ assert not p.is_symlink() and not os.access(p,os.W_OK)
+assert not (root/'maintainer').exists()
+"""
+        result = obj.exec_run(["python", "-I", "-c", script], user="1000:1000")
+        if result.exit_code != 0:
+            raise ValueError("template health check failed")
+        return True
+
     def ensure_bound(self, view):
         if view.status != "provisioning":
             raise ValueError("preparation requires provisioning state")

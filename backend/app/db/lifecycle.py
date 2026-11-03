@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import ExamSession, Invitation, Submission
+from .models import ExamSession, Invitation, Submission, WorkspaceFileRevision
 from .session import get_session_factory, session_scope
 from .states import SessionStatus as Status
 
@@ -98,6 +98,47 @@ class LockedSession:
     def _clear_error(self) -> None:
         self._record.lifecycle_error_code = None
         self._record.lifecycle_error_at = None
+
+    def observe_file_revision(self, path: str, content_sha256: str) -> int:
+        """Record an observed digest in this lock's transaction, without committing.
+
+        The caller authorizes the file and reads its bytes under the existing
+        session lock. This method only tracks observations, not filesystem writes.
+        """
+        self._active()
+        if (
+            not isinstance(path, str)
+            or not 1 <= len(path) <= 500
+            or any(char in path for char in ("\\", ":"))
+            or any(ord(char) < 32 or ord(char) == 127 for char in path)
+            or any(part in ("", ".", "..") for part in path.split("/"))
+        ):
+            raise ValueError("File revision path must be a relative POSIX file path")
+        if (
+            not isinstance(content_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", content_sha256) is None
+        ):
+            raise ValueError("File revision digest must be lowercase SHA-256 hex")
+        revision = self._session.get(
+            WorkspaceFileRevision, (self._record.session_id, path)
+        )
+        if revision is None:
+            revision = WorkspaceFileRevision(
+                session_id=self._record.session_id,
+                path=path,
+                version=1,
+                content_sha256=content_sha256,
+            )
+            self._session.add(revision)
+        elif revision.content_sha256 != content_sha256:
+            revision.version += 1
+            revision.content_sha256 = content_sha256
+        else:
+            return revision.version
+        # Flush so repeated observations also work with autoflush disabled.
+        # The outer lock context still owns commit/rollback for all pending work.
+        self._session.flush()
+        return revision.version
 
     def _error(self, code: str) -> None:
         if (

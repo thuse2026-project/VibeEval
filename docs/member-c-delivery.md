@@ -29,3 +29,13 @@ freeze/delete 在 spawn 子进程中建立独立 Docker 客户端，请求超时
 正式入口为 SandboxRuntime（提交注入）和 BoundSandboxAdapter（数据库锁内创建）。文件HTTP接口和WebSocket网关尚未提供；ensure_bound仅完成容器绑定，健康检查、ready转换及prepare/start路由仍需继续接入。不要将此分支视为完整考生工作台。
 
 拉取后需安装 requirements-gvisor.txt，或安装已包含它的 requirements-dev.txt。仓库没有提交密钥、服务器登录凭据或本地需求附件。手工验证脚本中的本地镜像ID对应本次测试服务器；其他机器需先构建 booking_template 并替换测试镜像ID，不可直接假定该镜像存在。
+
+### 2026-11-02 准备/开始接口数据库验证
+
+新增 tests/test_preparation_http.py。服务器独立 PostgreSQL16 临时容器上执行迁移0001–0004，真实HTTP TestClient、Cookie入场和会话数据库验证通过：匿名请求拦截；准备前开始返回409；准备后ready且未计时；重复准备只调用一次创建；重复开始返回同一开始/截止时间；原Cookie恢复原会话；其他浏览器prepare/start返回404。Docker调用在该项测试中使用Mock，不将其记为真实沙箱全链路。临时数据库容器与卷已清理。未部署HTTP监听服务。
+
+## 第二批：准备与开始接口
+
+显式沙箱应用新增 POST /api/v1/sessions/{id}/prepare 与 /start，详情见 docs/api.md。入场鉴权、数据库状态和计时直接复用共享实现。服务器临时PostgreSQL上HTTP入场、准备、重复开始和跨浏览器访问测试通过；Docker在该HTTP测试中为替身。真实Docker权限验证为先前独立测试，不混称全链路。
+
+新增 workspace/files.py 是纯策略模块：固定六文件白名单、两文件可写、1MiB UTF-8限制、观察到内容变化后递增整数版本、拒绝过期版本。尚未接持久版本账本、实际安全写入或文件HTTP接口；不能当作已完成安全保存。不会将未实现能力挂为可用接口。

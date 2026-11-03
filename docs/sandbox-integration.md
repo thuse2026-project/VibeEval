@@ -1,6 +1,6 @@
 # 沙箱与共享数据库接入约定
 
-本说明对应数据库迁移 `0004`。共享数据库层、提交存储、`SubmissionCoordinator` 交卷协调器及候选人交卷 HTTP 路由已实现，已接入陈弘毅 `codex/sandbox-lifecycle@761cdc7` 的绑定与提交适配器。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。HTTP 鉴权、错误码和应用注入见 [交卷 HTTP 接入](submission-http-handoff.md)，普通与真实环境验证边界见 [联合验收说明](sandbox-submission-validation.md)。
+本说明当前对应数据库迁移 `0005`，在既有会话与提交模型上新增工作区文件版本表，接口见 [工作区文件版本](workspace-file-revisions.md)。共享数据库层、提交存储、`SubmissionCoordinator` 交卷协调器及候选人交卷 HTTP 路由已实现，已接入陈弘毅 `codex/sandbox-lifecycle@761cdc7` 的绑定与提交适配器；文件读取与终端接入基于其后续 `91ebff9`。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。HTTP 鉴权、错误码和应用注入见 [交卷 HTTP 接入](submission-http-handoff.md)，普通与真实环境验证边界见 [联合验收说明](sandbox-submission-validation.md)。
 
 ## 1. 会话、沙箱和截止时间
 
@@ -128,22 +128,22 @@ for view in coordinator.lifecycle.list_cleanup_candidates():
 
 - 暂停/导出/快照/数据库失败：沙箱侧保留环境和文件，不自动恢复编辑或删除容器。错误处理应在失败的锁上下文退出、事务回滚之后执行。
 - 若提交结果不确定，先查询 `get_session_receipt`；已存在回执就按成功处理。没有时另开锁调用 `mark_submission_failed("SNAPSHOT_WRITE_FAILED")` 等安全错误代码，保持禁止编辑，不因重试重置截止时间。
-- 由提交侧发起交卷重试，重新 `begin_submission`，复用同一暂停环境、容器 ID、固定资源标识及首份最终答卷语义；沙箱侧的暂停/导出须幂等。HTTP 提交入口已接协调器，当前尚未新增自动重试 worker。
+- 由提交侧发起交卷重试，重新 `begin_submission`，复用同一暂停环境、容器 ID、固定资源标识及首份最终答卷语义；沙箱侧的暂停/导出须幂等。HTTP 提交入口已接协调器，独立定期处理命令可恢复中断或失败的交卷。
 - 快照已落盘而数据库失败时，可能保留未引用文件；它不会被当作成功答卷，也不会触发沙箱清理。该类文件的垃圾回收仍未实现。
-- 只有确认数据库提交成功后，提交侧才发起清理通知；本阶段提供待清理台账 `list_cleanup_candidates(limit=...)`，尚未启动后台清理 worker。沙箱侧执行删除，保留工作区文件；容器已不存在时应按幂等成功处理。
+- 只有确认数据库提交成功后，提交侧才发起清理通知；提供待清理台账 `list_cleanup_candidates(limit=...)`，独立定期处理命令可消费这些已提交状态。沙箱侧执行删除，保留工作区文件；容器已不存在时应按幂等成功处理。
 - 清理失败调用 `locked.mark_cleanup_failed("SANDBOX_CLEANUP_FAILED")`，会话仍是 `submitted`，答卷成功不撤销。待清理记录继续可查；后续清理必须再次拿锁、核对原 ID。清理后保留历史映射，不创建新空环境。
 
 协调器已实现上述回执恢复、交卷失败记录与成功后的清理尝试。冻结/导出失败抛出 `SubmissionAttemptFailed`，安全代码为 `SANDBOX_FREEZE_EXPORT_FAILED`；导出身份不匹配为 `SANDBOX_EXPORT_MISMATCH`；快照校验、存储或最终数据库事务失败为 `SNAPSHOT_PERSIST_FAILED`。错误消息及日志不包含沙箱 SDK 原始异常。适配器冻结失败时，数据库门禁仍禁止编辑；真正暂停是否成功须由适配器确认，失败不能被当作已有稳定快照。
 
 `SessionBusy` 表示已有保存、交卷或清理持有数据库锁；本次请求不调用沙箱，应轮询或有界重试。未知会话和不允许的起始状态分别保留 `LifecycleNotFound`、`LifecycleConflict`。提交事务失败后，协调器先查询已提交回执再记录失败；数据库不可用或锁冲突可能使错误台账暂时无法写入，此时已提交的 `submitting` 门禁继续生效，重试仍使用原会话。进程退出同样可能留下 `submitting`，由后续调用重试恢复。
 
-`submit()` 在提交成功后尝试清理；清理失败仍返回固定提交回执，并尽力记录错误，待清理台账不会消失。单独调用 `cleanup()` 失败抛出 `SandboxCleanupFailed`，也可能透传清理资格错误或 `SessionBusy`；调用方逐条捕获后安排后续重试。当前没有自动重试循环、到期扫描或清理 worker，示例循环是接入方式，并非已启动的后台任务。
+`submit()` 在提交成功后尝试清理；清理失败仍返回固定提交回执，并尽力记录错误，待清理台账不会消失。单独调用 `cleanup()` 失败抛出 `SandboxCleanupFailed`，也可能透传清理资格错误或 `SessionBusy`；独立的 `app.submissions.maintenance` 命令提供到期扫描、恢复和清理重试，按配置宿主、共享错误时间及批量上限执行。命令需显式启动，部署、计数和延迟边界见 [提交定期处理](submission-maintenance.md)。
 
 ## 6. 当前沙箱接入与后续范围
 
 成员 C 已提供 `BoundSandboxAdapter.ensure_bound`、`freeze_and_export`、`delete_sandbox`，通过固定资源名、标签和实际镜像 ID 核验绑定。`SandboxRuntime` 在独立 spawn 子进程建立 Docker 客户端，提供请求与操作等待超时；显式 HTTP 工厂为 `app.sandbox.http_app:create_app`。导出为内存中的稳定文本元组，公开测试输出当前为 `None`。
 
-文件 HTTP、WebSocket PTY、健康检查及准备/开始路由尚未交付，不能仅凭容器 running 进入可答题状态。保存与终端输入后续仍须使用共享写入门禁；截止自动交卷、后台清理与完整工作台验收继续留待后续阶段。新增联合测试及 Linux/gVisor 环境配置见联合验收说明，普通 CI 跳过的真实用例不计为通过。
+成员 C 的 `91ebff9` 已提供受限文件读取、WebSocket PTY、健康检查及准备/开始路由，接入说明见 [终端与文件交接](workspace-terminal-handoff.md)；`0005` 补齐读取所需的持久版本方法。不能仅凭容器 running 进入可答题状态。安全保存仍待实现，保存与终端输入须遵守共享写入门禁；完整工作台及生产部署验收留待后续阶段。到期和清理扫描已提供独立命令，联合测试及 Linux/gVisor 环境配置见联合验收说明，普通 CI 跳过的真实用例不计为通过。
 
 ## 7. Windows 快照并发兼容修复
 

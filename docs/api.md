@@ -10,7 +10,7 @@
 - 工作区文件、PTY 与正式工作台的整体联调；沙箱提交适配器已接入，联合验收记录见下文。
 - 会话状态、开始计时与截止后的处理方式。
 - 公开测试的执行入口，以及结果如何保存并关联提交。
-- 到期自动交卷、后台重试与清理调度（主动交卷的同步回执、失败和重复请求语义见下文）。
+- 生产截止冻结精度与定期处理部署（到期扫描、恢复和清理命令已实现，见提交定期处理说明）。
 - 文件版本冲突、越界路径、只读文件和冻结后操作的错误约定。
 - 终端退出、断开及错误消息的约定。
 
@@ -143,17 +143,17 @@ app.dependency_overrides[get_submission_reader] = lambda: submission_reader
 
 成功入库后会尝试清理容器。清理失败仍返回同一份 202 回执，清理待办继续保存在共享台账，不要求考生重复提交。冻结或持久化失败时保持写入门禁，尽力记录 `submission_failed`；数据库暂时不可用时也可能仍为 `submitting`，后续重试使用同一容器和原截止时间。
 
-实际沙箱在应用构建时注入 `create_app(submission_sandbox=adapter)`，已提供成员 C 的显式入口 `app.sandbox.http_app:create_app`，使用带超时的 `SandboxRuntime`。默认 `app.main:app` 未配置真实适配器，对没有最终答卷的交卷请求明确返回 503，不会调用空冻结或生成演示答卷。普通 CI 用 Docker 替身，真实 runsc 联合测试需显式开启；环境和实际验证记录见 [联合验收说明](sandbox-submission-validation.md)。候选人工作台、文件/PTY 接口及后台任务仍待后续接入。
+实际沙箱在应用构建时注入 `create_app(submission_sandbox=adapter)`，已提供成员 C 的显式入口 `app.sandbox.http_app:create_app`，使用带超时的 `SandboxRuntime`。默认 `app.main:app` 未配置真实适配器，对没有最终答卷的交卷请求明确返回 503，不会调用空冻结或生成演示答卷。普通 CI 用 Docker 替身，真实 runsc 联合测试需显式开启；环境和实际验证记录见 [联合验收说明](sandbox-submission-validation.md)。候选人工作台和文件/PTY 接口仍待后续接入，定期处理命令须由部署方显式启动。
 
 ## 提交持久化内部契约
 
-共享会话、容器映射、跨进程行锁、状态集合及提交失败后的恢复规则见 [沙箱接入约定](sandbox-integration.md)，对应迁移 `0004`。`SessionView.task_version_id` 与 `sandbox_image_ref` 分别提供题目发布版本和镜像引用；提交台账会冻结保存两者，现有管理端 reader 字段保持不变。已有 HTTP 草案仍待对齐这些内部状态和鉴权方式。
+共享会话、容器映射、跨进程行锁、状态集合及提交失败后的恢复规则见 [沙箱接入约定](sandbox-integration.md)，当前迁移为 `0005`，新增工作区文件版本表。`SessionView.task_version_id` 与 `sandbox_image_ref` 分别提供题目发布版本和镜像引用；提交台账会冻结保存两者，现有管理端 reader 字段保持不变。已有 HTTP 草案仍待对齐这些内部状态和鉴权方式。
 
 以下为当前分支已实现的 Python 内部服务，HTTP 交卷路由见上一节，真实适配器通过显式工厂接入；下方 E.3 保留原始 HTTP 草案。
 
 `backend/app/submissions/coordinator.py` 的 `SubmissionCoordinator(sandbox_adapter)` 是交卷编排入口，提供 `submit(session_id, idempotency_key)` 和 `cleanup(session_id)`。调用方先验证会话归属，再由协调器提交 `submitting` 门禁、调用注入适配器的 `freeze_and_export(view)`、核验导出的会话与容器身份、持久化答卷、事务提交后尝试 `delete_sandbox(view)`。适配器返回 `FrozenWorkspace(session_id, sandbox_id, files, public_test_output=None)`；具体冻结、超时、保留文件要求见沙箱接入约定。已接入 `SandboxRuntime`；普通 CI 保留替身测试，真实验收另行开启。
 
-`submit()` 返回下述固定回执，重复请求直接返回第一份已提交答卷。冻结、导出或持久化失败抛出带安全 `code` 的 `SubmissionAttemptFailed`，保留原环境及禁止写入状态供重试；并发锁冲突透传 `SessionBusy`。提交已成功时，清理失败不撤销回执，继续出现在 `lifecycle.list_cleanup_candidates()`；后续单独 `cleanup()` 失败可抛出 `SandboxCleanupFailed`。数据库异常后的回执恢复、错误代码和无自动 worker 的边界见沙箱接入约定；HTTP 映射见上一节，清理没有公开的候选人 HTTP 接口。
+`submit()` 返回下述固定回执，重复请求直接返回第一份已提交答卷。冻结、导出或持久化失败抛出带安全 `code` 的 `SubmissionAttemptFailed`，保留原环境及禁止写入状态供重试；并发锁冲突透传 `SessionBusy`。提交已成功时，清理失败不撤销回执，继续出现在 `lifecycle.list_cleanup_candidates()`；后续单独 `cleanup()` 失败可抛出 `SandboxCleanupFailed`。已实现独立的 `SubmissionMaintenance.run_once()` 和 CLI 持续模式，按宿主扫描到期与未完成提交、重试清理，不依赖浏览器在线；共享重试间隔、启动方式及延迟边界见 [提交定期处理](submission-maintenance.md)。这些内部处理不新增候选人 HTTP 清理接口，也不会在 API 导入时自动启动。
 
 `backend/app/submissions/service.py` 中的 `SubmissionService` 提供：
 
@@ -376,3 +376,25 @@ get_session_receipt(session_id)
 
 
 ---
+
+## 沙箱准备与开始接口（成员 C 开发中）
+
+显式 app.sandbox.http_app:create_app 新增 POST /api/v1/sessions/{session_id}/prepare 和 POST /api/v1/sessions/{session_id}/start。复用 require_candidate_session、Cookie与 X-VibeEval-Request: 1；默认 app.main 未挂载。请求无需body，镜像、宿主和题目版本由后端 SANDBOX_IMAGE_REF / SANDBOX_BACKEND_REF / SANDBOX_TASK_VERSION 指定，禁止浏览器选择镜像。
+
+成功返回 session_id/status/started_at/deadline_at；不返回容器ID。prepare 同步执行有界沙箱调用，耗时可能达数十秒；不是后台排队202。前端应禁用重复按钮，超时后先查询已有status。409表示状态冲突或会话忙，503表示配置或准备失败。start只在共享生命周期允许时开始，重复开始不刷新截止时间。
+
+健康检查只检查Python3.12、非root身份、六文件可读/可写权限与父目录保护，不运行考生代码；两项预期失败测试不作为健康失败。磁盘配额和完整前端联合验收尚待完成。
+
+## 工作区读取与 PTY（成员 C）
+
+显式沙箱入口已挂载 WS `/api/v1/sessions/{session_id}/terminal`：原浏览器 Cookie 鉴权，精确 Origin 允许名单，只有 `in_progress` 且未到截止时间才能连接、输入或 resize。协议沿用上述 input/output/resize；Ctrl+C 原样发送 `\u0003`。完整配置、限制、关闭码、断线语义和真实验证命令见 [终端与文件交接](workspace-terminal-handoff.md)。
+
+GET `/files` 和 GET `/file?path=...` 已接入 `LockedSession.observe_file_revision` 与持久版本表，先执行 Alembic `upgrade head` 到 `0005`。首次观察返回版本 1，相同内容保持版本，观察到变化时递增，记录与读取使用同一会话事务，成功提交后才返回浏览器；内部契约见 [工作区文件版本](workspace-file-revisions.md)。响应结构沿用附录 E；会话忙返回 409 与 `Retry-After: 1`，未开考/已结束返回 409，非法路径返回 422，归属不符返回 404。仍保留方法缺失时的 503 `FILE_REVISIONS_UNAVAILABLE` 兜底，数据库或读取故障返回 503。
+
+PUT `/file` 已提供，沿用 `path/expected_version/content` 请求和 `path/new_version/saved_at` 响应。版本必须为正整数，内容限 UTF-8 编码后 1 MiB。相同内容保存保持版本；旧版本或暂停前发生的终端修改返回 409 `FILE_VERSION_CONFLICT`，detail 包含 `current_version`，不会覆盖当前内容。前端保留本地编辑并重新读取比较，不得自动套用新版本强行重发。
+
+保存先取得共享会话锁，暂停考生进程后再次核对摘要，由受限临时 runsc 容器执行固定脚本原子替换；确认写入容器已移除后才恢复原进程。只读文件返回 403；非法参数返回 422；会话忙为 409 `SESSION_BUSY`，可按 `Retry-After: 1` 重试；状态不允许为 409 `SESSION_NOT_WRITABLE`。保存异常返回 503 `FILE_SAVE_UNCERTAIN`，需重新读取核对，原环境可能保持暂停；显式确认后可重试，不能自动覆盖。文件替换与数据库提交不是同一事务，下一次读取会根据实际内容恢复版本。
+
+交卷前前端应 flush 并等待保存成功。冻结会先停止遗留写入容器，再导出稳定文件；固定 staging 文件不属于答卷。API 与维护进程需同时升级适配器，不能混用新保存模块和旧冻结模块。保存不会延长考试截止时间。详细恢复语义见 [工作区交接](workspace-terminal-handoff.md)。
+
+本期固定六文件，只有 `src/booking.py`、预建的 `tests/test_candidate.py` 可编辑；草案中 `src/main.py` 的可写示例已被陈智恒确认的会议室题目权限取代。只读文件不能由终端删除或替换。

@@ -8,7 +8,7 @@ import multiprocessing
 import os
 
 
-def _operate(pipe, settings, method, view):
+def _operate(pipe, settings, method, view, args=()):
     import docker
 
     from .bound_adapter import BoundSandboxAdapter
@@ -17,7 +17,7 @@ def _operate(pipe, settings, method, view):
     try:
         client = docker.DockerClient(base_url=settings[0], timeout=settings[2])
         adapter = BoundSandboxAdapter(client, settings[1])
-        pipe.send((True, getattr(adapter, method)(view)))
+        pipe.send((True, getattr(adapter, method)(view, *args)))
     except Exception as error:
         from requests.exceptions import Timeout
 
@@ -53,11 +53,11 @@ class SandboxRuntime:
         self.settings = (docker_url, backend_ref, request_timeout)
         self.operation_timeout = operation_timeout
 
-    def _call(self, method, view):
+    def _call(self, method, view, *args):
         ctx = multiprocessing.get_context("spawn")
         reader, writer = ctx.Pipe(duplex=False)
         worker = ctx.Process(
-            target=_operate, args=(writer, self.settings, method, view)
+            target=_operate, args=(writer, self.settings, method, view, args)
         )
         worker.start()
         writer.close()
@@ -85,6 +85,28 @@ class SandboxRuntime:
 
     def freeze_and_export(self, view):
         return self._call("freeze_and_export", view)
+
+    def ensure_bound(self, view):
+        return self._call("ensure_bound", view)
+
+    def check_ready(self, view):
+        return self._call("check_ready", view)
+
+    def read_file(self, view, path):
+        from app.workspace.files import validate_path
+
+        validate_path(path)
+        return self._call("read_file", view, path)
+
+    def read_files(self, view):
+        return self._call("read_files", view)
+
+    def save_file(self, view, path, expected_digest, content):
+        from app.workspace.files import encode_content, validate_path
+
+        validate_path(path, write=True)
+        encode_content(content)
+        return self._call("save_file", view, path, expected_digest, content)
 
     def delete_sandbox(self, view):
         return self._call("delete_sandbox", view)

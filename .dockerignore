@@ -1,0 +1,25 @@
+# Build contexts contain application sources only, never secrets or exam data.
+**
+!backend/
+!backend/app/
+!backend/app/**
+!backend/migrations/
+!backend/migrations/**
+!backend/alembic.ini
+!backend/requirements.txt
+!backend/requirements-db.txt
+!backend/requirements-gvisor.txt
+!frontend/
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/vite.config.ts
+!frontend/index.html
+!frontend/src/
+!frontend/src/**
+!deploy/
+!deploy/Dockerfile.backend
+!deploy/Dockerfile.frontend
+!deploy/nginx.conf
+**/__pycache__/
+**/*.pyc

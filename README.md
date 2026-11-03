@@ -4,9 +4,11 @@
 
 当前开发 **Release 1.0 MVP**：先完成无 AI 辅助的「凭证入场 → 独立沙箱准备 → 多文件编辑与终端操作 → 交卷冻结 → 考官调阅」闭环。AI 辅助、隐藏测试和能力画像留待后续版本。
 
-陈智恒负责的模块已提供考官登录、共享数据库入场与恢复、考务总览、只读答卷详情和标准样题；真实提交查询已接共享持久化服务。赵晨一已接入交卷 HTTP 路由与协调器，真实沙箱适配器及候选人交卷交互仍需联调。演示来源可单独预览，陈智恒模块进度与验证结果见 [BCL.md](BCL.md)。
+陈智恒负责的模块已提供考官登录、共享数据库入场与恢复、考务总览、只读答卷详情和标准样题；真实提交查询已接共享持久化服务。赵晨一已接入交卷 HTTP、协调器、到期恢复与清理，并完成真实沙箱提交验证；候选人交卷交互及完整工作台仍需联调。演示来源可单独预览，陈智恒模块进度与验证结果见 [BCL.md](BCL.md)。
 
 已整合 PostgreSQL 与 Redis 开发环境、共享会话与提交服务。入场接共享数据库的启动、旧数据和沙箱对接说明见 [入场 PostgreSQL 交接](docs/entry-postgres-handoff.md)。
+
+成员 C 的显式沙箱入口已提供准备、开始、文件树、文件读取、安全保存和 WebSocket PTY，文件版本复用共享迁移 `0005`。真实 gVisor 读写与冻结测试已通过；候选人工作台仍需前端联合验收，见 [工作区接入](docs/workspace-terminal-handoff.md)。
 
 ## 文档入口
 
@@ -20,12 +22,16 @@
 - [交卷 HTTP 接入](docs/submission-http-handoff.md)：原浏览器鉴权、提交回执、沙箱注入与错误处理。
 - [CI 与 PR 合并检查](docs/ci-and-pr-checks.md)：前后端检查命令、汇总检查和主分支规则配置。
 - [沙箱与交卷联合验收](docs/sandbox-submission-validation.md)：真实适配器启动、可信题目镜像构建和 opt-in gVisor 验收。
+- [提交定期处理](docs/submission-maintenance.md)：到期自动提交、进程中断恢复和失败清理重试。
+- [工作区文件版本](docs/workspace-file-revisions.md)：持久版本表、同一会话事务内的摘要观察接口与接入验证。
+- [应用容器部署](docs/application-deployment.md)：前后端打包、共享持久卷、可选 gVisor 维护进程及升级回退。
+- [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读写、持久版本冲突和联合测试。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
 ## 开发前需要知道
 
-- 技术基线：前端 React + TypeScript + Vite，后端 Python + FastAPI，数据库 PostgreSQL。沙箱通过适配器接入，当前协作按 Docker + gVisor 生命周期模块对接，尚未完成真实联调；原需求中的 E2B 保留为背景方案。
+- 技术基线：前端 React + TypeScript + Vite，后端 Python + FastAPI，数据库 PostgreSQL。沙箱通过适配器接入，Docker + gVisor 的文件读写、PTY 和冻结链路已通过真实后端联合验证，完整前端工作台仍待联调；原需求中的 E2B 保留为背景方案。
 - 前端负责交互；身份权限、会话状态和考试截止时间由后端决定，`session_id` 本身不等于访问凭证。
 - 考生代码在独立沙箱运行，平台后端负责管理沙箱；不在平台后端直接执行考生代码。
 - 交卷后以固定快照为准，后台调阅读取提交快照。
@@ -225,7 +231,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini check
 ```
 
-Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动数据库；迁移完成后版本应为 `0004 (head)`，`check` 应提示没有新的迁移差异。启动应用时不自动建表，结构变更统一通过 Alembic 管理。
+Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动数据库；迁移完成后版本应为 `0005 (head)`，`check` 应提示没有新的迁移差异。启动应用时不自动建表，结构变更统一通过 Alembic 管理。
 
 连接配置从仓库根目录 `.env` 读取，不依赖当前工作目录；同名环境变量优先。默认使用 `POSTGRES_HOST`（`127.0.0.1`）、`POSTGRES_PORT`、`POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD`。可用 `DATABASE_URL` 整体覆盖连接配置，支持 `postgresql://` 或 `postgresql+psycopg://`；直接填写 URL 时须对账号和密码中的特殊字符进行 URL 编码，使用分项配置时无需编码。
 
@@ -237,6 +243,7 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 | `exam_sessions` | 关联邀请，保存浏览器凭据哈希、状态、沙箱引用及入场/开始/截止/提交时间；邀请和浏览器哈希分别唯一 |
 | `snapshots` | 保存快照所属会话、内容摘要、字节数、文件数和创建时间；文件正文放持久文件存储 |
 | `submissions` | 每会话唯一的最终提交，记录幂等键、固定快照引用及当时的考生/场次身份和时间；禁止引用其他会话的快照 |
+| `workspace_file_revisions` | 以原会话和相对路径为主键，保存正整数版本和内容摘要；在原会话锁及事务内观察变化，会话删除时级联清理 |
 
 `ExamSession.task_version_id` 保存逻辑题目发布版本，`sandbox_image_ref` 保存不可变镜像引用；两者在最终提交时复制到 `Submission`。新接入通过 `prepare_sandbox(..., task_version_id=...)` 固定题目版本，未知旧记录不自动回填。具体调用及 Windows 快照并发修复说明见沙箱接入文档。
 
@@ -248,7 +255,7 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 
 服务位于 `backend/app/submissions/`，内部契约及 HTTP 接口见 [docs/api.md](docs/api.md#主动交卷-http已实现)。`POST /api/v1/sessions/{session_id}/submit` 复用原浏览器 Cookie 和会话归属校验，需要 `X-VibeEval-Request: 1` 与 `Idempotency-Key`；只在最终答卷成功入库后返回 202 回执。文件和已有公开测试输出由服务端沙箱适配器提供，不接受浏览器上传作为答卷来源，也不在平台后端执行考生代码或测试。
 
-交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。已接入成员 C 的 `SandboxRuntime`，显式启动方式为 `uvicorn app.sandbox.http_app:create_app --factory`，配置及测试见联合验收说明。默认应用未配置适配器，尚未交卷的请求明确返回 503，已有答卷仍可恢复回执。到期自动提交和后台清理仍待接入；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
+交卷编排入口为 `SubmissionCoordinator(sandbox_adapter).submit(session_id, idempotency_key)`：提交写入门禁后，调用注入的适配器冻结导出，核验会话和容器身份，再持久化最终答卷，数据库提交成功后尝试清理。失败重试复用原会话和沙箱；提交成功而清理失败时保留成功回执及清理待办，可通过 `cleanup(session_id)` 单独重试。已接入成员 C 的 `SandboxRuntime`，显式启动方式为 `uvicorn app.sandbox.http_app:create_app --factory`，配置及测试见联合验收说明。默认应用未配置适配器，尚未交卷的请求明确返回 503，已有答卷仍可恢复回执。到期提交和清理重试已提供独立命令，部署时须显式启动；协议及错误语义见 [沙箱接入约定](docs/sandbox-integration.md#4-交卷顺序与事务边界)。
 
 调用方须先完成会话归属校验，将会话置为 `submitting`，禁止新写入并等待进行中的保存结束，停止仍会写文件的进程，再导出固定文件集。之后调用 `persist_frozen_submission()`：服务锁定会话行，落盘并校验快照，在同一数据库事务写入快照元数据、最终提交及会话的提交时间和 `submitted` 状态。重复请求（包括更换幂等键）始终返回首份已提交答卷，不读取或覆盖新传入的文件。
 
@@ -257,6 +264,10 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 默认限制为：最多 1000 个文件、UTF-8 文件内容合计 10 MiB、公开测试输出 1 MiB、序列化快照 16 MiB。文件名须为不含越界片段的相对 POSIX 路径，最多 500 字符；重复路径、文件/目录冲突、二进制内容及超限输入会明确失败，不静默丢弃。空文件和空文件列表允许保存；公开测试输出的 `null` 表示未提供，空字符串表示输出为空，都不表示测试通过。
 
 文件系统与 PostgreSQL 不共享事务。若文件已经落盘但数据库提交失败，数据库记录和会话提交时间会回滚，文件可能作为未引用对象保留；此类文件不会出现在提交查询中，重试可安全复用。当前没有自动垃圾回收，避免误删被其他提交复用的对象。读取损坏或缺失快照时明确失败，不回退到活动工作区。
+
+### 到期与恢复处理
+
+已提供独立命令 `python -m app.submissions.maintenance`，扫描 PostgreSQL 中到期、正在提交/提交失败及待清理的会话，复用原沙箱和最终答卷语义。默认处理一轮，可通过 `--watch --interval 5` 持续运行，按 `SANDBOX_BACKEND_REF` 限定宿主；没有在 HTTP 导入时自动启动。命令、共享重试间隔及实际暂停延迟的边界见 [提交定期处理](docs/submission-maintenance.md)。
 
 ### 数据库测试
 
@@ -319,6 +330,7 @@ GitHub Actions 工作流仍为 `.github/workflows/backend-ci.yml`，显示名为
 | Linux / Node 22 | `npm ci`、ESLint（零警告）、TypeScript 检查和 Vite 构建 |
 | Windows / Python 3.13 | 配置单元测试、快照并发及路径校验，不启动 PostgreSQL 服务容器 |
 | Linux / Compose | 启动 PostgreSQL 16 和 Redis，验证健康状态、数据库查询和 Redis PING，结束后清理本次 CI 的容器与卷 |
+| Linux / 应用 Compose | 构建前后端镜像，验证同源代理、Cookie、迁移及全部应用容器重建后原答卷恢复；只使用合成测试数据 |
 | `Required checks` | 汇总前述全部任务；失败、取消或跳过都会使汇总失败，只有全部成功才通过 |
 
 CI 使用独立临时数据库和固定测试密码，不需要额外配置仓库 Secret。所有 PR 都运行完整检查，未按目录跳过。主分支规则配置保存在 `.github/main-ruleset.json`，要求 `Required checks` 来自 GitHub Actions、至少另一位成员复查、解决评审讨论并保持分支最新，同时禁止强推和删除 `main`。配置文件须另行应用到 GitHub 才生效，实际启用状态以仓库设置和 API 为准；流程见 CI 文档。GitHub 实际执行结果以 Actions 和 PR 检查页为准，本地验证不替代远程执行记录。
@@ -327,13 +339,15 @@ CI 使用独立临时数据库和固定测试密码，不需要额外配置仓�
 
 前后端启动见前文。真实沙箱联调仍需要对应适配器、宿主和运行环境，本地 Docker Desktop 不表示已具备 gVisor 沙箱能力。
 
+独立的 `deploy/compose.yml` 可启动完整应用容器栈；默认仅开放本机 8080，同源代理前后端，共享数据库与答卷持久卷。Linux 宿主另加 `deploy/compose.gvisor.yml` 后装配真实沙箱适配器并运行维护进程。首次账号设置、HTTPS 前提、启动、升级与回退步骤见 [应用容器部署](docs/application-deployment.md)，这组配置不改动根目录的开发数据库 Compose。
+
 ## 开发与部署流程
 
 日常流程：**本地任务分支开发与调试 → 人工检验 → PR 复查并合并 `main` → 服务器部署已验证的提交 → 联调与验收**。
 
 - 本地用于开发，GitHub 用于代码协作，服务器用于运行集成后的版本。服务器上的项目目录是同一仓库的独立副本，通过 Git 更新，不与本地目录自动同步；日常代码修改在本地完成。
-- 当前先推进本地功能开发，暂不配置服务器。首个可运行功能完成后安排首次部署，提前验证部署流程，后续随集成进度更新。
-- 部署沿用 Docker Compose 方向，由赵晨一协调。首次部署时补齐启动步骤、部署提交号及回退方式；服务器凭证和环境配置不入库，数据库与提交快照使用持久存储，避免更新服务时丢失。
+- 当前已完成本地应用容器与持久化验收，尚无正式服务器部署；后续在具备宿主及完整工作台后做现场联调。
+- 部署沿用 Docker Compose，由赵晨一协调，启动和回退步骤已提供；正式部署另行记录实际提交号、镜像 ID 和验收结果。服务器凭证和环境配置不入库，数据库与提交快照使用持久存储，避免更新服务时丢失。
 
 ## 开发约定
 
