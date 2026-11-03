@@ -389,6 +389,12 @@ get_session_receipt(session_id)
 
 显式沙箱入口已挂载 WS `/api/v1/sessions/{session_id}/terminal`：原浏览器 Cookie 鉴权，精确 Origin 允许名单，只有 `in_progress` 且未到截止时间才能连接、输入或 resize。协议沿用上述 input/output/resize；Ctrl+C 原样发送 `\u0003`。完整配置、限制、关闭码、断线语义和真实验证命令见 [终端与文件交接](workspace-terminal-handoff.md)。
 
-GET `/files` 和 GET `/file?path=...` 已接入 `LockedSession.observe_file_revision` 与持久版本表，先执行 Alembic `upgrade head` 到 `0005`。首次观察返回版本 1，相同内容保持版本，观察到变化时递增，记录与读取使用同一会话事务，成功提交后才返回浏览器；内部契约见 [工作区文件版本](workspace-file-revisions.md)。响应结构沿用附录 E；会话忙返回 409 与 `Retry-After: 1`，未开考/已结束返回 409，非法路径返回 422，归属不符返回 404。仍保留方法缺失时的 503 `FILE_REVISIONS_UNAVAILABLE` 兜底，数据库或读取故障返回 503。PUT `/file` 尚未提供。
+GET `/files` 和 GET `/file?path=...` 已接入 `LockedSession.observe_file_revision` 与持久版本表，先执行 Alembic `upgrade head` 到 `0005`。首次观察返回版本 1，相同内容保持版本，观察到变化时递增，记录与读取使用同一会话事务，成功提交后才返回浏览器；内部契约见 [工作区文件版本](workspace-file-revisions.md)。响应结构沿用附录 E；会话忙返回 409 与 `Retry-After: 1`，未开考/已结束返回 409，非法路径返回 422，归属不符返回 404。仍保留方法缺失时的 503 `FILE_REVISIONS_UNAVAILABLE` 兜底，数据库或读取故障返回 503。
+
+PUT `/file` 已提供，沿用 `path/expected_version/content` 请求和 `path/new_version/saved_at` 响应。版本必须为正整数，内容限 UTF-8 编码后 1 MiB。相同内容保存保持版本；旧版本或暂停前发生的终端修改返回 409 `FILE_VERSION_CONFLICT`，detail 包含 `current_version`，不会覆盖当前内容。前端保留本地编辑并重新读取比较，不得自动套用新版本强行重发。
+
+保存先取得共享会话锁，暂停考生进程后再次核对摘要，由受限临时 runsc 容器执行固定脚本原子替换；确认写入容器已移除后才恢复原进程。只读文件返回 403；非法参数返回 422；会话忙为 409 `SESSION_BUSY`，可按 `Retry-After: 1` 重试；状态不允许为 409 `SESSION_NOT_WRITABLE`。保存异常返回 503 `FILE_SAVE_UNCERTAIN`，需重新读取核对，原环境可能保持暂停；显式确认后可重试，不能自动覆盖。文件替换与数据库提交不是同一事务，下一次读取会根据实际内容恢复版本。
+
+交卷前前端应 flush 并等待保存成功。冻结会先停止遗留写入容器，再导出稳定文件；固定 staging 文件不属于答卷。API 与维护进程需同时升级适配器，不能混用新保存模块和旧冻结模块。保存不会延长考试截止时间。详细恢复语义见 [工作区交接](workspace-terminal-handoff.md)。
 
 本期固定六文件，只有 `src/booking.py`、预建的 `tests/test_candidate.py` 可编辑；草案中 `src/main.py` 的可写示例已被陈智恒确认的会议室题目权限取代。只读文件不能由终端删除或替换。

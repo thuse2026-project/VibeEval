@@ -34,6 +34,8 @@ class DockerSubmissionBridge:
         return obj
 
     def freeze_and_export(self, view):
+        from .safe_save import remove_writer
+
         if view.status not in {"submitting", "submission_failed"}:
             raise ValueError("submission fence required")
         obj = self._container(view)
@@ -42,6 +44,7 @@ class DockerSubmissionBridge:
             obj.reload()
         if obj.status != "paused":
             raise ValueError("sandbox is not paused")
+        remove_writer(self.client, view)
         stream, _ = obj.get_archive("/workspace")
         data = bytearray()
         try:
@@ -56,6 +59,8 @@ class DockerSubmissionBridge:
         return FrozenWorkspace(view.session_id, view.sandbox_id, decode_workspace(data))
 
     def delete_sandbox(self, view):
+        from .safe_save import remove_writer
+
         if view.status != "submitted":
             raise ValueError("committed submission required")
         try:
@@ -65,12 +70,16 @@ class DockerSubmissionBridge:
             try:
                 self.client.containers.get(view.sandbox_id)
             except NotFound:
+                remove_writer(self.client, view)
                 return
             raise
+        remove_writer(self.client, view)
         obj.remove(force=True, v=False)
 
 
 def decode_workspace(data):
+    from .safe_save import STAGING_FILES
+
     files, seen, total = [], set(), 0
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
         for index, entry in enumerate(archive):
@@ -92,6 +101,8 @@ def decode_workspace(data):
                 raise ValueError("unsupported workspace entry")
             if entry.size > 1024 * 1024 or len(files) >= 200:
                 raise ValueError("workspace limit exceeded")
+            if path in STAGING_FILES:
+                continue  # Incomplete atomic staging is never an answer file.
             total += entry.size
             if total > 10 * 1024 * 1024:
                 raise ValueError("workspace limit exceeded")

@@ -8,6 +8,8 @@
 
 已整合 PostgreSQL 与 Redis 开发环境、共享会话与提交服务。入场接共享数据库的启动、旧数据和沙箱对接说明见 [入场 PostgreSQL 交接](docs/entry-postgres-handoff.md)。
 
+成员 C 的显式沙箱入口已提供准备、开始、文件树、文件读取、安全保存和 WebSocket PTY，文件版本复用共享迁移 `0005`。真实 gVisor 读写与冻结测试已通过；候选人工作台仍需前端联合验收，见 [工作区接入](docs/workspace-terminal-handoff.md)。
+
 ## 文档入口
 
 - [完整 VibeEval 文档](docs/requirements/VibeEval-AICoding%20平台.md)：一期范围以附录 E 为主要依据，正文和其他附录作为背景参考。
@@ -23,13 +25,13 @@
 - [提交定期处理](docs/submission-maintenance.md)：到期自动提交、进程中断恢复和失败清理重试。
 - [工作区文件版本](docs/workspace-file-revisions.md)：持久版本表、同一会话事务内的摘要观察接口与接入验证。
 - [应用容器部署](docs/application-deployment.md)：前后端打包、共享持久卷、可选 gVisor 维护进程及升级回退。
-- [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读取、版本表待接入接口及联合测试。
+- [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读写、持久版本冲突和联合测试。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
 ## 开发前需要知道
 
-- 技术基线：前端 React + TypeScript + Vite，后端 Python + FastAPI，数据库 PostgreSQL。沙箱通过适配器接入，Docker + gVisor 的交卷链路已通过真实联合验证，文件/PTY 和完整工作台仍待联调；原需求中的 E2B 保留为背景方案。
+- 技术基线：前端 React + TypeScript + Vite，后端 Python + FastAPI，数据库 PostgreSQL。沙箱通过适配器接入，Docker + gVisor 的文件读写、PTY 和冻结链路已通过真实后端联合验证，完整前端工作台仍待联调；原需求中的 E2B 保留为背景方案。
 - 前端负责交互；身份权限、会话状态和考试截止时间由后端决定，`session_id` 本身不等于访问凭证。
 - 考生代码在独立沙箱运行，平台后端负责管理沙箱；不在平台后端直接执行考生代码。
 - 交卷后以固定快照为准，后台调阅读取提交快照。

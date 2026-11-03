@@ -101,6 +101,13 @@ class SandboxRuntime:
     def read_files(self, view):
         return self._call("read_files", view)
 
+    def save_file(self, view, path, expected_digest, content):
+        from app.workspace.files import encode_content, validate_path
+
+        validate_path(path, write=True)
+        encode_content(content)
+        return self._call("save_file", view, path, expected_digest, content)
+
     def delete_sandbox(self, view):
         return self._call("delete_sandbox", view)
 
