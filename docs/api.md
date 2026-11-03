@@ -147,7 +147,7 @@ app.dependency_overrides[get_submission_reader] = lambda: submission_reader
 
 ## 提交持久化内部契约
 
-共享会话、容器映射、跨进程行锁、状态集合及提交失败后的恢复规则见 [沙箱接入约定](sandbox-integration.md)，对应迁移 `0004`。`SessionView.task_version_id` 与 `sandbox_image_ref` 分别提供题目发布版本和镜像引用；提交台账会冻结保存两者，现有管理端 reader 字段保持不变。已有 HTTP 草案仍待对齐这些内部状态和鉴权方式。
+共享会话、容器映射、跨进程行锁、状态集合及提交失败后的恢复规则见 [沙箱接入约定](sandbox-integration.md)，当前迁移为 `0005`，新增工作区文件版本表。`SessionView.task_version_id` 与 `sandbox_image_ref` 分别提供题目发布版本和镜像引用；提交台账会冻结保存两者，现有管理端 reader 字段保持不变。已有 HTTP 草案仍待对齐这些内部状态和鉴权方式。
 
 以下为当前分支已实现的 Python 内部服务，HTTP 交卷路由见上一节，真实适配器通过显式工厂接入；下方 E.3 保留原始 HTTP 草案。
 
@@ -389,6 +389,6 @@ get_session_receipt(session_id)
 
 显式沙箱入口已挂载 WS `/api/v1/sessions/{session_id}/terminal`：原浏览器 Cookie 鉴权，精确 Origin 允许名单，只有 `in_progress` 且未到截止时间才能连接、输入或 resize。协议沿用上述 input/output/resize；Ctrl+C 原样发送 `\u0003`。完整配置、限制、关闭码、断线语义和真实验证命令见 [终端与文件交接](workspace-terminal-handoff.md)。
 
-GET `/files` 和 GET `/file?path=...` 已提供路由及读取业务，但等待赵晨一提供 `LockedSession.observe_file_revision` 和持久版本表。缺失时返回 503 `{"detail":{"code":"FILE_REVISIONS_UNAVAILABLE","message":"文件版本服务尚未接入"}}`，不会返回虚构版本号。接入后响应结构沿用附录 E；会话忙返回 409 与 `Retry-After: 1`，未开考/已结束返回 409，非法路径返回 422，归属不符返回 404。PUT `/file` 尚未提供。
+GET `/files` 和 GET `/file?path=...` 已接入 `LockedSession.observe_file_revision` 与持久版本表，先执行 Alembic `upgrade head` 到 `0005`。首次观察返回版本 1，相同内容保持版本，观察到变化时递增，记录与读取使用同一会话事务，成功提交后才返回浏览器；内部契约见 [工作区文件版本](workspace-file-revisions.md)。响应结构沿用附录 E；会话忙返回 409 与 `Retry-After: 1`，未开考/已结束返回 409，非法路径返回 422，归属不符返回 404。仍保留方法缺失时的 503 `FILE_REVISIONS_UNAVAILABLE` 兜底，数据库或读取故障返回 503。PUT `/file` 尚未提供。
 
 本期固定六文件，只有 `src/booking.py`、预建的 `tests/test_candidate.py` 可编辑；草案中 `src/main.py` 的可写示例已被陈智恒确认的会议室题目权限取代。只读文件不能由终端删除或替换。

@@ -1,6 +1,6 @@
 # 沙箱与共享数据库接入约定
 
-本说明对应数据库迁移 `0004`。共享数据库层、提交存储、`SubmissionCoordinator` 交卷协调器及候选人交卷 HTTP 路由已实现，已接入陈弘毅 `codex/sandbox-lifecycle@761cdc7` 的绑定与提交适配器。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。HTTP 鉴权、错误码和应用注入见 [交卷 HTTP 接入](submission-http-handoff.md)，普通与真实环境验证边界见 [联合验收说明](sandbox-submission-validation.md)。
+本说明当前对应数据库迁移 `0005`，在既有会话与提交模型上新增工作区文件版本表，接口见 [工作区文件版本](workspace-file-revisions.md)。共享数据库层、提交存储、`SubmissionCoordinator` 交卷协调器及候选人交卷 HTTP 路由已实现，已接入陈弘毅 `codex/sandbox-lifecycle@761cdc7` 的绑定与提交适配器；文件读取与终端接入基于其后续 `91ebff9`。以下 Python 接口均为可信后端内部接口，调用前仍须校验浏览器凭据和会话归属，`session_id` 不充当凭证。HTTP 鉴权、错误码和应用注入见 [交卷 HTTP 接入](submission-http-handoff.md)，普通与真实环境验证边界见 [联合验收说明](sandbox-submission-validation.md)。
 
 ## 1. 会话、沙箱和截止时间
 
@@ -143,7 +143,7 @@ for view in coordinator.lifecycle.list_cleanup_candidates():
 
 成员 C 已提供 `BoundSandboxAdapter.ensure_bound`、`freeze_and_export`、`delete_sandbox`，通过固定资源名、标签和实际镜像 ID 核验绑定。`SandboxRuntime` 在独立 spawn 子进程建立 Docker 客户端，提供请求与操作等待超时；显式 HTTP 工厂为 `app.sandbox.http_app:create_app`。导出为内存中的稳定文本元组，公开测试输出当前为 `None`。
 
-文件 HTTP、WebSocket PTY、健康检查及准备/开始路由尚未交付，不能仅凭容器 running 进入可答题状态。保存与终端输入后续仍须使用共享写入门禁；完整工作台及生产部署验收继续留待后续阶段。到期和清理扫描已提供独立命令，新增联合测试及 Linux/gVisor 环境配置见联合验收说明，普通 CI 跳过的真实用例不计为通过。
+成员 C 的 `91ebff9` 已提供受限文件读取、WebSocket PTY、健康检查及准备/开始路由，接入说明见 [终端与文件交接](workspace-terminal-handoff.md)；`0005` 补齐读取所需的持久版本方法。不能仅凭容器 running 进入可答题状态。安全保存仍待实现，保存与终端输入须遵守共享写入门禁；完整工作台及生产部署验收留待后续阶段。到期和清理扫描已提供独立命令，联合测试及 Linux/gVisor 环境配置见联合验收说明，普通 CI 跳过的真实用例不计为通过。
 
 ## 7. Windows 快照并发兼容修复
 

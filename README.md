@@ -21,6 +21,7 @@
 - [CI 与 PR 合并检查](docs/ci-and-pr-checks.md)：前后端检查命令、汇总检查和主分支规则配置。
 - [沙箱与交卷联合验收](docs/sandbox-submission-validation.md)：真实适配器启动、可信题目镜像构建和 opt-in gVisor 验收。
 - [提交定期处理](docs/submission-maintenance.md)：到期自动提交、进程中断恢复和失败清理重试。
+- [工作区文件版本](docs/workspace-file-revisions.md)：持久版本表、同一会话事务内的摘要观察接口与接入验证。
 - [应用容器部署](docs/application-deployment.md)：前后端打包、共享持久卷、可选 gVisor 维护进程及升级回退。
 - [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读取、版本表待接入接口及联合测试。
 
@@ -228,7 +229,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini check
 ```
 
-Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动数据库；迁移完成后版本应为 `0004 (head)`，`check` 应提示没有新的迁移差异。启动应用时不自动建表，结构变更统一通过 Alembic 管理。
+Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动数据库；迁移完成后版本应为 `0005 (head)`，`check` 应提示没有新的迁移差异。启动应用时不自动建表，结构变更统一通过 Alembic 管理。
 
 连接配置从仓库根目录 `.env` 读取，不依赖当前工作目录；同名环境变量优先。默认使用 `POSTGRES_HOST`（`127.0.0.1`）、`POSTGRES_PORT`、`POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD`。可用 `DATABASE_URL` 整体覆盖连接配置，支持 `postgresql://` 或 `postgresql+psycopg://`；直接填写 URL 时须对账号和密码中的特殊字符进行 URL 编码，使用分项配置时无需编码。
 
@@ -240,6 +241,7 @@ Linux/macOS 将 Python 路径换为 `./.venv/bin/python`。先按上一节启动
 | `exam_sessions` | 关联邀请，保存浏览器凭据哈希、状态、沙箱引用及入场/开始/截止/提交时间；邀请和浏览器哈希分别唯一 |
 | `snapshots` | 保存快照所属会话、内容摘要、字节数、文件数和创建时间；文件正文放持久文件存储 |
 | `submissions` | 每会话唯一的最终提交，记录幂等键、固定快照引用及当时的考生/场次身份和时间；禁止引用其他会话的快照 |
+| `workspace_file_revisions` | 以原会话和相对路径为主键，保存正整数版本和内容摘要；在原会话锁及事务内观察变化，会话删除时级联清理 |
 
 `ExamSession.task_version_id` 保存逻辑题目发布版本，`sandbox_image_ref` 保存不可变镜像引用；两者在最终提交时复制到 `Submission`。新接入通过 `prepare_sandbox(..., task_version_id=...)` 固定题目版本，未知旧记录不自动回填。具体调用及 Windows 快照并发修复说明见沙箱接入文档。
 

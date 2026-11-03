@@ -123,6 +123,22 @@ class ExamSession(Base):
     invitation: Mapped[Invitation] = relationship(back_populates="session")
 
 
+class WorkspaceFileRevision(Base):
+    __tablename__ = "workspace_file_revisions"
+    __table_args__ = (
+        CheckConstraint("length(path) > 0", name="path_not_empty"),
+        CheckConstraint("version > 0", name="version_positive"),
+        CheckConstraint("content_sha256 ~ '^[0-9a-f]{64}$'", name="digest_format"),
+    )
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE"), primary_key=True
+    )
+    path: Mapped[str] = mapped_column(String(500), primary_key=True)
+    version: Mapped[int] = mapped_column(BigInteger)
+    content_sha256: Mapped[str] = mapped_column(String(64))
+
+
 class Snapshot(Base):
     __tablename__ = "snapshots"
     __table_args__ = (

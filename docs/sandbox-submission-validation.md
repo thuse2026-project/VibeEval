@@ -4,7 +4,7 @@
 
 ## 接入与启动
 
-在已注册 `runsc` 的 Linux Docker 环境，安装 `backend/requirements.txt` 和 `backend/requirements-gvisor.txt`，或直接安装 `requirements-dev.txt`。数据库配置沿用根 `.env`，运行 Alembic `upgrade head` 到 `0004`。进程环境设置：
+在已注册 `runsc` 的 Linux Docker 环境，安装 `backend/requirements.txt` 和 `backend/requirements-gvisor.txt`，或直接安装 `requirements-dev.txt`。数据库配置沿用根 `.env`，运行 Alembic `upgrade head` 到当前版本（现为 `0005`，包括工作区文件版本表）。进程环境设置：
 
 ```sh
 export SANDBOX_BACKEND_REF=docker-gvisor:exam-node-01
