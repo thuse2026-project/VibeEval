@@ -1,19 +1,19 @@
 @scope (.candidate-app) {
 :scope {
-  --bg: #f5f6f8;
+  --bg: var(--ve-bg,#f4f6f9);
   --panel: #ffffff;
-  --line: #e5e7eb;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --blue: #2563eb;
-  --blue-soft: #eff6ff;
+  --line: var(--ve-line,#dce3ec);
+  --text: var(--ve-text,#233348);
+  --muted: var(--ve-muted,#52647a);
+  --blue: var(--ve-accent,#395e87);
+  --blue-soft: var(--ve-accent-soft,#edf2f8);
   --green: #16a34a;
   --green-soft: #f0fdf4;
   --amber: #d97706;
   --amber-soft: #fffbeb;
   --red: #dc2626;
   --red-soft: #fef2f2;
-  --dark: #1f2937;
+  --dark: #243348;
   --editor: #1e1e1e;
   --terminal: #111827;
 }
@@ -27,7 +27,16 @@ html, body, #root { height: 100%; }
   -webkit-font-smoothing: antialiased;
 }
 
-.screen-page { display: flex; flex-direction: column; min-height: 100vh; }
+.screen-page { display: flex; flex-direction: column; min-height: 100dvh; }
+:scope main { display:block; }
+:scope > .confirm-body { width:min(448px,calc(100% - 32px)); margin:64px auto; padding:32px; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+:scope > .confirm-body h1 { margin-bottom:24px; text-align:left; }
+:scope > .confirm-body form { display:block; width:100%; padding:0; margin:0; }
+:scope > .confirm-body label { display:block; font-size:14px; font-weight:600; }
+:scope > .confirm-body input { display:block; margin-top:10px; }
+:scope > .confirm-body button { width:100%; margin-top:24px; min-height:44px; border:1px solid var(--blue); border-radius:6px; background:var(--blue); color:#fff; font-size:14px; font-weight:600; }
+:scope > .confirm-body button:disabled { opacity:.6; }
+:scope button:focus-visible, :scope a:focus-visible { outline:3px solid #6d8eb4; outline-offset:3px; }
 
 .topbar {
   height: 56px;
@@ -53,7 +62,8 @@ html, body, #root { height: 100%; }
   font-size: 13px;
   cursor: pointer;
 }
-.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary { width:auto; margin:0; background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn.primary:hover:not(:disabled) { background:var(--ve-accent-hover,#2c4d71); }
 .btn.danger { background: #fff; border-color: #fca5a5; color: var(--red); }
 .btn:disabled { background: #f3f4f6; color: #9ca3af; border-color: #e5e7eb; cursor: not-allowed; }
 
@@ -74,7 +84,7 @@ html, body, #root { height: 100%; }
 .banner-error { background: var(--red-soft); border: 1px solid #fca5a5; color: var(--red); }
 
 /* 考前确认 */
-.confirm-body { flex: 1; padding: 32px 48px; }
+.confirm-body { flex: 1; padding: 32px 48px; width:100%; max-width:1040px; margin:0 auto; }
 .confirm-body h1 { font-size: 24px; margin-bottom: 6px; }
 .task-meta { display: flex; gap: 16px; margin: 8px 0 24px; flex-wrap: wrap; }
 .task-meta span { font-size: 13px; color: var(--muted); }
@@ -87,7 +97,7 @@ html, body, #root { height: 100%; }
 .confirm-footer .actions { display: flex; gap: 12px; }
 
 /* 环境准备 */
-.provision-body { flex: 1; padding: 48px 120px; }
+.provision-body { flex: 1; padding: 48px; width:100%; max-width:880px; margin:0 auto; }
 .provision-body h1 { font-size: 22px; margin-bottom: 28px; }
 .steps { list-style: none; }
 .step { display: flex; gap: 16px; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--line); }
@@ -116,6 +126,8 @@ html, body, #root { height: 100%; }
 .ide-topbar .spacer { flex: 1; }
 .ide-topbar button { background: transparent; border: 1px solid #4b5563; color: #fff; padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; }
 .ide-topbar button.submit { background: var(--blue); border-color: var(--blue); }
+.ide-topbar button:hover:not(:disabled) { background:#35465e; }
+.ide-topbar button.submit:hover:not(:disabled) { background:#476f9b; }
 .ide-main { display: grid; grid-template-columns: 220px 1fr 300px; min-height: 0; overflow: hidden; }
 .ide-main.has-no-ai { grid-template-columns: 220px 1fr; }
 .sidebar { background: #fff; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
@@ -192,6 +204,9 @@ html, body, #root { height: 100%; }
 .ide-main.without-ai {grid-template-columns:220px minmax(0,1fr);}
 .candidate-error textarea {display:block;width:100%;min-height:120px;}
 @media(max-width:700px) {
+  .confirm-body,.provision-body { padding:28px 20px; }
+  .confirm-footer { padding:16px 20px; flex-wrap:wrap; gap:16px; text-align:left; }
+  .confirm-footer .actions { width:100%; align-items:center; }
   .ide-main.without-ai {grid-template-columns:150px minmax(0,1fr);}
   .ide-topbar {gap:8px;flex-wrap:wrap;}
 }
