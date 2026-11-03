@@ -68,7 +68,7 @@ export function WorkspaceScreen({
         </button>
       </div>
 
-      <div className="ide-main">
+      <div className={`ide-main ${aiOpen ? '' : 'without-ai'}`}>
         <aside className="sidebar">
           <div className="tabs">
             <button className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>

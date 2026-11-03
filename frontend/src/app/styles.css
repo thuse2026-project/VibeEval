@@ -184,4 +184,10 @@ html, body, #root { height: 100%; }
 .event .flag { background: var(--amber-soft); color: var(--amber); font-size: 11px; padding: 1px 6px; border-radius: 4px; }
 
 .candidate-error {padding:12px;background:#fff0eb;color:#7b2511;}
+.ide-main.without-ai {grid-template-columns:220px minmax(0,1fr);}
+.candidate-error textarea {display:block;width:100%;min-height:120px;}
+@media(max-width:700px) {
+  .ide-main.without-ai {grid-template-columns:150px minmax(0,1fr);}
+  .ide-topbar {gap:8px;flex-wrap:wrap;}
+}
 }

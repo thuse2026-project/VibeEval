@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "lint": "eslint . --max-warnings 0",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "test:integration": "playwright test"
   },
   "engines": {
     "node": "^22.13.0 || >=24"
@@ -20,6 +21,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "@types/node": "^22.0.0",
     "@eslint/js": "10.0.1",
     "@types/react": "^19.1.0",
