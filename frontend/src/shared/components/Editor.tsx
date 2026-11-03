@@ -23,6 +23,8 @@ export function CodeEditor({ path, value, readOnly, onChange }: Props) {
         </span>
       </div>
       <Editor
+        key={path}
+        path={path}
         height="100%"
         language={languageFromPath(path)}
         value={value}
