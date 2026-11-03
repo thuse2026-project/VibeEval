@@ -13,6 +13,7 @@ type Props = {
   content: string
   activeReadonly: boolean
   saveState: SaveState
+  busy: boolean
   sessionId: string
   command: {id:number;text:string}|null
   terminalEnabled: boolean
@@ -40,6 +41,7 @@ export function WorkspaceScreen({
   content,
   activeReadonly,
   saveState,
+  busy,
   sessionId, command, terminalEnabled, onTerminalConnection,
   terminalConnected,
   onSelectFile,
@@ -62,9 +64,9 @@ export function WorkspaceScreen({
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
-        <button disabled={!terminalConnected || !terminalEnabled} onClick={onRunTests}>运行测试</button>
-        <button className="submit" onClick={onSubmit}>
-          提交答卷
+        <button disabled={busy || !terminalConnected || !terminalEnabled} onClick={onRunTests}>运行测试</button>
+        <button className="submit" disabled={busy || !terminalEnabled} onClick={onSubmit}>
+          {busy ? '正在处理…' : '提交答卷'}
         </button>
       </div>
 

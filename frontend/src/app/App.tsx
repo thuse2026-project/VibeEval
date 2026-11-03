@@ -131,7 +131,7 @@ export default function CandidateApp() {
     if(!window.confirm('确认交卷？提交后不能继续修改。'))return;
     await act(async()=>{await flush();if(dirty.current.size)throw new Error('仍有未保存修改，请先保存。');if(session)await getReceipt(session);});
   }
-  return <div className="candidate-app">
+  return <div className="candidate-app" aria-busy={busy}>
     {phase!=='workspace'&&dirty.current.size>0&&<section className="candidate-error" aria-label="未保存草稿">
       <h2>以下本地草稿尚未确认保存，不属于已提交答卷</h2><p>考试结束或会话失效后不能补写答卷，但可复制草稿留存。</p>
       {[...dirty.current].map(name=><label key={name}>{name}<textarea readOnly aria-label={`未保存草稿 ${name}`} value={drafts.current.get(name)??''}/></label>)}
@@ -153,7 +153,7 @@ export default function CandidateApp() {
         {id:'create',title:'准备独立环境',description:session.status==='ready'?'环境已就绪，尚未计时':'等待真实沙箱准备',state:session.status==='ready'?'done':busy?'doing':'wait'},
       ]} error={null} ready={!busy&&session.status==='ready'} onRetry={()=>void prepare()} onEnter={()=>void start()}/>
       :phase==='workspace'?<WorkspaceScreen title={session.exam_info.title} remaining={remaining} files={files} activePath={path} content={content}
-        activeReadonly={busy||remaining<=0||session.status!=='in_progress'||!!files.find(f=>f.path===path)?.readonly} saveState={saveState}
+        activeReadonly={busy||remaining<=0||session.status!=='in_progress'||!!files.find(f=>f.path===path)?.readonly} saveState={saveState} busy={busy}
         terminalConnected={connected} sessionId={sid!} command={command} onTerminalConnection={setConnected}
         terminalEnabled={remaining>0&&session.status==='in_progress'} onSelectFile={name=>void selectFile(name)} onEdit={edit}
         onRunTests={()=>void act(async()=>{await flush();if(!connected)throw new Error('请先连接终端。');setCommand({id:Date.now(),text:testCommand});})} onSubmit={()=>void submit()}/>

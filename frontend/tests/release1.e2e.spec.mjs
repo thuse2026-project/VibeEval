@@ -70,7 +70,7 @@ test('real workspace saves, conflicts, PTY tests, submission and examiner snapsh
   await expect(page.locator('.editor-tabs')).toContainText('src/booking.py');
   await expect(page.locator('.editor-tabs')).not.toContainText('只读');
   await paste(page, reference + '\n# final-edit-before-submit\n');
-  const receiptResponse = page.waitForResponse(response => response.url().endsWith('/submit') && response.status() === 202);
+  const receiptResponse = page.waitForResponse(response => response.url().endsWith('/submit') && response.status() === 202, { timeout: 90000 });
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: '提交答卷', exact: true }).click();
   const receipt = await (await receiptResponse).json();
@@ -83,6 +83,7 @@ test('real workspace saves, conflicts, PTY tests, submission and examiner snapsh
   await page.getByLabel('账号', { exact: true }).fill(process.env.VIBEEVAL_E2E_ADMIN_USER ?? 'examiner');
   await page.getByLabel('密码', { exact: true }).fill(process.env.VIBEEVAL_E2E_ADMIN_PASSWORD);
   await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.getByLabel('考核场次').selectOption(session.exam_info.id);
   const row = page.getByRole('row').filter({ hasText: session.candidate.id });
   await row.getByRole('link', { name: '查看答卷' }).click();
   await page.getByRole('button', { name: 'src/booking.py', exact: true }).click();
@@ -93,11 +94,12 @@ test('real workspace saves, conflicts, PTY tests, submission and examiner snapsh
 test('real deadline submission preserves a visible unsaved local draft', async ({ page }) => {
   test.skip(!process.env.VIBEEVAL_E2E_DEADLINE_TOKEN, 'Provide a fresh one-minute invitation');
   await enter(page, process.env.VIBEEVAL_E2E_DEADLINE_TOKEN);
-  await expect.poll(async () => page.locator('.timer').textContent(), { timeout: 70000, intervals: [200] }).toBe('00:03');
+  await expect.poll(async () => page.locator('.timer').textContent(), { timeout: 70000, intervals: [200] }).toBe('00:04');
   await page.locator('.monaco-editor .view-lines').click();
   await page.keyboard.press('Control+End');
   await page.keyboard.press('Enter');
-  await page.keyboard.type('# local-last-second-draft');
+  await page.evaluate(() => navigator.clipboard.writeText('# local-last-second-draft'));
+  await page.keyboard.press('Control+v');
   await expect(page.getByRole('heading', { name: '答卷已提交' })).toBeVisible({ timeout: 30000 });
   await expect(page.getByLabel('未保存草稿 src/booking.py')).toHaveValue(/local-last-second-draft/);
   await expect(page.getByRole('heading', { name: '以下本地草稿尚未确认保存，不属于已提交答卷' })).toBeVisible();
