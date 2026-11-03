@@ -21,6 +21,7 @@ export default function CandidateApp() {
   const [files,setFiles] = useState<FileEntry[]>([]);
   const metadata = useRef<FileEntry[]>([]);
   const drafts = useRef(new Map<string,string>());
+  const selection = useRef(0);
   const dirty = useRef(new Set<string>());
   const [path,setPath] = useState('');
   const [content,setContent] = useState('');
@@ -106,20 +107,34 @@ export default function CandidateApp() {
     };
     const next=chain.current.catch(()=>{}).then(save);chain.current=next;return next;
   }
-  function edit(text:string) {
-    if(locked.current||remaining<=0||session?.status!=='in_progress'||files.find(f=>f.path===path)?.readonly)return;
-    drafts.current.set(path,text);dirty.current.add(path);setContent(text);setSaveState('idle');
+  function edit(name:string,text:string) {
+    if(locked.current||remaining<=0||session?.status!=='in_progress'||files.find(f=>f.path===name)?.readonly)return;
+    drafts.current.set(name,text);dirty.current.add(name);setSaveState('idle');
     if(timer.current)clearTimeout(timer.current);
     timer.current=setTimeout(()=>{void flush().catch(e=>setError(e.message));},5000);
   }
   async function selectFile(name:string) {
+    if(locked.current)return;
+    const requestId=++selection.current;
+    if(drafts.current.has(name)) {
+      const cached=drafts.current.get(name)!;
+      setPath(name);setContent(cached);
+      void flush().catch(e=>setError(e.message));
+      void request<{content:string;version:number}>(`/sessions/${sid}/file?path=${encodeURIComponent(name)}`).then(result=>{
+        const file=metadata.current.find(f=>f.path===name);
+        if(dirty.current.has(name)||drafts.current.get(name)!==cached||result.version<(file?.version??0))return;
+        drafts.current.set(name,result.content);if(file)file.version=result.version;
+        if(selection.current===requestId)setContent(result.content);
+      }).catch(e=>setError(e.message));
+      return;
+    }
     await act(async()=>{
-      await flush();
       const result=await request<{content:string;version:number}>(`/sessions/${sid}/file?path=${encodeURIComponent(name)}`);
       drafts.current.set(name,result.content);
       const file=metadata.current.find(f=>f.path===name);if(file)file.version=result.version;
       setPath(name);setContent(result.content);
     });
+    void flush().catch(e=>setError(e.message));
   }
   async function prepare() {await act(async()=>{
     setPhase('prepare');await request(`/sessions/${sid}/prepare`,{method:'POST'});setSession(await current());
@@ -131,7 +146,7 @@ export default function CandidateApp() {
     if(!window.confirm('确认交卷？提交后不能继续修改。'))return;
     await act(async()=>{await flush();if(dirty.current.size)throw new Error('仍有未保存修改，请先保存。');if(session)await getReceipt(session);});
   }
-  return <div className="candidate-app" aria-busy={busy}>
+  return <div className={`candidate-app ${phase==='workspace'?'workspace-open':''}`} aria-busy={busy}>
     {phase!=='workspace'&&dirty.current.size>0&&<section className="candidate-error" aria-label="未保存草稿">
       <h2>以下本地草稿尚未确认保存，不属于已提交答卷</h2><p>考试结束或会话失效后不能补写答卷，但可复制草稿留存。</p>
       {[...dirty.current].map(name=><label key={name}>{name}<textarea readOnly aria-label={`未保存草稿 ${name}`} value={drafts.current.get(name)??''}/></label>)}

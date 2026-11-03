@@ -32,6 +32,6 @@ export function TerminalPane({sessionId,enabled,command,onConnection}:Props) {
   useEffect(()=>{
     if(command&&socket.current?.readyState===WebSocket.OPEN)socket.current.send(JSON.stringify({type:'input',data:command.text}));
   },[command]);
-  return <div className="terminal"><div className="terminal-head"><span className={`conn ${connected?'online':'offline'}`}>{connected?'终端已连接 · /workspace':'终端未连接'}</span>
+  return <div className="terminal-pane"><div className="terminal-head"><span className={`conn ${connected?'online':'offline'}`}>{connected?'终端已连接 · /workspace':'终端未连接'}</span>
     <button disabled={!enabled||connected} onClick={()=>setAttempt(v=>v+1)}>重新连接终端</button></div><div ref={container} className="terminal-body"/></div>;
 }

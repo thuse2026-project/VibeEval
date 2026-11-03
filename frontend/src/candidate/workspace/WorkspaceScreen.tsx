@@ -20,7 +20,7 @@ type Props = {
   onTerminalConnection: (connected:boolean)=>void
   terminalConnected: boolean
   onSelectFile: (path: string) => void
-  onEdit: (content: string) => void
+  onEdit: (path: string, content: string) => void
   onRunTests: () => void
   onSubmit: () => void
 }
@@ -54,7 +54,7 @@ export function WorkspaceScreen({
   const [termOpen, setTermOpen] = useState(true)
 
   return (
-    <div className="ide">
+    <div className={`ide ${termOpen ? '' : 'terminal-collapsed'}`}>
       <div className="ide-topbar">
         <span className="logo">VibeEval</span>
         <span className="task">{title}</span>
@@ -64,6 +64,7 @@ export function WorkspaceScreen({
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
+        {busy && <span role="status">正在处理，请稍候…</span>}
         <button disabled={busy || !terminalConnected || !terminalEnabled} onClick={onRunTests}>运行测试</button>
         <button className="submit" disabled={busy || !terminalEnabled} onClick={onSubmit}>
           {busy ? '正在处理…' : '提交答卷'}
@@ -81,7 +82,7 @@ export function WorkspaceScreen({
             </button>
           </div>
           {leftTab === 'files' ? (
-            <FileTree files={files} activePath={activePath} onSelect={onSelectFile} />
+            <FileTree files={files} activePath={activePath} onSelect={onSelectFile} busy={busy} />
           ) : (
             <div className="problem-pane">
               <p>修复 src/booking.py 的会议室预约缺陷：允许首尾相接预约，取消后释放时段。完整题面见 README.md。</p>
