@@ -2,6 +2,7 @@ import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import Login from '../admin/login/Login';
 import Entry from '../candidate/entry/Entry';
+import CandidateApp from './App';
 import Overview from '../admin/submissions/Overview';
 import Detail from '../admin/submissions/Detail';
 import { api, ApiError, type Examiner } from '../shared/api';
@@ -112,4 +113,5 @@ function App() {
 }
 
 const candidateEntry = window.location.pathname === '/entry' || window.location.pathname === '/entry/';
-createRoot(document.getElementById('root')!).render(candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);
+const workspace = window.location.pathname === '/' || window.location.pathname.startsWith('/workspace');
+createRoot(document.getElementById('root')!).render(workspace ? <CandidateApp /> : candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);
