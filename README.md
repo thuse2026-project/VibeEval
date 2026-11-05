@@ -28,6 +28,8 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [工作区文件版本](docs/workspace-file-revisions.md)：持久版本表、同一会话事务内的摘要观察接口与接入验证。
 - [应用容器部署](docs/application-deployment.md)：前后端打包、共享持久卷、可选 gVisor 维护进程及升级回退。
 - [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读写、持久版本冲突和联合测试。
+- [模型 API 接入](docs/llm-api.md)：后端私有配置、模型列表、文本调用及本地连通性验证。
+- [Agent API 原子能力](docs/agent-primitives.md)：可检查的模型输入、纯对话，以及待逐批确认的上下文、压缩和结构化输出。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 

@@ -12,6 +12,7 @@ from .admin.router import AuthState, current_session, router
 from .admin.submissions import router as submission_router
 from .exams.router import router as entry_router
 from .exams.store import configured_store
+from .llm.router import router as llm_router
 from .submissions.coordinator import SubmissionSandbox
 from .submissions.router import router as candidate_submission_router
 from .submissions.storage import SnapshotStore
@@ -49,6 +50,7 @@ def create_app(
     app.include_router(overview_router)
     app.include_router(submission_router)
     app.include_router(evaluation_router)
+    app.include_router(llm_router)
     app.include_router(entry_router)
     app.include_router(candidate_submission_router)
 

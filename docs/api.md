@@ -14,6 +14,14 @@
 - 文件版本冲突、越界路径、只读文件和冻结后操作的错误约定。
 - 终端退出、断开及错误消息的约定。
 
+## 模型 API（新增）
+
+模型 API 新增独立考官联调接口：`GET /api/v1/admin/llm/config`、
+`GET /api/v1/admin/llm/models`、`POST /api/v1/admin/llm/chat`。
+沿用下述考官 Cookie 和 POST 来源头；请求、响应、限额及错误码见
+[模型 API 契约](llm-api.md#http-契约)。内部原子函数与后续批次见 [Agent 原子函数](agent-primitives.md)。
+本批尚未接入候选人工作台。
+
 ## 考官登录（本轮实现）
 
 - 账号由本地初始化命令预配置，无注册接口。
