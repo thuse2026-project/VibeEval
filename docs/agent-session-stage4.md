@@ -60,6 +60,7 @@ message.content 是助手文字，message.tool_calls 是结构化请求，两者
 工具请求非空时不能将助手文字当成整轮结束；以更新后的 Turn.status 为准。
 每步用量在 step.response.usage；state.usage 和 state.compaction_usage 是已接受记录的汇总。
 message.continuation_json 是适配器续调数据，不能当作可展示的内部推理。
+截断/过滤的 API 响应不暴露工具请求，保留明确结束原因和可用用量；修正细节见 [整体验收记录](agent-session-audit.md)。
 
 ## 外层应遵守的调用顺序
 

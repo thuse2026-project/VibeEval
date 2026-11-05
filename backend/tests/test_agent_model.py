@@ -311,6 +311,68 @@ class AgentModelTests(unittest.IsolatedAsyncioTestCase):
             accept_response(self.state, "s1", partial).turns[0].status, "failed"
         )
 
+    def test_provider_message_cannot_claim_a_different_role(self):
+        for role in ("user", "system", "tool", None):
+            payload = completion()
+            payload["choices"][0]["message"]["role"] = role
+            with self.subTest(role=role), self.assertRaises(LLMError):
+                parse_model_response(payload, tools=self.registry, model="m")
+
+    async def test_incomplete_tool_output_preserves_reason_usage_and_safe_continuation(
+        self,
+    ):
+        for reason, code in (
+            ("length", "OUTPUT_TRUNCATED"),
+            ("content_filter", "CONTENT_FILTERED"),
+        ):
+            for raw_calls in (
+                [NATIVE_CALL],
+                [
+                    {
+                        **NATIVE_CALL,
+                        "function": {"name": "read_file", "arguments": '{"path":'},
+                    }
+                ],
+                [{"function": {"arguments": '{"path":'}}],
+            ):
+                with self.subTest(reason=reason, raw_calls=raw_calls):
+                    seen = []
+
+                    def transport(request):
+                        seen.append(request)
+                        return httpx.Response(
+                            200,
+                            json=completion(
+                                text="输出未完成", calls=raw_calls, reason=reason
+                            ),
+                        )
+
+                    response = await call_model(
+                        self.prepare(),
+                        tools=self.registry,
+                        client=LLMClient(
+                            self.settings, transport=httpx.MockTransport(transport)
+                        ),
+                    )
+                    self.assertEqual(len(seen), 1)
+                    self.assertEqual(response.finish_reason, reason)
+                    self.assertEqual(response.message.tool_calls, ())
+                    failed = accept_response(self.state, "s1", response)
+                    self.assertEqual(failed.turns[0].status, "failed")
+                    self.assertEqual(failed.turns[0].steps[0].error_code, code)
+                    self.assertEqual(failed.usage.total_tokens, 10)
+                    self.assertEqual(pending_tool_calls(failed), ())
+                    continued = start_step(
+                        begin_turn(failed, "重新提问", request_key="m2"), step_id="s2"
+                    )
+                    payload = self.prepare(continued).payload
+                    NativeRequest.model_validate(payload)
+                    self.assertFalse(
+                        any(
+                            message.get("tool_calls") for message in payload["messages"]
+                        )
+                    )
+
     async def test_changed_tools_or_tampered_request_fail_before_any_api_call(self):
         class NeverCall:
             async def complete(self, payload):

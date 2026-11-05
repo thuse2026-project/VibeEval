@@ -217,8 +217,18 @@ def parse_model_response(
     try:
         choice = payload["choices"][0]
         message = choice["message"]
+        if message.get("role", "assistant") != "assistant":
+            raise ValueError
+        finish_reason = choice["finish_reason"]
         calls = []
-        raw_calls = message.get("tool_calls")
+        # Truncated/filtered output may contain unfinished argument JSON or even
+        # an unfinished call header. Preserve its reason/usage, never advertise
+        # it as a valid external request or replay its partial tool chain.
+        raw_calls = (
+            []
+            if finish_reason in ("length", "content_filter")
+            else message.get("tool_calls")
+        )
         if raw_calls is None:
             raw_calls = []
         if not isinstance(raw_calls, list):
@@ -260,7 +270,7 @@ def parse_model_response(
                 tool_calls=tuple(calls),
                 continuation_json=metadata,
             ),
-            finish_reason=choice["finish_reason"],
+            finish_reason=finish_reason,
             usage=usage,
         )
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):

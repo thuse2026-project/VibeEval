@@ -123,3 +123,4 @@ reasoning_summary 如有，仅为简短可展示说明；不要求模型提供�
 原自定义引用仓库和单次 JSON 协议草稿已移至 Git 忽略的 `runtime/agent-design-drafts/2026-11-05/`，
 不作为本分支正式接口。第一批为本地提交 ac80abc，第二批为 abd1a1e，第三批为 e9e914a；
 第四批经用户确认提交到本地分支，均未推送。接入方优先阅读第四批契约和 examples/agent_handoff.py。
+前四批提交后，按用户选择追加 [整体验收与修正](agent-session-audit.md)，保持既定接口范围。

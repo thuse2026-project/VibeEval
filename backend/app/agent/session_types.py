@@ -132,7 +132,7 @@ class ModelStep(FrozenModel):
     ]
     response: ModelResponse | None = None
     tool_results: tuple[ToolResult, ...] = ()
-    error_code: str | None = None
+    error_code: str | None = Field(default=None, pattern=r"^[A-Z0-9_]+$")
 
     @model_validator(mode="after")
     def paired_results(self):
@@ -142,27 +142,50 @@ class ModelStep(FrozenModel):
         if len(results) != len(set(results)) or not set(results) <= ids:
             raise ValueError("tool results must match unique calls in this step")
         if self.status == "awaiting_model" and (
-            self.response or self.tool_results or self.error_code
+            self.response or self.tool_results or self.error_code is not None
         ):
             raise ValueError("an awaiting model step cannot already contain a result")
         if self.status == "awaiting_tools" and (
             not calls
             or set(results) == ids
-            or self.error_code
+            or self.error_code is not None
             or self.response.finish_reason in ("length", "content_filter")
         ):
             raise ValueError("an awaiting tools step needs unresolved tool calls")
         if self.status == "completed" and (
             self.response is None
             or set(results) != ids
-            or self.error_code
+            or self.error_code is not None
             or self.response.finish_reason in ("length", "content_filter")
         ):
             raise ValueError(
                 "a completed step must have a complete response and tool results"
             )
-        if self.status == "failed" and not self.error_code:
-            raise ValueError("a failed step requires an error code")
+        if self.status == "failed" and (
+            not self.error_code
+            or self.tool_results
+            or self.response is not None
+            and {
+                "length": "OUTPUT_TRUNCATED",
+                "content_filter": "CONTENT_FILTERED",
+            }.get(self.response.finish_reason)
+            != self.error_code
+        ):
+            raise ValueError(
+                "a failed step must match its response and have no tool results"
+            )
+        if self.status == "interrupted" and (
+            self.error_code is not None
+            or self.response is not None
+            and (
+                not calls
+                or set(results) == ids
+                or self.response.finish_reason in ("length", "content_filter")
+            )
+        ):
+            raise ValueError(
+                "an interrupted step must have been awaiting a model or tools"
+            )
         return self
 
 
@@ -182,8 +205,11 @@ class TurnState(FrozenModel):
 
     @model_validator(mode="after")
     def coherent_steps(self):
-        if any(step.status != "completed" for step in self.steps[:-1]):
-            raise ValueError("only the last model step can be unfinished")
+        if any(
+            step.status != "completed" or not step.response.message.tool_calls
+            for step in self.steps[:-1]
+        ):
+            raise ValueError("only completed tool exchanges may precede another step")
         last = self.steps[-1] if self.steps else None
         if (
             self.status == "ready"
@@ -200,9 +226,13 @@ class TurnState(FrozenModel):
         if (
             self.status == "interrupted"
             and last
-            and last.status not in ("completed", "interrupted")
+            and (
+                last.status not in ("completed", "interrupted")
+                or last.status == "completed"
+                and not last.response.message.tool_calls
+            )
         ):
-            raise ValueError("interrupted turn has an active model step")
+            raise ValueError("interrupted turn must end at an unfinished operation")
         return self
 
 

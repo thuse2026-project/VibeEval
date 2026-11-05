@@ -317,6 +317,66 @@ class AgentSessionTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             ConversationState.model_validate(payload)
 
+    def test_snapshot_cannot_append_another_step_after_a_final_answer(self):
+        complete = accept_response(self.waiting, "step-1", response("最终回答"))
+        payload = complete.model_dump(mode="json")
+        payload["turns"][0]["status"] = "awaiting_model"
+        payload["turns"][0]["steps"].append(
+            {"id": "step-2", "status": "awaiting_model"}
+        )
+        with self.assertRaises(ValidationError):
+            restore_snapshot(json.dumps(payload), scope_id="scope-1")
+
+    def test_snapshot_failure_code_and_results_must_match_the_response(self):
+        failed = accept_response(
+            self.waiting, "step-1", response(None, calls=CALLS, finish_reason="length")
+        )
+        cases = []
+        for code in ("CONTENT_FILTERED", "bad code"):
+            payload = failed.model_dump(mode="json")
+            payload["turns"][0]["steps"][0]["error_code"] = code
+            cases.append(payload)
+        payload = failed.model_dump(mode="json")
+        payload["turns"][0]["steps"][0]["response"]["finish_reason"] = "stop"
+        cases.append(payload)
+        payload = failed.model_dump(mode="json")
+        payload["turns"][0]["steps"][0]["tool_results"].append(
+            {"tool_call_id": "call-a", "content": "unexpected result"}
+        )
+        cases.append(payload)
+        payload = self.waiting.model_dump(mode="json")
+        payload["turns"][0]["steps"][0]["error_code"] = ""
+        cases.append(payload)
+        for index, payload in enumerate(cases):
+            with self.subTest(case=index), self.assertRaises(ValidationError):
+                restore_snapshot(json.dumps(payload), scope_id="scope-1")
+
+    def test_snapshot_interruption_must_match_an_unfinished_operation(self):
+        complete = accept_response(self.waiting, "step-1", response("最终回答"))
+        exchanged = supply_tool_results(
+            self.waiting_tools(),
+            "step-1",
+            [ToolResult(tool_call_id=call.id, content="source") for call in CALLS],
+        )
+        cases = []
+        for step_status in ("completed", "interrupted"):
+            payload = complete.model_dump(mode="json")
+            payload["turns"][0]["status"] = "interrupted"
+            payload["turns"][0]["steps"][0]["status"] = step_status
+            cases.append(payload)
+        payload = exchanged.model_dump(mode="json")
+        payload["turns"][0]["status"] = "interrupted"
+        payload["turns"][0]["steps"][0]["status"] = "interrupted"
+        cases.append(payload)
+        payload = interrupt_turn(self.waiting, self.waiting.active_turn.id).model_dump(
+            mode="json"
+        )
+        payload["turns"][0]["steps"][0]["error_code"] = "UNEXPECTED_ERROR"
+        cases.append(payload)
+        for index, payload in enumerate(cases):
+            with self.subTest(case=index), self.assertRaises(ValidationError):
+                restore_snapshot(json.dumps(payload), scope_id="scope-1")
+
     def test_input_state_is_immutable_and_operations_do_not_edit_older_snapshots(self):
         self.assertEqual(self.empty.turns, ())
         self.assertEqual(self.ready.turns[0].steps, ())
