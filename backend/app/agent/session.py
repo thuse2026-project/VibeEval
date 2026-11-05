@@ -228,7 +228,9 @@ def interrupt_turn(state: ConversationState, turn_id: str) -> ConversationState:
     )
 
 
-def render_history(state: ConversationState) -> list[dict]:
+def render_history(
+    state: ConversationState, *, include_continuation: bool = False
+) -> list[dict]:
     """Project native-role history without modifying its retained source records.
 
     Like Codex prompt normalization, explicitly close interrupted call/output
@@ -253,7 +255,8 @@ def render_history(state: ConversationState) -> list[dict]:
                     }
                     for call in output.tool_calls
                 ]
-            # Metadata remains opaque until the provider adapter is implemented.
+            if include_continuation and output.continuation_json is not None:
+                message["provider_metadata"] = json.loads(output.continuation_json)
             history.append(message)
             results = {result.tool_call_id: result for result in step.tool_results}
             for call in output.tool_calls:

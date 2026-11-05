@@ -9,6 +9,7 @@ Claude Code 官方仓库本身不作为本批完整运行时的代码来源；Cl
 | `session_types.py` | 会话级状态与单轮状态分开，单轮持有待处理调用、取消和用量；Python 类型及可序列化结构为本地适配 | [Codex SessionState](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/state/session.rs)、[TurnState](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/state/turn.rs) |
 | `session_types.py` | 工具调用 ID、工具结果关联 ID、错误结果和助手输出等消息结构；原始工具参数保留为兼容 API 的 JSON 字符串 | [Claude Agent SDK types.py](https://github.com/anthropics/claude-agent-sdk-python/blob/3be907edb9c86269d30d1427a77937dd788d6419/src/claude_agent_sdk/types.py) |
 | `session.py` 的 `render_history` | 中断后在模型历史投影中补齐工具调用的明确中断结果，不修改已保存的原始结果 | [Codex normalize.rs](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/context_manager/normalize.rs) |
+| `tools.py`、`model.py` | 声明给模型的工具与具体工具调用分开，按名称校验调用；将消息分解成结构化对象后验证。本地改写为 Chat Completions 协议，没有移植上游执行器 | [Codex router.rs](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/tools/router.rs)、[Claude message_parser.py](https://github.com/anthropics/claude-agent-sdk-python/blob/3be907edb9c86269d30d1427a77937dd788d6419/src/claude_agent_sdk/_internal/message_parser.py) |
 
 这里没有整文件复制上游实现。状态转换、乐观版本存储、输入校验与测试是围绕本项目 API 边界的 Python 改写。
 不声称与上游类型或全部行为兼容；SDK 网络传输、执行器、审批、调度、多 Agent 等不在本批移植范围。
@@ -20,3 +21,6 @@ Claude Code 官方仓库本身不作为本批完整运行时的代码来源；Cl
 - `LICENSE-Claude-Agent-SDK.txt`：Claude Agent SDK Python，MIT。
 
 本文件记录技术来源及附带声明，不改变仓库其他部分的许可范围。
+
+第二批 `prompts.py` 是本项目撰写的短全局 prompt，没有复制 Claude Code 私有 prompt。
+续调元数据处理依据 [OpenRouter 官方协议](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)。

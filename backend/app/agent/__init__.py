@@ -1,6 +1,7 @@
 """Independent agent primitives; no autonomous loop or workspace integration."""
 
 from .dialogue import chat_only, prepare_chat
+from .model import call_model, prepare_model_request
 from .session import (
     accept_response,
     begin_turn,
@@ -14,6 +15,7 @@ from .session import (
     supply_tool_results,
 )
 from .session_store import MemorySessionStore, SessionStore
+from .tools import ToolDefinition, ToolRegistry
 
 __all__ = [
     "chat_only",
@@ -30,4 +32,8 @@ __all__ = [
     "restore_snapshot",
     "SessionStore",
     "MemorySessionStore",
+    "ToolDefinition",
+    "ToolRegistry",
+    "prepare_model_request",
+    "call_model",
 ]

@@ -125,6 +125,33 @@ class LLMClient:
         except (KeyError, TypeError, ValidationError):
             raise LLMError(502, "模型服务返回的模型列表无效") from None
 
+    async def complete(self, payload: dict) -> dict:
+        """Low-level non-streaming completion for a validated protocol adapter.
+
+        This is internal Python API, not a browser proxy. Callers validate native
+        messages/tool schemas and filter the returned vendor data before exposing it.
+        """
+        allowed = {
+            "model",
+            "messages",
+            "tools",
+            "tool_choice",
+            "max_tokens",
+            "temperature",
+            "stream",
+        }
+        if set(payload) - allowed or payload.get("stream", False) is not False:
+            raise LLMError(422, "模型请求参数无效或不支持流式调用")
+        request = dict(payload)
+        model = request.get("model") or self.settings.model
+        if not isinstance(model, str) or not model.strip():
+            raise LLMError(503, "尚未配置 LLM_MODEL")
+        limit = request.get("max_tokens", self.settings.max_output_tokens)
+        if type(limit) is not int or not 1 <= limit <= self.settings.max_output_tokens:
+            raise LLMError(422, "max_tokens 超过后端配置的输出上限或无效")
+        request.update(model=model, max_tokens=limit, stream=False)
+        return await self._request("POST", "chat/completions", request)
+
     async def chat(self, body: ChatInput) -> ChatResult:
         model = body.model or self.settings.model
         if not model:
