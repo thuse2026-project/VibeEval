@@ -236,8 +236,15 @@ def render_history(
     Like Codex prompt normalization, explicitly close interrupted call/output
     pairs in the projection. Pending live calls stay pending.
     """
+    return render_turns(state.turns, include_continuation=include_continuation)
+
+
+def render_turns(
+    turns: Sequence[TurnState], *, include_continuation: bool = False
+) -> list[dict]:
+    """Render whole turns, keeping call/output pairs inside their original turn."""
     history = []
-    for turn in state.turns:
+    for turn in turns:
         history.append({"role": "user", "content": turn.user_message})
         for step in turn.steps:
             if step.response is None:

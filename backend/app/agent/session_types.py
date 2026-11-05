@@ -4,6 +4,7 @@ See UPSTREAM.md for source versions, adaptation boundaries and license notices.
 No upstream CLI or SDK is invoked by these types.
 """
 
+import hashlib
 import json
 from typing import Annotated, Literal
 
@@ -212,6 +213,53 @@ class SessionConfig(FrozenModel):
     tools_version: str = "1"
 
 
+def turns_digest(turns: tuple[TurnState, ...]) -> str:
+    encoded = json.dumps(
+        [turn.model_dump(mode="json") for turn in turns],
+        sort_keys=True,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def sum_usage(items: list[TokenUsage | None]) -> TokenUsage:
+    counts = {}
+    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        values = [getattr(item, field) if item else None for item in items]
+        counts[field] = (
+            sum(values)
+            if values and all(value is not None for value in values)
+            else None
+        )
+    return TokenUsage(**counts)
+
+
+class ContextCheckpoint(FrozenModel):
+    id: Identifier
+    generation: int = Field(strict=True, ge=1)
+    parent_id: Identifier | None = None
+    source_revision: int = Field(strict=True, ge=0)
+    source_state_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    through_turn_count: int = Field(strict=True, ge=1)
+    through_turn_id: Identifier
+    source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    summary: str = Field(min_length=1, max_length=16000)
+    model: str = Field(min_length=1, max_length=200)
+    prompt_version: Literal["1"] = "1"
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    response_id: str | None = None
+    usage: TokenUsage | None = None
+
+    @field_validator("summary")
+    @classmethod
+    def nonblank_summary(cls, value):
+        if not value.strip():
+            raise ValueError("summary cannot be blank")
+        return value
+
+
 class ConversationState(FrozenModel):
     schema_version: Literal[1] = 1
     id: Identifier
@@ -219,6 +267,7 @@ class ConversationState(FrozenModel):
     revision: int = Field(default=0, strict=True, ge=0)
     config: SessionConfig = Field(default_factory=SessionConfig)
     turns: tuple[TurnState, ...] = ()
+    compactions: tuple[ContextCheckpoint, ...] = ()
 
     @model_validator(mode="after")
     def coherent_turns(self):
@@ -233,6 +282,33 @@ class ConversationState(FrozenModel):
             raise ValueError("turn IDs, request keys and step IDs must be unique")
         if any(turn.status not in TERMINAL for turn in self.turns[:-1]):
             raise ValueError("only the last turn may be active")
+        covered, parent, seen, last_source_revision = 0, None, set(), -1
+        for generation, checkpoint in enumerate(self.compactions, 1):
+            count = checkpoint.through_turn_count
+            if (
+                checkpoint.id in seen
+                or checkpoint.generation != generation
+                or checkpoint.parent_id != parent
+            ):
+                raise ValueError("invalid compaction checkpoint chain")
+            if (
+                not covered <= count <= len(self.turns)
+                or not last_source_revision < checkpoint.source_revision < self.revision
+            ):
+                raise ValueError("invalid compaction boundary or source revision")
+            prefix = self.turns[:count]
+            if any(turn.status not in TERMINAL for turn in prefix):
+                raise ValueError("compaction cannot cover an unfinished turn")
+            if (
+                prefix[-1].id != checkpoint.through_turn_id
+                or turns_digest(prefix) != checkpoint.source_digest
+            ):
+                raise ValueError(
+                    "compaction source history does not match its checkpoint"
+                )
+            covered, parent = count, checkpoint.id
+            last_source_revision = checkpoint.source_revision
+            seen.add(checkpoint.id)
         return self
 
     @property
@@ -245,16 +321,18 @@ class ConversationState(FrozenModel):
     def usage(self) -> TokenUsage:
         # Derive totals from accepted responses, so replaying a response cannot
         # double count it. A missing counter stays unknown rather than becoming 0.
-        responses = [
-            step.response for turn in self.turns for step in turn.steps if step.response
+        items = [
+            step.response.usage
+            for turn in self.turns
+            for step in turn.steps
+            if step.response
         ]
-        counts = {}
-        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            values = [
-                getattr(response.usage, field) if response.usage else None
-                for response in responses
-            ]
-            counts[field] = (
-                sum(values) if values and all(v is not None for v in values) else None
-            )
-        return TokenUsage(**counts)
+        return sum_usage(items + [checkpoint.usage for checkpoint in self.compactions])
+
+    @property
+    def compaction_usage(self) -> TokenUsage:
+        return sum_usage([checkpoint.usage for checkpoint in self.compactions])
+
+    @property
+    def context_generation(self) -> int:
+        return len(self.compactions)

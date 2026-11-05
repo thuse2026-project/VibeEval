@@ -29,10 +29,11 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [应用容器部署](docs/application-deployment.md)：前后端打包、共享持久卷、可选 gVisor 维护进程及升级回退。
 - [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读写、持久版本冲突和联合测试。
 - [模型 API 接入](docs/llm-api.md)：后端私有配置、模型列表、文本调用及本地连通性验证。
-- [Agent API 原子能力](docs/agent-primitives.md)：已实现的文本调用与输入预览。
+- [Agent API 原子能力](docs/agent-primitives.md)：文本调用、会话状态、原生工具交互与上下文接口入口。
 - [Agent API 会话范围](docs/agent-session-design.md)：参考 Codex/Claude SDK 源码，定义会话、轮次、原生工具交互、上下文和上下游接口。
 - [Agent 会话第一批](docs/agent-session-stage1.md)：本地状态转换、工具结果配对、快照与存储接口，以及不访问网络的运行示例。
 - [Agent 会话第二批](docs/agent-session-stage2.md)：原生工具调用、全局 prompt、完整请求预览与两次 API 调用示例。
+- [Agent 会话第三批](docs/agent-session-stage3.md)：显式压缩、检查点采用、原始历史保留与快照恢复后续调。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 

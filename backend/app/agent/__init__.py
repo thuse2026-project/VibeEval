@@ -1,5 +1,7 @@
 """Independent agent primitives; no autonomous loop or workspace integration."""
 
+from .compaction import apply_compaction, call_compaction, prepare_compaction
+from .context import context_info, render_context
 from .dialogue import chat_only, prepare_chat
 from .model import call_model, prepare_model_request
 from .session import (
@@ -36,4 +38,9 @@ __all__ = [
     "ToolRegistry",
     "prepare_model_request",
     "call_model",
+    "prepare_compaction",
+    "call_compaction",
+    "apply_compaction",
+    "render_context",
+    "context_info",
 ]

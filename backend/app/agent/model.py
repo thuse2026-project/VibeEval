@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.llm.client import LLMClient
 from app.llm.config import LLMError, LLMSettings, load_settings
 
+from .context import render_context
 from .prompts import GLOBAL_AGENT_PROMPT, PROMPT_VERSION
-from .session import render_history
 from .session_types import (
     AssistantOutput,
     ConversationState,
@@ -120,6 +120,8 @@ class PreparedModelRequest(FrozenModel):
     prompt_version: str
     tools_version: str
     tools_fingerprint: str
+    context_generation: int = Field(default=0, strict=True, ge=0)
+    context_through_turns: int = Field(default=0, strict=True, ge=0)
     payload_json: str = Field(max_length=64000)
     payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -173,7 +175,7 @@ def prepare_model_request(
     messages = [{"role": "system", "content": GLOBAL_AGENT_PROMPT}]
     if state.config.system_prompt:
         messages.append({"role": "system", "content": state.config.system_prompt})
-    for item in render_history(state, include_continuation=True):
+    for item in render_context(state, include_continuation=True):
         metadata = item.pop("provider_metadata", {})
         if set(metadata) - {"reasoning_details"}:
             raise SessionError("unsupported provider continuation fields")
@@ -199,6 +201,10 @@ def prepare_model_request(
         prompt_version=PROMPT_VERSION,
         tools_version=registry.version,
         tools_fingerprint=registry.fingerprint,
+        context_generation=state.context_generation,
+        context_through_turns=(
+            state.compactions[-1].through_turn_count if state.compactions else 0
+        ),
         payload_json=encoded,
         payload_sha256=hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
     )

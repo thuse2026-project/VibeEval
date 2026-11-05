@@ -1,7 +1,7 @@
 # Agent API 会话边界与实现范围
 
 状态：2026-11-05 用户已确认范围，按批实现。第一批 [本地会话状态](agent-session-stage1.md) 已确认提交；
-第二批 [原生模型调用](agent-session-stage2.md) 已实现，待检查。
+第二批 [原生模型调用](agent-session-stage2.md) 已确认提交；第三批 [上下文压缩与恢复](agent-session-stage3.md) 已实现，待检查。
 分支 `feat/llm-api` 负责模型 API 调用前后的会话维护，并向上下游暴露接口。
 不构建完整编程 Agent，不自行增加上游未核实的引用管理系统。
 
@@ -120,4 +120,4 @@ reasoning_summary 如有，仅为简短可展示说明；不要求模型提供�
 已提交基线 `ccab276` 为模型 API 接入与文本输入预览。后续复用方式是参考公开源码移植/改写为本项目代码，
 不是直接启动 Codex/Claude SDK 或 CLI。
 原自定义引用仓库和单次 JSON 协议草稿已移至 Git 忽略的 `runtime/agent-design-drafts/2026-11-05/`，
-不作为本分支正式接口。第一批为本地提交 ac80abc；第二批实现与说明待用户检查后提交，均未推送。
+不作为本分支正式接口。第一批为本地提交 ac80abc，第二批为 abd1a1e；第三批待用户检查后提交，均未推送。
