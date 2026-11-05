@@ -34,6 +34,7 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [Agent 会话第一批](docs/agent-session-stage1.md)：本地状态转换、工具结果配对、快照与存储接口，以及不访问网络的运行示例。
 - [Agent 会话第二批](docs/agent-session-stage2.md)：原生工具调用、全局 prompt、完整请求预览与两次 API 调用示例。
 - [Agent 会话第三批](docs/agent-session-stage3.md)：显式压缩、检查点采用、原始历史保留与快照恢复后续调。
+- [Agent 接入契约与示例](docs/agent-session-stage4.md)：组员接入入口、标识与状态、存储并发、跨会话读取、错误及完整模拟流程。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
