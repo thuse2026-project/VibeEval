@@ -26,6 +26,11 @@ Agent 接入分支另增考生归属下的会话创建、列表、历史和事�
 契约、开关及数据库迁移见 [Agent 接入第一批](agent-integration-stage1.md)。
 这些记录接口不直接执行模型或沙箱命令。
 
+第二批另增同一对话下的 `POST/GET /references`、`GET /references/{reference_id}`、
+`GET /materials/{material_id}`、`GET /reads`，用于引用输入、材料预览和实际阅读查询。
+内部阅读服务复用上一分支原生 tool call/result；没有开放浏览器伪造工具回执的接口。
+版本、选区、工具和后续边界见 [Agent 接入第二批](agent-integration-stage2.md)。
+
 ## 考官登录（本轮实现）
 
 - 账号由本地初始化命令预配置，无注册接口。

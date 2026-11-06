@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -143,6 +144,11 @@ class WorkspaceFileRevision(Base):
 class AgentConversation(Base):
     __tablename__ = "agent_conversations"
     __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "exam_session_id",
+            name="uq_agent_conversations_identity_scope",
+        ),
         CheckConstraint("revision >= 0 AND event_sequence >= 1", name="counters_valid"),
         CheckConstraint("length(btrim(title)) > 0", name="title_not_blank"),
         CheckConstraint(
@@ -190,6 +196,138 @@ class AgentEvent(Base):
     sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     kind: Mapped[str] = mapped_column(String(80))
     data_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentMaterial(Base):
+    __tablename__ = "agent_materials"
+    __table_args__ = (
+        UniqueConstraint(
+            "exam_session_id", "material_key", name="uq_agent_materials_scope_key"
+        ),
+        UniqueConstraint(
+            "material_id", "exam_session_id", name="uq_agent_materials_identity_scope"
+        ),
+        CheckConstraint(
+            "material_key ~ '^[0-9a-f]{64}$' AND content_sha256 ~ '^[0-9a-f]{64}$' AND source_sha256 ~ '^[0-9a-f]{64}$'",
+            name="digests_valid",
+        ),
+        CheckConstraint(
+            "size_bytes = octet_length(content_text) AND size_bytes <= 8388608 AND created_at >= 0",
+            name="size_timeline_valid",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata_json) = 'object'", name="metadata_object"
+        ),
+    )
+
+    material_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    exam_session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+    )
+    material_key: Mapped[str] = mapped_column(String(64))
+    source_kind: Mapped[str] = mapped_column(String(40))
+    source_id: Mapped[str] = mapped_column(String(512))
+    source_version: Mapped[str] = mapped_column(String(200))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    content_text: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    metadata_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentInputReference(Base):
+    __tablename__ = "agent_input_references"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "exam_session_id"],
+            [
+                "agent_conversations.conversation_id",
+                "agent_conversations.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["material_id", "exam_session_id"],
+            ["agent_materials.material_id", "agent_materials.exam_session_id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(reference_json) = 'object' AND created_at >= 0",
+            name="data_timeline_valid",
+        ),
+        Index(
+            "ix_agent_input_references_conversation",
+            "conversation_id",
+            "created_at",
+            "reference_id",
+        ),
+    )
+
+    reference_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    material_id: Mapped[str | None] = mapped_column(String(128))
+    reference_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentReadObservation(Base):
+    __tablename__ = "agent_read_observations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "exam_session_id"],
+            [
+                "agent_conversations.conversation_id",
+                "agent_conversations.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["material_id", "exam_session_id"],
+            ["agent_materials.material_id", "agent_materials.exam_session_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "conversation_id",
+            "step_id",
+            "tool_call_id",
+            name="uq_agent_read_observations_call",
+        ),
+        CheckConstraint("call_sha256 ~ '^[0-9a-f]{64}$'", name="digest_valid"),
+        CheckConstraint(
+            "action_kind IN ('query', 'read') AND status IN ('succeeded', 'error', 'denied')",
+            name="known_status",
+        ),
+        CheckConstraint(
+            "(status = 'succeeded' AND material_id IS NOT NULL) OR (status != 'succeeded' AND material_id IS NULL)",
+            name="material_status",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(result_json) = 'object' AND created_at >= 0",
+            name="data_timeline_valid",
+        ),
+        Index(
+            "ix_agent_read_observations_conversation",
+            "conversation_id",
+            "created_at",
+            "observation_id",
+        ),
+    )
+
+    observation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    turn_id: Mapped[str] = mapped_column(String(128))
+    step_id: Mapped[str] = mapped_column(String(128))
+    tool_call_id: Mapped[str] = mapped_column(String(128))
+    tool_name: Mapped[str] = mapped_column(String(64))
+    call_sha256: Mapped[str] = mapped_column(String(64))
+    action_kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))
+    material_id: Mapped[str | None] = mapped_column(String(128))
+    result_json: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[int] = mapped_column(BigInteger)
 
 

@@ -39,6 +39,7 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [Agent 后端接入计划](docs/agent-integration-plan.md)：新分支的引用、主动查询阅读、执行、批准、数据库和事件协议范围。
 - [Agent 上下文管理](docs/agent-context-management-plan.md)：阅读材料、跨对话读取、主动/被动压缩及恢复的已确认设计。
 - [Agent 接入第一批](docs/agent-integration-stage1.md)：PostgreSQL 会话保存、考试归属、事务事件和基础 HTTP 接口。
+- [Agent 接入第二批](docs/agent-integration-stage2.md)：用户引用、工作区查询阅读、跨对话取材与不可变材料，复用核心原生工具协议。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 

@@ -1,4 +1,4 @@
-"""Owned conversation metadata APIs. Model/tool dispatch is a later batch."""
+"""Owned conversations, user references, and material inspection APIs."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -6,8 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.agent import create_conversation
 from app.agent.session_types import SessionConflict, SessionError
 from app.core.security import require_browser_header
+from app.db.lifecycle import SessionLifecycle
 from app.exams.router import require_candidate_session
+from app.workspace.service import WorkspaceReader
 
+from .material_store import MaterialStore
+from .reading_types import InputReference, ReadingError
+from .sources import SourceReader
 from .store import (
     ConversationClosed,
     ConversationNotFound,
@@ -68,6 +73,39 @@ def result(action):
         raise HTTPException(
             503, {"code": "AGENT_STATE_UNAVAILABLE", "message": "Agent 记录暂时不可用"}
         ) from None
+    except ReadingError as error:
+        status = (
+            404
+            if error.code == "SOURCE_UNAVAILABLE"
+            else (
+                409
+                if error.code == "SOURCE_VERSION_CHANGED"
+                else 503 if error.code.endswith("_UNAVAILABLE") else 422
+            )
+        )
+        raise HTTPException(
+            status,
+            {"code": error.code, "message": "引用或材料暂不可用，请核对范围及版本"},
+        ) from None
+
+
+def reading(request: Request, store=Depends(repository)):
+    configured = request.app.state.agent_reading
+    if configured is not None:
+        return configured
+    factory = getattr(store, "factory", None)
+    if factory is None:
+        raise HTTPException(
+            503,
+            {"code": "AGENT_STORAGE_UNAVAILABLE", "message": "Agent 需要共享持久存储"},
+        )
+    sandbox = request.app.state.submission_sandbox
+    workspace = (
+        WorkspaceReader(SessionLifecycle(factory), sandbox)
+        if sandbox is not None
+        else None
+    )
+    return SourceReader(MaterialStore(factory), workspace=workspace)
 
 
 @router.post("/conversations", status_code=201)
@@ -124,5 +162,71 @@ def events(
     return result(
         lambda: store.events(
             session_id, conversation_id, after_sequence=after_sequence, limit=limit
+        )
+    )
+
+
+@router.post("/conversations/{conversation_id}/references", status_code=201)
+def create_reference(
+    body: InputReference, session_id: str, conversation_id: str, reader=Depends(reading)
+):
+    return result(
+        lambda: reader.create_reference(
+            session_id, conversation_id, body.model_dump(mode="json")
+        )
+    )
+
+
+@router.get("/conversations/{conversation_id}/references")
+def references(
+    session_id: str,
+    conversation_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    reader=Depends(reading),
+):
+    return result(
+        lambda: reader.store.references(
+            session_id, conversation_id, offset=offset, limit=limit
+        )
+    )
+
+
+@router.get("/conversations/{conversation_id}/references/{reference_id}")
+def reference(
+    session_id: str, conversation_id: str, reference_id: str, reader=Depends(reading)
+):
+    return result(
+        lambda: reader.store.reference(session_id, conversation_id, reference_id)
+    )
+
+
+@router.get("/conversations/{conversation_id}/materials/{material_id}")
+def material(
+    session_id: str,
+    conversation_id: str,
+    material_id: str,
+    offset: int = Query(default=0, ge=0),
+    max_chars: int = Query(default=12000, ge=1, le=16000),
+    reader=Depends(reading),
+):
+    return result(
+        lambda: reader.store.material_view(
+            session_id, conversation_id, material_id, offset=offset, max_chars=max_chars
+        )
+    )
+
+
+@router.get("/conversations/{conversation_id}/reads")
+def reads(
+    session_id: str,
+    conversation_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    reader=Depends(reading),
+):
+    return result(
+        lambda: reader.store.observations(
+            session_id, conversation_id, offset=offset, limit=limit
         )
     )

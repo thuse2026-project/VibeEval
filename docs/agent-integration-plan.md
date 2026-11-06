@@ -1,7 +1,9 @@
 # Agent 上下游全流程接入计划
 
 状态：2026-11-06 用户确认总体范围，并明确引用与查询阅读分开、本分支只做后端。按批实现，检查确认后提交。
-用户已确认包含主动/被动压缩、文件阅读管理与跨对话阅读的 [上下文管理设计](agent-context-management-plan.md)，现从 [第一批持久化底座](agent-integration-stage1.md) 开始实现。
+用户已确认包含主动/被动压缩、文件阅读管理与跨对话阅读的 [上下文管理设计](agent-context-management-plan.md)。
+[第一批持久化底座](agent-integration-stage1.md) 已确认并提交 `add28b6`；
+[第二批引用与阅读](agent-integration-stage2.md) 已确认，本地提交，未推送。
 分支：`feat/agent-integration`，基于已验收的 `feat/llm-api@8c25e65`。
 旧分支的 Agent 核心尚未进入 main；新分支保留该依赖，后续先合入核心再整理集成 PR 的基线。
 本计划依据现有代码整理，其他 Agent 生成的计划只作为参考，不自动成为任务要求。
@@ -23,6 +25,10 @@
 继续复用 app.agent 的 Conversation/Turn/ModelStep，不另建一套会话状态机。
 新业务编排放在 app.agent_integration，核心层继续接受显式输入，不依赖 FastAPI、数据库或 Docker。
 实际沙箱操作扩展现有 app.sandbox；文件读写继续复用 app.workspace。
+
+已核对上一分支：全局 prompt、ToolDefinition/ToolRegistry、原生调用解析与 ToolResult 配对
+均属于 `app.agent`，读取和执行共用同一协议。本分支只注册真实处理器、策略与持久化，
+不新建一套模型返回格式；协议若确有缺口，应修补核心后再由集成层使用。
 
 ```mermaid
 flowchart LR
