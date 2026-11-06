@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -137,6 +138,59 @@ class WorkspaceFileRevision(Base):
     path: Mapped[str] = mapped_column(String(500), primary_key=True)
     version: Mapped[int] = mapped_column(BigInteger)
     content_sha256: Mapped[str] = mapped_column(String(64))
+
+
+class AgentConversation(Base):
+    __tablename__ = "agent_conversations"
+    __table_args__ = (
+        CheckConstraint("revision >= 0 AND event_sequence >= 1", name="counters_valid"),
+        CheckConstraint("length(btrim(title)) > 0", name="title_not_blank"),
+        CheckConstraint(
+            "created_at >= 0 AND updated_at >= created_at", name="timeline_order"
+        ),
+        CheckConstraint(
+            "jsonb_typeof(state_json) = 'object' AND "
+            "coalesce(state_json->>'id', '') = conversation_id AND "
+            "coalesce(state_json->>'scope_id', '') = exam_session_id AND "
+            "coalesce(state_json->>'revision', '') = revision::text",
+            name="state_identity",
+        ),
+        Index(
+            "ix_agent_conversations_exam_created",
+            "exam_session_id",
+            "created_at",
+            "conversation_id",
+        ),
+    )
+
+    conversation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    exam_session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    revision: Mapped[int] = mapped_column(BigInteger)
+    event_sequence: Mapped[int] = mapped_column(BigInteger)
+    state_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentEvent(Base):
+    __tablename__ = "agent_events"
+    __table_args__ = (
+        CheckConstraint("sequence >= 1 AND created_at >= 0", name="counters_valid"),
+        CheckConstraint("length(btrim(kind)) > 0", name="kind_not_blank"),
+        CheckConstraint("jsonb_typeof(data_json) = 'object'", name="data_object"),
+    )
+
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_conversations.conversation_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(80))
+    data_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
 
 
 class Snapshot(Base):

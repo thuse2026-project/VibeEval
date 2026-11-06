@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from .admin.evaluation import router as evaluation_router
 from .admin.overview import router as overview_router
 from .admin.router import AuthState, current_session, router
 from .admin.submissions import router as submission_router
+from .agent_integration.router import router as agent_router
 from .exams.router import router as entry_router
 from .exams.store import configured_store
 from .llm.router import router as llm_router
@@ -25,6 +27,8 @@ def create_app(
     *,
     submission_sandbox: SubmissionSandbox | None = None,
     snapshot_store: SnapshotStore | None = None,
+    agent_enabled: bool | None = None,
+    agent_store=None,
 ) -> FastAPI:
     app = FastAPI(title="VibeEval API", version="0.1.0")
     app.state.auth = AuthState(load_accounts() if accounts is None else accounts)
@@ -34,6 +38,12 @@ def create_app(
     app.state.entry_failures = defaultdict(list)
     app.state.submission_sandbox = submission_sandbox
     app.state.snapshot_store = snapshot_store
+    app.state.agent_enabled = (
+        (os.environ.get("VIBEEVAL_AGENT_ENABLED") == "1")
+        if agent_enabled is None
+        else agent_enabled
+    )
+    app.state.agent_store = agent_store
     if entry_db is None:
         from .admin.submissions import get_submission_reader
         from .submissions.service import SubmissionService
@@ -53,6 +63,7 @@ def create_app(
     app.include_router(llm_router)
     app.include_router(entry_router)
     app.include_router(candidate_submission_router)
+    app.include_router(agent_router)
 
     @app.exception_handler(SQLAlchemyError)
     async def database_unavailable(request: Request, error: SQLAlchemyError):

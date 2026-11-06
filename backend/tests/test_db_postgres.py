@@ -91,6 +91,8 @@ class PostgreSQLTests(unittest.TestCase):
                 "snapshots",
                 "submissions",
                 "workspace_file_revisions",
+                "agent_conversations",
+                "agent_events",
                 "alembic_version",
             },
         )

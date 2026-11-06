@@ -36,6 +36,9 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [Agent 会话第三批](docs/agent-session-stage3.md)：显式压缩、检查点采用、原始历史保留与快照恢复后续调。
 - [Agent 接入契约与示例](docs/agent-session-stage4.md)：组员接入入口、标识与状态、存储并发、跨会话读取、错误及完整模拟流程。
 - [Agent 整体验收修正](docs/agent-session-audit.md)：模型截断处理、快照状态一致性和响应角色校验的回归记录。
+- [Agent 后端接入计划](docs/agent-integration-plan.md)：新分支的引用、主动查询阅读、执行、批准、数据库和事件协议范围。
+- [Agent 上下文管理](docs/agent-context-management-plan.md)：阅读材料、跨对话读取、主动/被动压缩及恢复的已确认设计。
+- [Agent 接入第一批](docs/agent-integration-stage1.md)：PostgreSQL 会话保存、考试归属、事务事件和基础 HTTP 接口。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
