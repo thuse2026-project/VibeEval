@@ -122,6 +122,8 @@ class PreparedModelRequest(FrozenModel):
     tools_fingerprint: str
     context_generation: int = Field(default=0, strict=True, ge=0)
     context_through_turns: int = Field(default=0, strict=True, ge=0)
+    context_through_steps: int = Field(default=0, strict=True, ge=0)
+    context_through_step_id: str | None = None
     payload_json: str = Field(max_length=64000)
     payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -145,18 +147,20 @@ class CompletionClient(Protocol):
     async def complete(self, payload: dict) -> dict: ...
 
 
-def prepare_model_request(
+def project_model_input(
     state: ConversationState,
     *,
     tools: ToolRegistry | None = None,
     settings: LLMSettings | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
-) -> PreparedModelRequest:
-    """Prepare one already-started step; this function never calls the model."""
-    turn = state.active_turn
-    if turn is None or turn.status != "awaiting_model":
-        raise SessionBusy("start a model step before preparing its request")
+    context_transform=None,
+) -> dict:
+    """Project inspectable input before transport size/pair validation.
+
+    Allows preflight of a ready turn without allocating a model step. The
+    trusted optional transform changes the window, never the retained history.
+    """
     registry = tools if tools is not None else ToolRegistry()
     if (
         state.config.prompt_version != PROMPT_VERSION
@@ -175,20 +179,52 @@ def prepare_model_request(
     messages = [{"role": "system", "content": GLOBAL_AGENT_PROMPT}]
     if state.config.system_prompt:
         messages.append({"role": "system", "content": state.config.system_prompt})
-    for item in render_context(state, include_continuation=True):
+    context = render_context(state, include_continuation=True)
+    if context_transform is not None:
+        context = context_transform(context)
+    for item in context:
         metadata = item.pop("provider_metadata", {})
         if set(metadata) - {"reasoning_details"}:
             raise SessionError("unsupported provider continuation fields")
         item.update(metadata)
         messages.append(item)
     specifications = registry.specifications()
-    native = NativeRequest(
-        model=model,
-        messages=tuple(messages),
-        max_tokens=limit,
-        temperature=temperature,
-        tools=specifications or None,
-        tool_choice="auto" if specifications else None,
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": limit,
+        "stream": False,
+    }
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if specifications:
+        payload.update(tools=specifications, tool_choice="auto")
+    return payload
+
+
+def prepare_model_request(
+    state: ConversationState,
+    *,
+    tools: ToolRegistry | None = None,
+    settings: LLMSettings | None = None,
+    max_tokens: int | None = None,
+    temperature: float | None = None,
+    context_transform=None,
+) -> PreparedModelRequest:
+    """Prepare one already-started step; this function never calls the model."""
+    turn = state.active_turn
+    if turn is None or turn.status != "awaiting_model":
+        raise SessionBusy("start a model step before preparing its request")
+    registry = tools if tools is not None else ToolRegistry()
+    native = NativeRequest.model_validate(
+        project_model_input(
+            state,
+            tools=registry,
+            settings=settings,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            context_transform=context_transform,
+        )
     )
     payload = native.model_dump(mode="json", exclude_none=True)
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, allow_nan=False)
@@ -204,6 +240,12 @@ def prepare_model_request(
         context_generation=state.context_generation,
         context_through_turns=(
             state.compactions[-1].through_turn_count if state.compactions else 0
+        ),
+        context_through_steps=(
+            state.compactions[-1].through_step_count if state.compactions else 0
+        ),
+        context_through_step_id=(
+            state.compactions[-1].through_step_id if state.compactions else None
         ),
         payload_json=encoded,
         payload_sha256=hashlib.sha256(encoded.encode("utf-8")).hexdigest(),

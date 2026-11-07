@@ -20,10 +20,18 @@ def render_context(
     if not state.compactions:
         return render_history(state, include_continuation=include_continuation)
     latest = state.compactions[-1]
+    tail = state.turns[latest.through_turn_count :]
+    if latest.through_step_count:
+        # Keep the active task verbatim and retain complete recent exchanges.
+        # This copy is a projection only, never written back as retained history.
+        first = tail[0].model_copy(
+            update={"steps": tail[0].steps[latest.through_step_count :]}
+        )
+        tail = (first,) + tail[1:]
     return [
         {"role": "user", "content": SUMMARY_PREFIX + latest.summary}
     ] + render_turns(
-        state.turns[latest.through_turn_count :],
+        tail,
         include_continuation=include_continuation,
     )
 
@@ -37,6 +45,7 @@ def serialized_size(messages: list[dict]) -> int:
 class ContextInfo(FrozenModel):
     generation: int
     covered_turns: int
+    covered_steps: int = 0
     retained_turns: int
     history_messages: int
     context_messages: int
@@ -51,6 +60,9 @@ def context_info(state: ConversationState) -> ContextInfo:
     return ContextInfo(
         generation=state.context_generation,
         covered_turns=covered,
+        covered_steps=(
+            state.compactions[-1].through_step_count if state.compactions else 0
+        ),
         retained_turns=len(state.turns) - covered,
         history_messages=len(history),
         context_messages=len(current),

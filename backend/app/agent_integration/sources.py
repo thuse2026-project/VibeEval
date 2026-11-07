@@ -216,6 +216,8 @@ class SourceReader:
                 "summary": latest.summary if latest else None,
                 "context_generation": state.context_generation,
                 "covered_turns": latest.through_turn_count if latest else 0,
+                "covered_steps": latest.through_step_count if latest else 0,
+                "through_step_id": latest.through_step_id if latest else None,
                 "retained_turn_count": len(state.turns),
             }
         elif args.view == "tool_result":

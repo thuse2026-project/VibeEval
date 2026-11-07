@@ -8,9 +8,11 @@ from app.agent.session_types import SessionConflict, SessionError
 from app.core.security import require_browser_header
 from app.db.lifecycle import SessionLifecycle
 from app.exams.router import require_candidate_session
+from app.llm.config import LLMError, load_settings
 from app.workspace.service import WorkspaceReader
 
 from .material_store import MaterialStore
+from .read_tools import ReadToolService
 from .reading_types import InputReference, ReadingError
 from .sources import SourceReader
 from .store import (
@@ -19,6 +21,7 @@ from .store import (
     PostgresSessionStore,
     StoredStateInvalid,
 )
+from .window import inspect_window
 
 router = APIRouter(
     prefix="/api/v1/sessions/{session_id}/agent",
@@ -86,6 +89,10 @@ def result(action):
         raise HTTPException(
             status,
             {"code": error.code, "message": "引用或材料暂不可用，请核对范围及版本"},
+        ) from None
+    except LLMError as error:
+        raise HTTPException(
+            error.status, {"code": "AGENT_MODEL_CONFIG_INVALID", "message": str(error)}
         ) from None
 
 
@@ -230,3 +237,28 @@ def reads(
             session_id, conversation_id, offset=offset, limit=limit
         )
     )
+
+
+@router.get("/conversations/{conversation_id}/context")
+def context_window(
+    session_id: str,
+    conversation_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    reader=Depends(reading),
+):
+    def action():
+        state = reader.store.conversations.load(session_id, conversation_id)
+        report = inspect_window(
+            state, tools=ReadToolService(reader).registry, settings=load_settings()
+        )
+        materials = report.pop("materials")
+        return {
+            **report,
+            "materials": materials[offset : offset + limit],
+            "material_count": len(materials),
+            "offset": offset,
+            "has_more": offset + limit < len(materials),
+        }
+
+    return result(action)

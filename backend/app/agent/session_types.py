@@ -254,6 +254,54 @@ def turns_digest(turns: tuple[TurnState, ...]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def coverage_digest(turns, through_turn_count, through_step_count=0):
+    """Stable source boundary: whole turns plus an optional closed step prefix.
+
+    The partial turn's status/tail may advance after adoption. Its identity,
+    request and covered exchanges must remain unchanged.
+    """
+    if (
+        type(through_turn_count) is not int
+        or type(through_step_count) is not int
+        or not 0 <= through_turn_count <= len(turns)
+        or through_step_count < 0
+        or (through_turn_count == 0 and through_step_count == 0)
+    ):
+        raise SessionError("invalid context boundary")
+    prefix = turns[:through_turn_count]
+    if any(turn.status not in TERMINAL for turn in prefix):
+        raise SessionError("compaction cannot cover an unfinished whole turn")
+    if not through_step_count:
+        return turns_digest(prefix)
+    if through_turn_count == len(turns):
+        raise SessionError("partial turn does not exist")
+    partial = turns[through_turn_count]
+    steps = partial.steps[:through_step_count]
+    if len(steps) != through_step_count or any(
+        step.status != "completed" or not step.response.message.tool_calls
+        for step in steps
+    ):
+        raise SessionError("partial coverage requires closed tool exchanges")
+    material = {
+        "turns": [turn.model_dump(mode="json") for turn in prefix],
+        "partial_turn": {
+            "id": partial.id,
+            "request_key": partial.request_key,
+            "user_message": partial.user_message,
+            "steps": [step.model_dump(mode="json") for step in steps],
+        },
+    }
+    return hashlib.sha256(
+        json.dumps(
+            material,
+            sort_keys=True,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def sum_usage(items: list[TokenUsage | None]) -> TokenUsage:
     counts = {}
     for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
@@ -272,12 +320,14 @@ class ContextCheckpoint(FrozenModel):
     parent_id: Identifier | None = None
     source_revision: int = Field(strict=True, ge=0)
     source_state_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    through_turn_count: int = Field(strict=True, ge=1)
+    through_turn_count: int = Field(strict=True, ge=0)
     through_turn_id: Identifier
+    through_step_count: int = Field(default=0, strict=True, ge=0)
+    through_step_id: Identifier | None = None
     source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     summary: str = Field(min_length=1, max_length=16000)
     model: str = Field(min_length=1, max_length=200)
-    prompt_version: Literal["1"] = "1"
+    prompt_version: Literal["1", "2"] = "1"
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     response_id: str | None = None
     usage: TokenUsage | None = None
@@ -312,9 +362,10 @@ class ConversationState(FrozenModel):
             raise ValueError("turn IDs, request keys and step IDs must be unique")
         if any(turn.status not in TERMINAL for turn in self.turns[:-1]):
             raise ValueError("only the last turn may be active")
-        covered, parent, seen, last_source_revision = 0, None, set(), -1
+        covered, parent, seen, last_source_revision = (0, 0), None, set(), -1
         for generation, checkpoint in enumerate(self.compactions, 1):
             count = checkpoint.through_turn_count
+            steps = checkpoint.through_step_count
             if (
                 checkpoint.id in seen
                 or checkpoint.generation != generation
@@ -322,21 +373,25 @@ class ConversationState(FrozenModel):
             ):
                 raise ValueError("invalid compaction checkpoint chain")
             if (
-                not covered <= count <= len(self.turns)
+                not covered <= (count, steps)
                 or not last_source_revision < checkpoint.source_revision < self.revision
             ):
                 raise ValueError("invalid compaction boundary or source revision")
-            prefix = self.turns[:count]
-            if any(turn.status not in TERMINAL for turn in prefix):
-                raise ValueError("compaction cannot cover an unfinished turn")
+            try:
+                actual_digest = coverage_digest(self.turns, count, steps)
+            except SessionError as error:
+                raise ValueError(str(error)) from None
+            boundary_turn = self.turns[count if steps else count - 1]
             if (
-                prefix[-1].id != checkpoint.through_turn_id
-                or turns_digest(prefix) != checkpoint.source_digest
+                boundary_turn.id != checkpoint.through_turn_id
+                or (boundary_turn.steps[steps - 1].id if steps else None)
+                != checkpoint.through_step_id
+                or actual_digest != checkpoint.source_digest
             ):
                 raise ValueError(
                     "compaction source history does not match its checkpoint"
                 )
-            covered, parent = count, checkpoint.id
+            covered, parent = (count, steps), checkpoint.id
             last_source_revision = checkpoint.source_revision
             seen.add(checkpoint.id)
         return self

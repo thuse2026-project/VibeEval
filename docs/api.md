@@ -31,6 +31,10 @@ Agent 接入分支另增考生归属下的会话创建、列表、历史和事�
 内部阅读服务复用上一分支原生 tool call/result；没有开放浏览器伪造工具回执的接口。
 版本、选区、工具和后续边界见 [Agent 接入第二批](agent-integration-stage2.md)。
 
+第三批 A 新增同一对话下的 `GET /context?offset=0&limit=20`，只读返回当前窗口预览、
+预算估算、压缩边界与材料可见情况，不返回正文、系统 prompt 或 Key，不触发模型。
+stage=preview 不表示已经向供应商发送；契约与运行编排边界见 [第三批 A](agent-integration-stage3a.md)。
+
 ## 考官登录（本轮实现）
 
 - 账号由本地初始化命令预配置，无注册接口。

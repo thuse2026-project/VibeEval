@@ -3,7 +3,7 @@
 from .compaction import apply_compaction, call_compaction, prepare_compaction
 from .context import context_info, render_context
 from .dialogue import chat_only, prepare_chat
-from .model import call_model, prepare_model_request
+from .model import call_model, prepare_model_request, project_model_input
 from .session import (
     accept_response,
     begin_turn,
@@ -37,6 +37,7 @@ __all__ = [
     "ToolDefinition",
     "ToolRegistry",
     "prepare_model_request",
+    "project_model_input",
     "call_model",
     "prepare_compaction",
     "call_compaction",

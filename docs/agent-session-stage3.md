@@ -3,6 +3,9 @@
 状态：2026-11-05 用户已确认，作为第三批检查点提交。前两批已分别提交为 ac80abc、abd1a1e，均未推送。
 本批继续参考固定版本的 Codex 源码，改写为项目内 Python 实现，来源见 backend/app/agent/UPSTREAM.md。
 
+后续接入分支在 [第三批 A](agent-integration-stage3a.md) 扩展了 ready Turn 内的完整工具交换边界、
+窗口投影和预算入口；下文保留原批次验收时的空闲压缩范围，最新调用约束以扩展说明为准。
+
 ## 会话保留什么，模型收到什么
 
 ConversationState.turns 保存完整用户消息、助手响应、工具调用与工具结果。

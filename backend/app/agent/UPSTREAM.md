@@ -26,3 +26,10 @@ Claude Code 官方仓库本身不作为本批完整运行时的代码来源；Cl
 第二批 `prompts.py` 是本项目撰写的短全局 prompt，没有复制 Claude Code 私有 prompt。
 续调元数据处理依据 [OpenRouter 官方协议](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)。
 第三批压缩 prompt 也是本项目撰写；没有复制上游完整压缩调度或 token 预算算法。
+
+接入第三批 A 在既有 checkpoint/replacement-history 适配上扩展活动 Turn 的完整工具交换边界；
+`coverage_digest` 固定已经覆盖的步骤及用户任务，后续尾部增长不使既有检查点失效。
+这些类型、预算估算与边界校验为本地实现，不声称复刻上游内部 token 计数。
+`app.agent_integration.window` 的分层整理、外置预览和摘要准备沿用已研究的
+[learn-claude-code s08 固定版本](https://github.com/shareAI-lab/learn-claude-code/blob/7226f555d48900076eba126acf37c9ed5f002b5d/s08_context_compact/code.py)
+的结构思路；本小步独立重写为原生消息投影，不复制其宿主文件写入或自动循环代码。
