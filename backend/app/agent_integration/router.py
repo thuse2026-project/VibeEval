@@ -12,8 +12,9 @@ from app.llm.config import LLMError, load_settings
 from app.workspace.service import WorkspaceReader
 
 from .material_store import MaterialStore
-from .read_tools import ReadToolService
 from .reading_types import InputReference, ReadingError
+from .runtime import RuntimeCoordinator
+from .runtime_types import AnswerInput, ApprovalInput, CompactInput, RunBusy, RunInput
 from .sources import SourceReader
 from .store import (
     ConversationClosed,
@@ -21,7 +22,6 @@ from .store import (
     PostgresSessionStore,
     StoredStateInvalid,
 )
-from .window import inspect_window
 
 router = APIRouter(
     prefix="/api/v1/sessions/{session_id}/agent",
@@ -94,6 +94,10 @@ def result(action):
         raise HTTPException(
             error.status, {"code": "AGENT_MODEL_CONFIG_INVALID", "message": str(error)}
         ) from None
+    except RunBusy:
+        raise HTTPException(
+            409, {"code": "AGENT_RUN_BUSY", "message": "对话已有活动运行或工作进程"}
+        ) from None
 
 
 def reading(request: Request, store=Depends(repository)):
@@ -113,6 +117,15 @@ def reading(request: Request, store=Depends(repository)):
         else None
     )
     return SourceReader(MaterialStore(factory), workspace=workspace)
+
+
+def runtime(request: Request, reader=Depends(reading)):
+    configured = request.app.state.agent_runtime
+    return (
+        configured
+        if configured is not None
+        else RuntimeCoordinator(reader, settings=result(load_settings))
+    )
 
 
 @router.post("/conversations", status_code=201)
@@ -241,6 +254,7 @@ def reads(
 
 @router.get("/conversations/{conversation_id}/context")
 def context_window(
+    request: Request,
     session_id: str,
     conversation_id: str,
     offset: int = Query(default=0, ge=0),
@@ -248,17 +262,157 @@ def context_window(
     reader=Depends(reading),
 ):
     def action():
-        state = reader.store.conversations.load(session_id, conversation_id)
-        report = inspect_window(
-            state, tools=ReadToolService(reader).registry, settings=load_settings()
+        service = request.app.state.agent_runtime or RuntimeCoordinator(
+            reader, settings=load_settings()
         )
+        report = service.preview(session_id, conversation_id)
         materials = report.pop("materials")
+        references = report.pop("input_references")
         return {
             **report,
             "materials": materials[offset : offset + limit],
             "material_count": len(materials),
+            "input_references": references[offset : offset + limit],
+            "input_reference_count": len(references),
             "offset": offset,
-            "has_more": offset + limit < len(materials),
+            "has_more": offset + limit < max(len(materials), len(references)),
         }
 
     return result(action)
+
+
+@router.post("/conversations/{conversation_id}/turns", status_code=202)
+def submit_turn(
+    body: RunInput, session_id: str, conversation_id: str, service=Depends(runtime)
+):
+    return result(lambda: service.submit(session_id, conversation_id, body))
+
+
+@router.post("/conversations/{conversation_id}/compactions", status_code=202)
+def submit_compaction(
+    body: CompactInput, session_id: str, conversation_id: str, service=Depends(runtime)
+):
+    return result(
+        lambda: service.submit(session_id, conversation_id, body, kind="compact")
+    )
+
+
+@router.get("/conversations/{conversation_id}/runs")
+def runs(
+    session_id: str,
+    conversation_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    service=Depends(runtime),
+):
+    return result(
+        lambda: service.store.list(
+            session_id, conversation_id, offset=offset, limit=limit
+        )
+    )
+
+
+@router.get("/conversations/{conversation_id}/runs/{run_id}")
+def run(session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)):
+    return result(lambda: service.store.get(session_id, conversation_id, run_id))
+
+
+@router.post("/conversations/{conversation_id}/runs/{run_id}/advance")
+async def advance_run(
+    session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)
+):
+    try:
+        return await service.advance(session_id, conversation_id, run_id)
+    except Exception as error:
+        return result(lambda raised=error: (_ for _ in ()).throw(raised))
+
+
+@router.post("/conversations/{conversation_id}/runs/{run_id}/interrupt")
+def interrupt_run(
+    session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)
+):
+    return result(
+        lambda: service.store.stop(
+            session_id, conversation_id, run_id, "interrupted", "USER_INTERRUPTED"
+        )
+    )
+
+
+@router.post("/conversations/{conversation_id}/runs/{run_id}/compact")
+def request_compaction(
+    session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)
+):
+    return result(
+        lambda: service.store.request_compaction(session_id, conversation_id, run_id)
+    )
+
+
+@router.get("/conversations/{conversation_id}/runs/{run_id}/attempts")
+def attempts(
+    session_id: str,
+    conversation_id: str,
+    run_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    service=Depends(runtime),
+):
+    return result(
+        lambda: service.store.attempts(
+            session_id, conversation_id, run_id, offset=offset, limit=limit
+        )
+    )
+
+
+@router.get("/conversations/{conversation_id}/runs/{run_id}/interactions")
+def interactions(
+    session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)
+):
+    return result(
+        lambda: service.store.interactions(session_id, conversation_id, run_id)
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/runs/{run_id}/interactions/{interaction_id}/approval"
+)
+def approve_interaction(
+    body: ApprovalInput,
+    session_id: str,
+    conversation_id: str,
+    run_id: str,
+    interaction_id: str,
+    service=Depends(runtime),
+):
+    return result(
+        lambda: service.store.resolve(
+            session_id,
+            conversation_id,
+            run_id,
+            interaction_id,
+            kind="approval",
+            answer=body.model_dump(mode="json"),
+        )
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/runs/{run_id}/interactions/{interaction_id}/answer"
+)
+def answer_interaction(
+    body: AnswerInput,
+    session_id: str,
+    conversation_id: str,
+    run_id: str,
+    interaction_id: str,
+    service=Depends(runtime),
+):
+    return result(
+        lambda: service.store.resolve(
+            session_id,
+            conversation_id,
+            run_id,
+            interaction_id,
+            kind="user_input",
+            answer=body.model_dump(mode="json"),
+        )
+    )

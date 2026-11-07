@@ -78,6 +78,9 @@ class ToolRegistry:
     def specifications(self) -> list[dict]:
         return [tool.specification() for tool in self._tools]
 
+    def with_tools(self, tools: Sequence[ToolDefinition]):
+        return ToolRegistry(self._tools + tuple(tools), version=self.version)
+
     @property
     def fingerprint(self) -> str:
         value = json.dumps(self.specifications(), sort_keys=True, ensure_ascii=False)

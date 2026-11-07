@@ -96,6 +96,9 @@ class PostgreSQLTests(unittest.TestCase):
                 "agent_materials",
                 "agent_input_references",
                 "agent_read_observations",
+                "agent_runs",
+                "agent_attempts",
+                "agent_interactions",
                 "alembic_version",
             },
         )

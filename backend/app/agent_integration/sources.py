@@ -55,6 +55,7 @@ def public_messages(state):
             "message_id": turn.id + ":user",
             "role": "user",
             "content": turn.user_message,
+            "input_context": turn.input_context,
         }
         for step in turn.steps:
             if not step.response:

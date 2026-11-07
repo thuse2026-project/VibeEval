@@ -193,6 +193,7 @@ class TurnState(FrozenModel):
     id: Identifier
     request_key: Identifier
     user_message: str = Field(min_length=1, max_length=16000)
+    input_context: str | None = Field(default=None, max_length=16000)
     status: Status = "ready"
     steps: tuple[ModelStep, ...] = ()
 
@@ -245,13 +246,21 @@ class SessionConfig(FrozenModel):
 
 def turns_digest(turns: tuple[TurnState, ...]) -> str:
     encoded = json.dumps(
-        [turn.model_dump(mode="json") for turn in turns],
+        [turn_record(turn) for turn in turns],
         sort_keys=True,
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
     )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def turn_record(turn):
+    record = turn.model_dump(mode="json")
+    # Preserve the digest of pre-attachment snapshots/checkpoints.
+    if turn.input_context is None:
+        record.pop("input_context")
+    return record
 
 
 def coverage_digest(turns, through_turn_count, through_step_count=0):
@@ -283,7 +292,7 @@ def coverage_digest(turns, through_turn_count, through_step_count=0):
     ):
         raise SessionError("partial coverage requires closed tool exchanges")
     material = {
-        "turns": [turn.model_dump(mode="json") for turn in prefix],
+        "turns": [turn_record(turn) for turn in prefix],
         "partial_turn": {
             "id": partial.id,
             "request_key": partial.request_key,
@@ -291,6 +300,8 @@ def coverage_digest(turns, through_turn_count, through_step_count=0):
             "steps": [step.model_dump(mode="json") for step in steps],
         },
     }
+    if partial.input_context is not None:
+        material["partial_turn"]["input_context"] = partial.input_context
     return hashlib.sha256(
         json.dumps(
             material,

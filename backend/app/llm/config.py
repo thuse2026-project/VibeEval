@@ -12,9 +12,18 @@ ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 class LLMError(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, *, uncertain=False, usage=None):
         super().__init__(message)
         self.status = status
+        self.uncertain = uncertain
+        self.usage = usage
+
+
+class ContextLimitError(LLMError):
+    """A structured provider rejection, never a generic network retry signal."""
+
+    def __init__(self):
+        super().__init__(422, "模型明确拒绝了超出上下文窗口的请求")
 
 
 @dataclass(frozen=True)

@@ -193,7 +193,11 @@ def prepare_compaction(
         "through_turn_count": through_turn,
         "previously_covered_steps": covered_steps,
         "through_step_count": through_step_count,
-        "protected_current_task": active.user_message if active else None,
+        "protected_current_task": (
+            render_turns((active.model_copy(update={"steps": ()}),))[0]["content"]
+            if active
+            else None
+        ),
         "new_turns": new_turns,
     }
     messages = [{"role": "system", "content": COMPACTION_PROMPT}]

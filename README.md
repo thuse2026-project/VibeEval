@@ -41,6 +41,7 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [Agent 接入第一批](docs/agent-integration-stage1.md)：PostgreSQL 会话保存、考试归属、事务事件和基础 HTTP 接口。
 - [Agent 接入第二批](docs/agent-integration-stage2.md)：用户引用、工作区查询阅读、跨对话取材与不可变材料，复用核心原生工具协议。
 - [Agent 接入第三批 A](docs/agent-integration-stage3a.md)：长 Turn 安全压缩、材料窗口投影、预算检查和只读窗口查询。
+- [Agent 接入第三批 B](docs/agent-integration-stage3b.md)：持久只读循环、主动/被动压缩、批准/提问、调用用量与未知结果恢复。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 

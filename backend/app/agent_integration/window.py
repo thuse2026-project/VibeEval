@@ -347,6 +347,90 @@ def inspect_window(
             "over_hard_limit": hard,
         },
         "materials": material_manifest(state, payload),
+        "input_references": input_reference_manifest(state),
+    }
+
+
+def input_reference_manifest(state):
+    covered = state.compactions[-1].through_turn_count if state.compactions else 0
+    result = []
+    for index, turn in enumerate(state.turns):
+        try:
+            context = json.loads(turn.input_context) if turn.input_context else {}
+        except ValueError:
+            continue
+        if not isinstance(context, dict) or not isinstance(
+            context.get("references"), list
+        ):
+            continue
+        for item in context["references"]:
+            if not isinstance(item, dict):
+                continue
+            result.append(
+                {
+                    "turn_id": turn.id,
+                    "reference_id": item.get("reference_id"),
+                    "material_id": item.get("material_id"),
+                    "kind": item.get("reference", {}).get("kind"),
+                    "source_version": item.get("source_version"),
+                    "window_mode": (
+                        "compacted"
+                        if index < covered
+                        else (
+                            "inline_fragment"
+                            if "text" in item and item.get("has_more")
+                            else "inline_material" if "text" in item else "locator"
+                        )
+                    ),
+                    "visible_sha256": (
+                        item.get("returned_sha256") if index >= covered else None
+                    ),
+                }
+            )
+    return result
+
+
+def compaction_manifest(request):
+    material = json.loads(request.payload["messages"][-1]["content"])
+    bodies = []
+    for turn in material["new_turns"]:
+        for message in turn["messages"]:
+            if message.get("role") != "tool":
+                continue
+            try:
+                body = json.loads(message["content"])
+            except (ValueError, TypeError):
+                continue
+            if isinstance(body, dict) and isinstance(body.get("material_id"), str):
+                bodies.append(
+                    {
+                        "turn_id": turn["turn_id"],
+                        "tool_call_id": message["tool_call_id"],
+                        "material_id": body["material_id"],
+                        "source_version": body.get("source_version"),
+                        "window_projection": body.get(
+                            "window_projection", "original_fragment"
+                        ),
+                        "returned_sha256": body.get("returned_sha256"),
+                    }
+                )
+    return {
+        "stage": "prepared",
+        "kind": "compaction",
+        "payload_sha256": request.payload_sha256,
+        "source_revision": request.source_revision,
+        "through_turn_count": request.through_turn_count,
+        "through_step_count": request.through_step_count,
+        "source_digest": request.source_digest,
+        "materials": bodies,
+        "budget": {
+            "serialized_characters": len(request.payload_json),
+            "estimated_input_tokens": math.ceil(
+                len(request.payload_json.encode("utf-8")) / 3
+            ),
+            "estimate_method": "utf8_bytes_div_3_heuristic_v1",
+            "reserved_output_tokens": request.payload["max_tokens"],
+        },
     }
 
 

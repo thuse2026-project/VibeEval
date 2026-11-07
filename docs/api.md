@@ -35,6 +35,11 @@ Agent 接入分支另增考生归属下的会话创建、列表、历史和事�
 预算估算、压缩边界与材料可见情况，不返回正文、系统 prompt 或 Key，不触发模型。
 stage=preview 不表示已经向供应商发送；契约与运行编排边界见 [第三批 A](agent-integration-stage3a.md)。
 
+第三批 B 接通 `POST /turns`、`POST /compactions` 及 `/runs/{run_id}` 下的 advance/interrupt/compact、
+attempts/interactions 和批准/答复接口。提交返回 queued Run，调用 advance 在后端运行只读循环；
+等待交互时答复后再 advance。请求、预算、错误和恢复语义见 [持久只读运行契约](agent-integration-stage3b.md)。
+浏览器不提交模型/工具成功回执；本批尚不提供命令或文件修改。
+
 ## 考官登录（本轮实现）
 
 - 账号由本地初始化命令预配置，无注册接口。

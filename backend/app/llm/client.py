@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from .config import LLMError, LLMSettings
+from .config import ContextLimitError, LLMError, LLMSettings
 
 
 class Message(BaseModel):
@@ -77,6 +77,29 @@ def upstream_error(status: int) -> LLMError:
     return LLMError(*messages.get(status, (502, "模型服务请求失败，请稍后重试")))
 
 
+def context_limit(error):
+    if not isinstance(error, dict):
+        return False
+    metadata = error.get("metadata")
+    return error.get("code") == "context_length_exceeded" or (
+        isinstance(metadata, dict)
+        and metadata.get("error_type") == "context_length_exceeded"
+    )
+
+
+def error_receipt(error, payload):
+    raw = payload.get("usage") if isinstance(payload, dict) else None
+    if isinstance(raw, dict):
+        keys = ("prompt_tokens", "completion_tokens", "total_tokens")
+        values = {key: raw.get(key) for key in keys}
+        if all(
+            value is None or type(value) is int and value >= 0
+            for value in values.values()
+        ):
+            error.usage = values
+    return error
+
+
 class LLMClient:
     def __init__(self, settings: LLMSettings, *, transport=None):
         self.settings = settings
@@ -98,12 +121,28 @@ class LLMClient:
                     timeout=self.settings.timeout_seconds,
                 )
         except (httpx.TimeoutException, TimeoutError):
-            raise LLMError(504, "模型服务响应超时，请稍后重试") from None
+            raise LLMError(
+                504, "模型服务响应超时，请稍后重试", uncertain=True
+            ) from None
         except httpx.RequestError:
-            raise LLMError(502, "暂时无法连接模型服务，请检查网络和 API 地址") from None
+            raise LLMError(
+                502, "暂时无法连接模型服务，请检查网络和 API 地址", uncertain=True
+            ) from None
         if not response.is_success:
+            try:
+                failure_payload = response.json()
+            except ValueError:
+                failure_payload = None
+            if response.status_code == 400:
+                error = (
+                    failure_payload.get("error", {})
+                    if isinstance(failure_payload, dict)
+                    else {}
+                )
+                if context_limit(error):
+                    raise error_receipt(ContextLimitError(), failure_payload)
             # Never expose provider bodies, URLs, headers or credentials to callers.
-            raise upstream_error(response.status_code)
+            raise error_receipt(upstream_error(response.status_code), failure_payload)
         try:
             payload = response.json()
         except ValueError:
@@ -112,8 +151,12 @@ class LLMClient:
             raise LLMError(502, "模型服务返回了无效数据")
         if "error" in payload:
             error = payload["error"]
+            if context_limit(error):
+                raise error_receipt(ContextLimitError(), payload)
             code = error.get("code") if isinstance(error, dict) else None
-            raise upstream_error(code if isinstance(code, int) else 502)
+            raise error_receipt(
+                upstream_error(code if isinstance(code, int) else 502), payload
+            )
         return payload
 
     async def models(self) -> list[ModelInfo]:

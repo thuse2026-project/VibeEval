@@ -33,3 +33,11 @@ Claude Code 官方仓库本身不作为本批完整运行时的代码来源；Cl
 `app.agent_integration.window` 的分层整理、外置预览和摘要准备沿用已研究的
 [learn-claude-code s08 固定版本](https://github.com/shareAI-lab/learn-claude-code/blob/7226f555d48900076eba126acf37c9ed5f002b5d/s08_context_compact/code.py)
 的结构思路；本小步独立重写为原生消息投影，不复制其宿主文件写入或自动循环代码。
+
+接入第三批 B 的 `RuntimeCoordinator` 依据同一固定版本的
+[s01 循环](https://github.com/shareAI-lab/learn-claude-code/blob/7226f555d48900076eba126acf37c9ed5f002b5d/s01_agent_loop/code.py)
+与 s08 分层压缩结构重写：模型输出原生调用，外层处理后回填结果并续调。
+项目自行实现 PostgreSQL 请求账本、租约、等待交互和停止/恢复；没有复制教学脚本的宿主执行器，
+没有引入 CLI/SDK 运行时。本批未直接复制其源码文本；该参考项目采用 MIT，来源说明见上下文计划。
+只识别明确结构化超窗错误作为一次补救信号，OpenRouter 字段依据
+[官方错误协议](https://openrouter.ai/docs/api_reference/errors-and-debugging)。
