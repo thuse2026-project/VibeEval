@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -353,7 +354,7 @@ class AgentRun(Base):
         ),
         CheckConstraint("kind IN ('turn', 'compact')", name="kind_valid"),
         CheckConstraint(
-            "status IN ('queued','running','waiting_approval','waiting_user_input','completed','failed','interrupted','unknown','capacity_exceeded','budget_exhausted','expired')",
+            "status IN ('queued','running','waiting_approval','waiting_user_input','waiting_operation','completed','failed','interrupted','unknown','capacity_exceeded','budget_exhausted','expired')",
             name="status_valid",
         ),
         CheckConstraint(
@@ -372,7 +373,7 @@ class AgentRun(Base):
             "conversation_id",
             unique=True,
             postgresql_where=text(
-                "status IN ('queued','running','waiting_approval','waiting_user_input')"
+                "status IN ('queued','running','waiting_approval','waiting_user_input','waiting_operation')"
             ),
         ),
     )
@@ -492,6 +493,66 @@ class AgentInteraction(Base):
     created_at: Mapped[int] = mapped_column(BigInteger)
     expires_at: Mapped[int] = mapped_column(BigInteger)
     finished_at: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class AgentOperation(Base):
+    __tablename__ = "agent_operations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id", "conversation_id", "exam_session_id"],
+            [
+                "agent_runs.run_id",
+                "agent_runs.conversation_id",
+                "agent_runs.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "run_id", "step_id", "tool_call_id", name="uq_agent_operations_call"
+        ),
+        CheckConstraint(
+            "status IN ('requested','waiting_approval','preparing','prepared','dispatching','running','succeeded','failed','conflict','denied','cancelled','timed_out','unknown')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "revision >= 0 AND created_at >= 0 AND updated_at >= created_at",
+            name="timeline_valid",
+        ),
+        CheckConstraint(
+            "call_sha256 ~ '^[0-9a-f]{64}$' AND binding_sha256 ~ '^[0-9a-f]{64}$'",
+            name="digests_valid",
+        ),
+        Index(
+            "uq_agent_operations_workspace_holder",
+            "exam_session_id",
+            unique=True,
+            postgresql_where=text("holds_workspace"),
+        ),
+    )
+
+    operation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(128))
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    turn_id: Mapped[str] = mapped_column(String(128))
+    step_id: Mapped[str] = mapped_column(String(128))
+    tool_call_id: Mapped[str] = mapped_column(String(128))
+    call_sha256: Mapped[str] = mapped_column(String(64))
+    args_json: Mapped[dict] = mapped_column(JSONB)
+    binding_json: Mapped[dict] = mapped_column(JSONB)
+    binding_sha256: Mapped[str] = mapped_column(String(64))
+    config_json: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(32))
+    policy_decision: Mapped[str | None] = mapped_column(String(16))
+    reason_code: Mapped[str | None] = mapped_column(String(80))
+    handle: Mapped[str | None] = mapped_column(String(128))
+    receipt_json: Mapped[dict | None] = mapped_column(JSONB)
+    result_json: Mapped[dict | None] = mapped_column(JSONB)
+    revision: Mapped[int] = mapped_column(Integer)
+    holds_workspace: Mapped[bool] = mapped_column(Boolean)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
 
 
 class Snapshot(Base):

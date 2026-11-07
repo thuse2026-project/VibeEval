@@ -11,7 +11,9 @@ class RunInput(FrozenModel):
     request_key: Identifier
     text: str = Field(min_length=1, max_length=12000, pattern=r"\S")
     reference_ids: tuple[Identifier, ...] = Field(default=(), max_length=20)
-    mode: Literal["chat_only", "read_only"] = "read_only"
+    mode: Literal["chat_only", "read_only", "confirm_actions", "sandbox_auto"] = (
+        "read_only"
+    )
 
 
 class CompactInput(FrozenModel):
@@ -20,8 +22,13 @@ class CompactInput(FrozenModel):
 
 class RunPolicy(FrozenModel):
     version: str = "1"
-    mode: Literal["chat_only", "read_only"] = "read_only"
+    mode: Literal["chat_only", "read_only", "confirm_actions", "sandbox_auto"] = (
+        "read_only"
+    )
     read_decision: Literal["allow", "ask", "deny"] = "allow"
+    action_decision: Literal["allow", "ask", "deny"] = "ask"
+    max_operations: int = Field(default=16, strict=True, ge=1, le=32)
+    max_command_seconds: int = Field(default=120, strict=True, ge=1, le=120)
     max_model_calls: int = Field(default=8, strict=True, ge=1, le=32)
     max_compactions: int = Field(default=2, strict=True, ge=1, le=8)
     max_tool_calls: int = Field(default=32, strict=True, ge=1, le=128)

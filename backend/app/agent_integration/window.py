@@ -28,6 +28,7 @@ READ_TOOLS = frozenset(
         "read_material",
         "read_reference",
         "read_source",
+        "read_execution_output",
     )
 )
 
@@ -193,6 +194,25 @@ def _retained_tools(state):
                     yield (turn.id, step.id, call.id)
 
 
+def execution_materials(body):
+    """Describe the bounded fragments in a platform execution receipt."""
+    if not isinstance(body, dict) or not isinstance(body.get("execution_id"), str):
+        return
+    for stream in ("stdout", "stderr"):
+        identity, text = body.get(stream + "_material_id"), body.get(stream)
+        if not isinstance(identity, str) or not isinstance(text, str):
+            continue
+        yield {
+            "material_id": identity,
+            "source_kind": "execution_" + stream,
+            "source_id": body["execution_id"] + ":" + stream,
+            "source_version": str(body.get("output_revision", "")),
+            "returned_sha256": digest(text),
+            "preview": body.get(stream + "_preview_has_more", False),
+            "end_offset": len(text),
+        }
+
+
 def material_manifest(state, payload):
     """Describe actual projected bodies, not presumed model memory/understanding."""
     tool_messages = [
@@ -214,6 +234,41 @@ def material_manifest(state, payload):
                 else {}
             )
             for result in step.tool_results:
+                call = calls[result.tool_call_id]
+                if call.name == "run_command":
+                    try:
+                        body = json.loads(result.content)
+                    except ValueError:
+                        continue
+                    item = visible.get((turn.id, step.id, result.tool_call_id))
+                    compacted = turn_index < boundary[0] or (
+                        turn_index == boundary[0] and step_index < boundary[1]
+                    )
+                    for part in execution_materials(body):
+                        entries.append(
+                            {
+                                "turn_id": turn.id,
+                                "step_id": step.id,
+                                "tool_call_id": result.tool_call_id,
+                                "material_id": part["material_id"],
+                                "source_kind": part["source_kind"],
+                                "source_id": part["source_id"],
+                                "source_version": part["source_version"],
+                                "original_returned_sha256": part["returned_sha256"],
+                                "window_mode": (
+                                    ("preview" if part["preview"] else "full_material")
+                                    if item
+                                    else "compacted" if compacted else "not_included"
+                                ),
+                                "message_index": item[0] if item else None,
+                                "visible_sha256": (
+                                    part["returned_sha256"] if item else None
+                                ),
+                                "start_offset": 0 if item else None,
+                                "end_offset": part["end_offset"] if item else None,
+                            }
+                        )
+                    continue
                 if result.is_error or calls[result.tool_call_id].name not in READ_TOOLS:
                     continue
                 original = read_body(result.content)
@@ -401,6 +456,21 @@ def compaction_manifest(request):
                 body = json.loads(message["content"])
             except (ValueError, TypeError):
                 continue
+            for part in execution_materials(body):
+                bodies.append(
+                    {
+                        "turn_id": turn["turn_id"],
+                        "tool_call_id": message["tool_call_id"],
+                        "material_id": part["material_id"],
+                        "source_version": part["source_version"],
+                        "window_projection": (
+                            "execution_preview"
+                            if part["preview"]
+                            else "original_fragment"
+                        ),
+                        "returned_sha256": part["returned_sha256"],
+                    }
+                )
             if isinstance(body, dict) and isinstance(body.get("material_id"), str):
                 bodies.append(
                     {

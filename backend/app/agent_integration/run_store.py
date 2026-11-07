@@ -36,7 +36,13 @@ from .window import (
     prepare_window_request,
 )
 
-ACTIVE = ("queued", "running", "waiting_approval", "waiting_user_input")
+ACTIVE = (
+    "queued",
+    "running",
+    "waiting_approval",
+    "waiting_user_input",
+    "waiting_operation",
+)
 
 
 class RunStore:
@@ -303,6 +309,8 @@ class RunStore:
 
     def claim(self, scope, cid, run_id):
         with self.locked(scope, cid, run_id, open_required=False) as (db, conv, run):
+            if run.status == "waiting_operation":
+                run.status = "queued"
             if run.status in ("waiting_approval", "waiting_user_input"):
                 row = db.scalar(
                     select(AgentInteraction).where(
@@ -709,7 +717,9 @@ class RunStore:
                 row.status, row.finished_at = "expired", int(self.clock())
             return self.interaction_view(row) if row else None
 
-    def wait(self, scope, cid, run_id, token, step_id, call, *, kind, request):
+    def wait(
+        self, scope, cid, run_id, token, step_id, call, *, kind, request, binding=None
+    ):
         with self.locked(scope, cid, run_id) as (db, conv, run):
             self._lease(run, token)
             if int(self.clock()) >= run.deadline_at:
@@ -741,6 +751,7 @@ class RunStore:
                     kind=kind,
                     call_sha256=call_digest(call),
                     binding_json={
+                        **(binding or {}),
                         "policy_sha256": digest(encoded(run.policy_json)),
                         "call_sha256": call_digest(call),
                         "scope_id": scope,
@@ -801,6 +812,17 @@ class RunStore:
             turn, step, call = self.materials._call(
                 state, row.step_id, row.tool_call_id
             )
+            if "operation_id" in row.binding_json:
+                from app.db.models import AgentOperation
+
+                operation = db.get(AgentOperation, row.binding_json["operation_id"])
+                if (
+                    operation is None
+                    or operation.run_id != run_id
+                    or operation.binding_sha256
+                    != row.binding_json["operation_binding_sha256"]
+                ):
+                    raise SessionConflict("operation approval binding changed")
             if (
                 turn is not state.active_turn
                 or step.status != "awaiting_tools"

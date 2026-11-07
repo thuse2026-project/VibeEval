@@ -99,6 +99,7 @@ class PostgreSQLTests(unittest.TestCase):
                 "agent_runs",
                 "agent_attempts",
                 "agent_interactions",
+                "agent_operations",
                 "alembic_version",
             },
         )

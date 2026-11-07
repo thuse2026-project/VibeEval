@@ -10,12 +10,27 @@ from pydantic import ValidationError
 from app.agent import begin_turn, create_conversation, render_history, start_step
 from app.agent.session import release_context_rejected_step
 from app.agent.session_types import turns_digest
+from app.agent_integration.operation_types import RunCommand
 from app.agent_integration.runtime_types import AskUser, RunInput
 from app.llm.client import LLMClient
 from app.llm.config import ContextLimitError, LLMError, LLMSettings
 
 
 class RuntimeProtocolTests(unittest.TestCase):
+    def test_command_arguments_are_explicit_bounded_and_cannot_choose_sandbox(self):
+        self.assertEqual(RunCommand(argv=("python", "-c", "")).argv[-1], "")
+        for body in (
+            {"argv": []},
+            {"argv": [""]},
+            {"argv": ["bad\x00exe"]},
+            {"argv": ["python"], "cwd": "../"},
+            {"argv": ["python"], "sandbox_id": "other"},
+            {"argv": ["python"], "timeout_seconds": 121},
+            {"argv": ["python"], "expected_versions": {"/etc/passwd": 1}},
+        ):
+            with self.subTest(body=body), self.assertRaises(ValidationError):
+                RunCommand.model_validate(body)
+
     def test_old_turn_digest_is_unchanged_without_attachment_context(self):
         state = begin_turn(create_conversation("scope"), "question", request_key="old")
         records = [
@@ -65,7 +80,7 @@ class RuntimeProtocolTests(unittest.TestCase):
         for body in (
             {"request_key": "k", "text": " "},
             {"request_key": "k", "text": "x", "approved": True},
-            {"request_key": "k", "text": "x", "mode": "sandbox_auto"},
+            {"request_key": "k", "text": "x", "mode": "host_auto"},
         ):
             with self.assertRaises(ValidationError):
                 RunInput.model_validate(body)

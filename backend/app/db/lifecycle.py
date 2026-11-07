@@ -314,6 +314,19 @@ class LockedSession:
             raise LifecycleConflict("Session is not writable")
         return self.view
 
+    def require_agent_idle(self):
+        from .models import AgentOperation
+
+        self._active()
+        active = self._session.scalar(
+            select(AgentOperation.operation_id).where(
+                AgentOperation.exam_session_id == self._record.session_id,
+                AgentOperation.holds_workspace.is_(True),
+            )
+        )
+        if active is not None:
+            raise SessionBusy("agent operation still owns the workspace")
+
     def begin_submission(self) -> SessionView:
         self._active()
         row = self._record

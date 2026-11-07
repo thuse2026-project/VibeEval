@@ -39,7 +39,9 @@ class DockerDouble:
     def __init__(self):
         self.volumes = SimpleNamespace(create=self.volume_create, get=self.volume_get)
         self.images = SimpleNamespace(get=lambda ref: SimpleNamespace(id=IMAGE))
-        self.containers = SimpleNamespace(get=self.get, create=self.create)
+        self.containers = SimpleNamespace(
+            get=self.get, create=self.create, list=lambda **kwargs: []
+        )
         self.container = None
         self.volume = None
         self.creates = 0

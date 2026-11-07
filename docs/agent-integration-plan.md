@@ -5,7 +5,8 @@
 [第一批持久化底座](agent-integration-stage1.md) 已确认并提交 `add28b6`；
 [第二批引用与阅读](agent-integration-stage2.md) 已确认并提交 `a892a67`，未推送。
 [第三批 A 上下文原子能力](agent-integration-stage3a.md) 已确认并提交 `925802e`，未推送。
-[第三批 B 持久只读运行](agent-integration-stage3b.md) 已确认，本地提交，未推送。
+[第三批 B 持久只读运行](agent-integration-stage3b.md) 已确认并提交 `236967e`，未推送。
+[第四批 A 命令执行](agent-integration-stage4a.md) 已确认，本地提交，未推送。
 分支：`feat/agent-integration`，基于已验收的 `feat/llm-api@8c25e65`。
 旧分支的 Agent 核心尚未进入 main；新分支保留该依赖，后续先合入核心再整理集成 PR 的基线。
 本计划依据现有代码整理，其他 Agent 生成的计划只作为参考，不自动成为任务要求。
@@ -258,6 +259,10 @@ accept_response/supply_tool_results 由可信服务端编排器调用；未来�
 第三批继续拆成两小步验收：A 先扩展长 Turn 压缩边界、材料窗口投影、预算和只读查询；
 B 再接持久运行编排、每次模型/压缩尝试与窗口记录、主动/被动触发、批准/提问和自动续调。
 A 的阈值规划不标为自动运行闭环已经完成。
+
+第四批也拆为两步：A 交付持久命令、批准、输出取回、取消与未知执行恢复；
+B 再交付版本化结构文件修改、补丁与变更回传。命令运行时能修改原任务允许写入的文件，
+不等同于独立的文件编辑/补丁审批接口已经完成。
 
 ## 9. 最终验收场景
 

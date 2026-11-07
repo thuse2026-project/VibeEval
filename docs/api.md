@@ -40,6 +40,13 @@ attempts/interactions 和批准/答复接口。提交返回 queued Run，调用 
 等待交互时答复后再 advance。请求、预算、错误和恢复语义见 [持久只读运行契约](agent-integration-stage3b.md)。
 浏览器不提交模型/工具成功回执；本批尚不提供命令或文件修改。
 
+第四批 A 增加原生 `run_command/read_execution_output`、`waiting_operation` 和
+`GET /operations`、`GET /operations/{id}`、`POST /operations/{id}/cancel`、
+`GET /operations/{id}/output`。批准继续使用已有 interactions 接口；输出增量通过现有事件查询。
+默认服务端仍为 read_only；confirm_actions/sandbox_auto 必须由服务端启用并允许客户端收窄。
+版本绑定、执行回执、输出偏移及不重发规则见 [沙箱命令契约](agent-integration-stage4a.md)。
+结构化文件修改/补丁接口待第四批 B；本分支不改前端。
+
 ## 考官登录（本轮实现）
 
 - 账号由本地初始化命令预配置，无注册接口。

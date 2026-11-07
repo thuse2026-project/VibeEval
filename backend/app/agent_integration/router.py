@@ -331,9 +331,62 @@ async def advance_run(
 def interrupt_run(
     session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)
 ):
+    return result(lambda: service.interrupt(session_id, conversation_id, run_id))
+
+
+@router.get("/conversations/{conversation_id}/operations")
+def operations(
+    session_id: str,
+    conversation_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    service=Depends(runtime),
+):
     return result(
-        lambda: service.store.stop(
-            session_id, conversation_id, run_id, "interrupted", "USER_INTERRUPTED"
+        lambda: service.operations.list(
+            session_id, conversation_id, offset=offset, limit=limit
+        )
+    )
+
+
+@router.get("/conversations/{conversation_id}/operations/{operation_id}")
+def operation(
+    session_id: str, conversation_id: str, operation_id: str, service=Depends(runtime)
+):
+    return result(
+        lambda: service.operations.observe(session_id, conversation_id, operation_id)
+    )
+
+
+@router.post("/conversations/{conversation_id}/operations/{operation_id}/cancel")
+def cancel_operation(
+    session_id: str, conversation_id: str, operation_id: str, service=Depends(runtime)
+):
+    return result(
+        lambda: service.operations.cancel(session_id, conversation_id, operation_id)
+    )
+
+
+@router.get("/conversations/{conversation_id}/operations/{operation_id}/output")
+def operation_output(
+    session_id: str,
+    conversation_id: str,
+    operation_id: str,
+    stream: str = Query(default="stdout", pattern="^(stdout|stderr)$"),
+    offset: int = Query(default=0, ge=0),
+    max_chars: int = Query(default=8000, ge=1, le=16000),
+    expected_revision: int | None = Query(default=None, ge=0),
+    service=Depends(runtime),
+):
+    return result(
+        lambda: service.operations.read_output(
+            session_id,
+            conversation_id,
+            operation_id,
+            stream,
+            offset=offset,
+            max_chars=max_chars,
+            expected_revision=expected_revision,
         )
     )
 

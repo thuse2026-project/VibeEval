@@ -28,6 +28,7 @@ from app.agent_integration.window import (
     ContextCapacityError,
     WindowPolicy,
     adopt_window_compaction,
+    compaction_manifest,
     inspect_window,
     plan_compaction,
     prepare_window_request,
@@ -93,6 +94,41 @@ def compact(state, steps):
 
 
 class WindowTests(unittest.TestCase):
+    def command_result(self):
+        state = start_step(self.state)
+        call = ToolCall(id="execution-call", name="run_command", arguments="{}")
+        state = accept_response(
+            state,
+            state.active_turn.steps[-1].id,
+            ModelResponse(
+                model="fixture",
+                finish_reason="tool_calls",
+                message=AssistantOutput(tool_calls=(call,)),
+            ),
+        )
+        return supply_tool_results(
+            state,
+            state.active_turn.steps[-1].id,
+            [
+                ToolResult(
+                    tool_call_id=call.id,
+                    content=encoded(
+                        {
+                            "execution_id": "execution-A",
+                            "status": "succeeded",
+                            "output_revision": 3,
+                            "stdout": "captured output " * 100,
+                            "stderr": "",
+                            "stdout_material_id": "stdout-material",
+                            "stderr_material_id": "stderr-material",
+                            "stdout_preview_has_more": True,
+                            "stderr_preview_has_more": False,
+                        }
+                    ),
+                )
+            ],
+        )
+
     def setUp(self):
         self.state = begin_turn(
             create_conversation("scope"), "当前请求保留。", request_key="window"
@@ -398,3 +434,28 @@ class WindowTests(unittest.TestCase):
             updated,
         )
         self.assertEqual(updated.turns, state.turns)
+
+    def test_command_previews_enter_body_free_material_manifest(self):
+        report = self.inspect(self.command_result())
+        parts = report["materials"]
+        self.assertEqual(len(parts), 2)
+        self.assertEqual(parts[0]["source_kind"], "execution_stdout")
+        self.assertEqual(parts[0]["source_version"], "3")
+        self.assertEqual(parts[0]["window_mode"], "preview")
+        self.assertEqual(parts[1]["window_mode"], "full_material")
+        self.assertNotIn("captured output", encoded(report))
+
+    def test_compaction_keeps_execution_locators_without_claiming_visible_output(self):
+        state = add_result(self.command_result(), "recent result", 2)
+        request = prepare_compaction(
+            state, through_turn=0, through_step_count=1, settings=SETTINGS
+        )
+        report = compaction_manifest(request)
+        self.assertEqual(
+            {item["material_id"] for item in report["materials"]},
+            {"stdout-material", "stderr-material"},
+        )
+        updated = compact(state, 1)
+        parts = self.inspect(updated)["materials"][:2]
+        self.assertTrue(all(item["window_mode"] == "compacted" for item in parts))
+        self.assertTrue(all(item["visible_sha256"] is None for item in parts))
