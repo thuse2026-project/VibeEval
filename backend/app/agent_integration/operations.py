@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import json
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -26,6 +27,7 @@ from app.sandbox.runtime import SandboxOperationFailed
 from app.workspace.files import ALLOWED_FILES
 from app.workspace.service import RevisionStoreUnavailable
 
+from .file_changes import ApplyPatch, WriteFile, finish_change, prepare_change
 from .material_store import call_digest
 from .materials import SourceSnapshot, digest, encoded, fragment
 from .operation_types import ExecutionSnapshot, OperationWaiting
@@ -81,8 +83,14 @@ class OperationService:
     @staticmethod
     def _view(row):
         receipt = row.receipt_json or {}
+        file_result = (
+            json.loads(row.result_json["content"])
+            if row.kind == "file_edit" and row.result_json
+            else {}
+        )
         return {
             "operation_id": row.operation_id,
+            "kind": row.kind,
             "execution_id": row.operation_id,
             "run_id": row.run_id,
             "turn_id": row.turn_id,
@@ -109,6 +117,8 @@ class OperationService:
             "stderr_bytes": receipt.get("stderr_bytes", 0),
             "stdout_truncated": receipt.get("stdout_truncated", False),
             "stderr_truncated": receipt.get("stderr_truncated", False),
+            "change": row.binding_json.get("change"),
+            "file_result": file_result or None,
         }
 
     def event(self, db, conv, run, row, kind, **data):
@@ -193,22 +203,26 @@ class OperationService:
                 "policy_sha256": digest(encoded(run.policy_json)),
             }
             identity = uuid.uuid4().hex
+            is_edit = call.name in ("write_file", "apply_patch")
             config = {
                 "operation_id": identity,
-                "argv": list(args.argv),
-                "cwd": args.cwd,
+                "kind": "file_edit" if is_edit else "command",
+                "tool_name": call.name,
                 "timeout_seconds": min(
-                    args.timeout_seconds,
+                    30 if is_edit else args.timeout_seconds,
                     run.policy_json["runtime"]["max_command_seconds"],
                 ),
-                "max_output_bytes": args.max_output_bytes,
+                "max_output_bytes": 1024 if is_edit else args.max_output_bytes,
                 "deadline_at": min(
                     run.deadline_at, view.deadline_at or run.deadline_at
                 ),
                 "expected_digests": {},
             }
+            if not is_edit:
+                config.update(argv=list(args.argv), cwd=args.cwd)
             row = AgentOperation(
                 operation_id=identity,
+                kind=config["kind"],
                 run_id=run_id,
                 conversation_id=cid,
                 exam_session_id=scope,
@@ -240,12 +254,13 @@ class OperationService:
                 raise SessionConflict(
                     "cannot declare an active execution failed without a stop receipt"
                 )
+            body = {"status": status, "code": code, "execution_id": operation_id}
+            if row.kind == "file_edit" and row.binding_json.get("change"):
+                body["change"] = {**row.binding_json["change"], "applied": False}
             result = ToolResult(
                 tool_call_id=row.tool_call_id,
                 is_error=True,
-                content=encoded(
-                    {"status": status, "code": code, "execution_id": operation_id}
-                ),
+                content=encoded(body),
             )
             row.result_json, row.status, row.reason_code = (
                 result.model_dump(mode="json"),
@@ -272,6 +287,11 @@ class OperationService:
             raise ReadingError("WORKSPACE_UNAVAILABLE")
         try:
             self.reader.workspace.tree(scope)
+            with self.locked(scope, cid, operation_id) as (_, _, _, row):
+                edit_path = row.args_json["path"] if row.kind == "file_edit" else None
+            current = (
+                self.reader.workspace.read(scope, edit_path) if edit_path else None
+            )
         except (LifecycleConflict, LifecycleNotFound):
             raise ReadingError("WORKSPACE_NOT_READY") from None
         except SessionBusy:
@@ -293,9 +313,14 @@ class OperationService:
             versions = self.file_versions(db, scope)
             if set(versions) != ALLOWED_FILES:
                 raise ReadingError("FILE_REVISIONS_UNAVAILABLE")
+            expected_versions = (
+                {row.args_json["path"]: row.args_json["expected_version"]}
+                if row.kind == "file_edit"
+                else row.args_json["expected_versions"]
+            )
             if any(
                 versions[path]["version"] != expected
-                for path, expected in row.args_json["expected_versions"].items()
+                for path, expected in expected_versions.items()
             ):
                 raise ReadingError("SOURCE_VERSION_CHANGED")
             if "files" in row.binding_json:
@@ -303,6 +328,37 @@ class OperationService:
                     raise ReadingError("SOURCE_VERSION_CHANGED")
             else:
                 row.binding_json = {**row.binding_json, "files": versions}
+                if row.kind == "file_edit":
+                    if current["version"] != versions[edit_path]["version"]:
+                        raise ReadingError("SOURCE_VERSION_CHANGED")
+                    args_type = (
+                        WriteFile
+                        if row.config_json["tool_name"] == "write_file"
+                        else ApplyPatch
+                    )
+                    change = prepare_change(
+                        self.materials,
+                        db,
+                        scope,
+                        operation_id,
+                        current["content"],
+                        args_type.model_validate(row.args_json),
+                    )
+                    row.binding_json = {**row.binding_json, "change": change}
+                    after = self.materials._material(
+                        db, scope, change["after_material_id"]
+                    )
+                    row.config_json = {
+                        **row.config_json,
+                        "edit": {
+                            "path": edit_path,
+                            "before_sha256": change["before_sha256"],
+                            "after_sha256": change["after_sha256"],
+                            "content_b64": base64.b64encode(
+                                after.text.encode("utf-8")
+                            ).decode("ascii"),
+                        },
+                    }
                 row.binding_sha256 = digest(
                     encoded({"binding": row.binding_json, "args": row.args_json})
                 )
@@ -389,6 +445,10 @@ class OperationService:
             if row.result_json:
                 return ToolResult.model_validate(row.result_json)
             previous = row.receipt_json or {}
+            if row.kind == "file_edit":
+                value["pause_owned"] = value.get("pause_owned", False) or previous.get(
+                    "pause_owned", False
+                )
             for key, old in previous.items():
                 if key not in value and key not in (
                     "status",
@@ -436,6 +496,8 @@ class OperationService:
                 row.revision += 1
                 row.receipt_json = payload
             row.status, row.reason_code = snapshot.status, snapshot.reason_code
+            if row.kind == "file_edit" and snapshot.processes_stopped:
+                return finish_change(self, db, conv, run, row, snapshot)
             row.holds_workspace = not snapshot.processes_stopped
             if not snapshot.processes_stopped:
                 self.event(db, conv, run, row, "operation." + snapshot.status)
@@ -561,6 +623,16 @@ class OperationService:
                         "policy_decision": "ask",
                         "reason_code": "ACTION_APPROVAL_REQUIRED",
                     }
+                    if row.kind == "file_edit":
+                        change = row.binding_json["change"]
+                        diff = self.materials._material(
+                            db, scope, change["diff_material_id"]
+                        )
+                        request["change"] = {
+                            **change,
+                            "diff_preview": diff.text[:2000],
+                            "diff_preview_has_more": len(diff.text) > 2000,
+                        }
                     binding = {
                         "operation_id": operation_id,
                         "operation_binding_sha256": row.binding_sha256,
@@ -626,7 +698,21 @@ class OperationService:
                 row.status = "dispatching"
                 self.event(db, conv, run, row, "operation.dispatching")
             try:
-                self.backend.start_execution(view, config, handle)
+                if config.get("kind") == "file_edit":
+                    # The original terminal pause is a lifecycle transition:
+                    # serialize it with submission and cancellation. Dispatch
+                    # intent was committed above before this bounded Docker I/O.
+                    with self.locked(
+                        scope, cid, operation_id, token=token, open_required=True
+                    ) as (db, _, _, row):
+                        self.assert_target(db, row)
+                        if row.cancel_requested or row.status != "dispatching":
+                            raise SessionConflict(
+                                "file edit was cancelled before start"
+                            )
+                        self.backend.start_execution(view, config, handle)
+                else:
+                    self.backend.start_execution(view, config, handle)
             except BACKEND_ERRORS:
                 pass  # No restart. Query this exact accepted-or-unknown start.
         try:
@@ -683,12 +769,25 @@ class OperationService:
             _, view, config, handle = self.data(scope, cid, operation_id)
             if self.backend is not None:
                 try:
-                    self.record(
-                        scope,
-                        cid,
-                        operation_id,
-                        self.backend.cancel_execution(view, config, handle),
-                    )
+                    stopped = self.backend.cancel_execution(view, config, handle)
+                    try:
+                        self.record(scope, cid, operation_id, stopped)
+                    except ReadingError:
+                        if not stopped.get("processes_stopped"):
+                            raise
+                        # Discard the invalid outcome but retain daemon stop and
+                        # private pause ownership; neither is candidate output.
+                        self.record(
+                            scope,
+                            cid,
+                            operation_id,
+                            {
+                                "status": "unknown",
+                                "processes_stopped": True,
+                                "pause_owned": stopped.get("pause_owned", False),
+                                "reason_code": "EXECUTION_RECEIPT_INVALID",
+                            },
+                        )
                 except BACKEND_ERRORS:
                     pass
         with self.locked(scope, cid, operation_id) as (_, _, _, row):
@@ -743,6 +842,23 @@ class OperationService:
             return fragment(
                 self._snapshot(row, stream), offset=offset, max_chars=max_chars
             )
+
+    def read_change(self, scope, cid, operation_id, part, *, offset=0, max_chars=8000):
+        if part not in ("before", "after", "diff"):
+            raise ReadingError("CHANGE_PART_INVALID")
+        with self.locked(scope, cid, operation_id) as (db, _, _, row):
+            plan = row.binding_json.get("change")
+            if row.kind != "file_edit" or not plan:
+                raise ReadingError("SOURCE_UNAVAILABLE")
+            identity = plan[part + "_material_id"]
+            snapshot = self.materials._material(db, scope, identity)
+            return {
+                "operation_id": operation_id,
+                "part": part,
+                "proposal": True,
+                "material_id": identity,
+                **fragment(snapshot, offset=offset, max_chars=max_chars),
+            }
 
     def read_tool(self, scope, cid, step_id, call, args):
         with session_scope(self.runs.factory) as db:

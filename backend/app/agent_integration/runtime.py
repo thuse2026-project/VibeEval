@@ -27,6 +27,7 @@ from app.agent.session_types import (
 from app.llm.client import LLMClient
 from app.llm.config import ContextLimitError, LLMError
 
+from .file_changes import ApplyPatch, WriteFile
 from .materials import encoded, validate_json_text
 from .operation_types import OperationWaiting, ReadExecution, RunCommand
 from .operations import OperationService
@@ -44,7 +45,7 @@ from .store import ConversationClosed
 from .window import ContextCapacityError, WindowPolicy, inspect_window
 
 
-def runtime_registry(reader, mode, actions_available=False):
+def runtime_registry(reader, mode, actions_available=False, file_edits_available=False):
     if mode == "chat_only":
         return ToolRegistry()
     reads = ReadToolService(reader).registry
@@ -81,6 +82,21 @@ def runtime_registry(reader, mode, actions_available=False):
                 ),
             )
         )
+        if file_edits_available:
+            registry = registry.with_tools(
+                (
+                    ToolDefinition(
+                        "write_file",
+                        "Propose replacing one existing writable file. Pin expected_version from a real read. The server stores before/after/diff materials and may pause for approval. No create, delete, rename or multi-file transaction. A proposal is not an applied change.",
+                        WriteFile,
+                    ),
+                    ToolDefinition(
+                        "apply_patch",
+                        "Propose ordered exact text replacements in one writable file, pinned by expected_version. Each old_text must occur exactly once at its stage; ambiguous or absent context fails the entire proposal without writing. Matching preserves line endings; no fuzzy match. The server may require approval before applying.",
+                        ApplyPatch,
+                    ),
+                )
+            )
     return registry
 
 
@@ -131,7 +147,18 @@ class RuntimeCoordinator:
         self.operations = OperationService(reader, self.store, execution_backend)
 
     def registry(self, mode):
-        return runtime_registry(self.reader, mode, self.operations.backend is not None)
+        backend = self.operations.backend
+        return runtime_registry(
+            self.reader,
+            mode,
+            backend is not None,
+            bool(
+                backend is not None
+                and getattr(backend, "supports_file_edits", False)
+                and callable(getattr(backend, "resume_workspace", None))
+                and callable(getattr(backend, "read_file", None))
+            ),
+        )
 
     def submit(self, scope, cid, body, *, kind="turn"):
         mode = body.mode if kind == "turn" else self.policy.mode
@@ -370,7 +397,7 @@ class RuntimeCoordinator:
                         interaction = self.store.interaction(
                             scope, cid, run_id, step_id, call
                         )
-                        if call.name == "run_command":
+                        if call.name in ("run_command", "write_file", "apply_patch"):
                             try:
                                 result = self.operations.execute(
                                     scope,

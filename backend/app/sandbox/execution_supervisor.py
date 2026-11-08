@@ -64,6 +64,93 @@ def child_limits():
     resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
 
 
+def edit_file(config, cancelled):
+    """Fixed platform write; never evaluate or import the proposed contents."""
+    edit = config["edit"]
+    path = edit["path"]
+    if path not in ("src/booking.py", "tests/test_candidate.py"):
+        raise ValueError("file is not editable")
+    data = base64.b64decode(edit["content_b64"], validate=True)
+    if len(data) > 1048576 or b"\x00" in data:
+        raise ValueError("invalid replacement bytes")
+    data.decode("utf-8")
+    if hashlib.sha256(data).hexdigest() != edit["after_sha256"]:
+        raise ValueError("replacement digest mismatch")
+    root = os.open("/workspace", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    directory = None
+    stage = None
+    try:
+        parent, name = path.split("/")
+        directory = os.open(
+            parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root
+        )
+        for fd in (root, directory):
+            info = os.fstat(fd)
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError("unsafe workspace directory")
+        old = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        with os.fdopen(old, "rb") as source:
+            info = os.fstat(source.fileno())
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or info.st_size > 1048576
+            ):
+                raise ValueError("unsafe target file")
+            before = source.read(1048577)
+        if hashlib.sha256(before).hexdigest() != edit["before_sha256"]:
+            return "conflict", "SOURCE_VERSION_CHANGED", None
+        if data != before:
+            stage = name + ".vibeeval-save"
+            try:
+                os.unlink(stage, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+            fd = os.open(
+                stage,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory,
+            )
+            with os.fdopen(fd, "wb") as target:
+                target.write(data)
+                os.fchmod(target.fileno(), 0o644)
+                os.fchown(target.fileno(), 1000, 1000)
+                target.flush()
+                os.fsync(target.fileno())
+        if cancelled[0] or os.path.exists("/control/cancel"):
+            return "cancelled", "CANCELLED_BEFORE_REPLACE", None
+        if time.time() >= config["deadline_at"]:
+            return "timed_out", "EXAM_DEADLINE", None
+        if stage:
+            os.replace(stage, name, src_dir_fd=directory, dst_dir_fd=directory)
+            stage = None
+            os.fsync(directory)
+        return (
+            "succeeded",
+            None,
+            {
+                "path": path,
+                "before_sha256": edit["before_sha256"],
+                "after_sha256": edit["after_sha256"],
+                "changed": data != before,
+            },
+        )
+    finally:
+        if stage is not None:
+            try:
+                os.unlink(stage, dir_fd=directory)
+            except FileNotFoundError:
+                pass
+        if directory is not None:
+            os.close(directory)
+        os.close(root)
+
+
+def edit_timeout(*_):
+    raise TimeoutError("file edit exceeded its bounded time")
+
+
 def supervise(config):
     if os.getuid() != 0:
         raise ValueError("platform supervisor must own its private control directory")
@@ -97,6 +184,8 @@ def supervise(config):
         atomic_json(directory, receipt)
 
     process = None
+    cancelled = [False]
+    signal.signal(signal.SIGTERM, lambda *_: cancelled.__setitem__(0, True))
     try:
         if started >= config["deadline_at"]:
             receipt.update(
@@ -115,8 +204,28 @@ def supervise(config):
             )
             publish(True)
             return
-        cancelled = [False]
-        signal.signal(signal.SIGTERM, lambda *_: cancelled.__setitem__(0, True))
+        if config.get("kind") == "file_edit":
+            signal.signal(signal.SIGALRM, edit_timeout)
+            signal.setitimer(
+                signal.ITIMER_REAL,
+                max(
+                    0.001,
+                    min(config["timeout_seconds"], config["deadline_at"] - time.time()),
+                ),
+            )
+            try:
+                status, code, change = edit_file(config, cancelled)
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            receipt.update(
+                status=status,
+                reason_code=code,
+                file_change=change,
+                command_started_at=started,
+                finished_at=time.time(),
+            )
+            publish(True)
+            return
         process = subprocess.Popen(
             config["argv"],
             cwd="/workspace" + ("/" + config["cwd"] if config["cwd"] != "." else ""),
@@ -199,7 +308,13 @@ def supervise(config):
             except ProcessLookupError:
                 pass
         receipt.update(
-            status="failed", reason_code="SUPERVISOR_FAILED", finished_at=time.time()
+            status="unknown" if config.get("kind") == "file_edit" else "failed",
+            reason_code=(
+                "FILE_EDIT_OUTCOME_UNKNOWN"
+                if config.get("kind") == "file_edit"
+                else "SUPERVISOR_FAILED"
+            ),
+            finished_at=time.time(),
         )
         publish(False)
     finally:
@@ -211,7 +326,7 @@ def supervise(config):
 
 
 def main():
-    config = json.loads(base64.b64decode(sys.argv[1], validate=True))
+    config = json.loads(base64.b64decode("".join(sys.argv[1:]), validate=True))
     supervise(config)
 
 

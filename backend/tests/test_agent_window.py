@@ -459,3 +459,62 @@ class WindowTests(unittest.TestCase):
         parts = self.inspect(updated)["materials"][:2]
         self.assertTrue(all(item["window_mode"] == "compacted" for item in parts))
         self.assertTrue(all(item["visible_sha256"] is None for item in parts))
+
+    def test_file_change_locators_do_not_claim_before_or_after_body_is_visible(self):
+        state = start_step(self.state)
+        call = ToolCall(id="edit-call", name="write_file", arguments="{}")
+        state = accept_response(
+            state,
+            state.active_turn.steps[-1].id,
+            ModelResponse(
+                model="fixture",
+                finish_reason="tool_calls",
+                message=AssistantOutput(tool_calls=(call,)),
+            ),
+        )
+        state = supply_tool_results(
+            state,
+            state.active_turn.steps[-1].id,
+            [
+                ToolResult(
+                    tool_call_id=call.id,
+                    is_error=True,
+                    content=encoded(
+                        {
+                            "execution_id": "edit-A",
+                            "change": {
+                                "path": "src/booking.py",
+                                "base_version": 1,
+                                "before_material_id": "before",
+                                "after_material_id": "after",
+                                "diff_material_id": "diff",
+                                "diff_preview": "-old\n+new\n",
+                                "diff_preview_has_more": False,
+                            },
+                        }
+                    ),
+                )
+            ],
+        )
+        parts = self.inspect(state)["materials"]
+        self.assertEqual(
+            [item["window_mode"] for item in parts],
+            ["locator", "locator", "full_material"],
+        )
+        self.assertIsNone(parts[0]["visible_sha256"])
+        self.assertIsNone(parts[1]["original_returned_sha256"])
+        recent = add_result(state, "recent", 2)
+        request = prepare_compaction(
+            recent, through_turn=0, through_step_count=1, settings=SETTINGS
+        )
+        manifest = compaction_manifest(request)["materials"]
+        self.assertEqual(
+            [item["window_projection"] for item in manifest],
+            ["locator", "locator", "original_fragment"],
+        )
+        self.assertTrue(
+            all(
+                item["window_mode"] == "compacted"
+                for item in self.inspect(compact(recent, 1))["materials"][:3]
+            )
+        )

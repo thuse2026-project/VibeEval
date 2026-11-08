@@ -35,11 +35,11 @@ def session_view(**values):
     return SessionView(**defaults)
 
 
-def progress_archive(value, *, uid=0, symbolic=False):
+def progress_archive(value, *, uid=0, symbolic=False, name="progress.json"):
     data = json.dumps(value).encode()
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode="w") as archive:
-        entry = tarfile.TarInfo("progress.json")
+        entry = tarfile.TarInfo(name)
         entry.uid, entry.mode, entry.size = uid, 0o600, len(data)
         if symbolic:
             entry.type, entry.linkname = tarfile.SYMTYPE, "/workspace/answer"
@@ -281,6 +281,90 @@ class ExecutionAdapterTests(unittest.TestCase):
         )
         self.assertTrue(obj.deleted)
         self.assertNotIn(names(self.config["operation_id"])[1], self.volumes)
+
+    def edit_config(self):
+        self.original.deleted = False
+        self.config["kind"] = "file_edit"
+        self.config["edit"] = {
+            "path": "src/booking.py",
+            "before_sha256": "c" * 64,
+            "after_sha256": "d" * 64,
+            "content_b64": base64.b64encode(b"# large file\n" * 16000).decode(),
+        }
+
+    def control_fixture(self, obj):
+        controls = {}
+
+        def put(path, data):
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as archive:
+                entry = archive.getmembers()[0]
+                controls[entry.name] = json.load(archive.extractfile(entry))
+
+        def get(path):
+            name = path.split("/")[-1]
+            if name not in controls:
+                raise NotFound("no private fixture control yet")
+            return progress_archive(controls[name], name=name)
+
+        obj.put_archive.side_effect = put
+        obj.get_archive.side_effect = get
+        self.original.pause.side_effect = lambda: setattr(
+            self.original, "status", "paused"
+        )
+        self.original.unpause.side_effect = lambda: setattr(
+            self.original, "status", "running"
+        )
+
+    def test_file_helper_has_only_fixed_write_capability_and_chunked_large_config(self):
+        self.edit_config()
+        self.prepare()
+        args, options = self.client.containers.create.call_args
+        self.assertEqual(options["cap_add"], ["CHOWN"])
+        chunks = args[1][4:]
+        self.assertGreater(len(chunks), 1)
+        self.assertLessEqual(max(map(len, chunks)), 32768)
+        decoded = json.loads(base64.b64decode("".join(chunks)))
+        self.assertEqual(decoded["edit"], self.config["edit"])
+        self.original.pause.assert_not_called()
+
+    def test_file_start_persists_pause_ownership_and_never_unpauses_implicitly(self):
+        self.edit_config()
+        handle = self.prepare()
+        obj = self.get(handle)
+        self.control_fixture(obj)
+        self.adapter.start_execution(self.view, self.config, handle)
+        self.assertEqual(self.original.status, "paused")
+        receipt = self.adapter.inspect_execution(self.view, self.config, handle)
+        self.assertTrue(receipt["pause_owned"])
+        self.original.unpause.assert_not_called()
+        with self.assertRaises(ValueError):
+            self.adapter.resume_workspace(replace(self.view, status="submitting"))
+        self.original.unpause.assert_not_called()
+
+    def test_preexisting_pause_is_not_claimed_by_an_edit(self):
+        self.edit_config()
+        handle = self.prepare()
+        self.original.status = "paused"
+        with self.assertRaises(ValueError):
+            self.adapter.start_execution(self.view, self.config, handle)
+        self.get(handle).put_archive.assert_not_called()
+        receipt = self.adapter.cancel_execution(self.view, self.config, handle)
+        self.assertFalse(receipt["pause_owned"])
+        self.original.unpause.assert_not_called()
+
+    def test_cancel_unconfirmed_file_start_retains_pause_proof_after_disarming(self):
+        self.edit_config()
+        handle = self.prepare()
+        obj = self.get(handle)
+        self.control_fixture(obj)
+        obj.start.side_effect = TimeoutError("start reply lost")
+        with self.assertRaises(TimeoutError):
+            self.adapter.start_execution(self.view, self.config, handle)
+        receipt = self.adapter.cancel_execution(self.view, self.config, handle)
+        self.assertTrue(receipt["pause_owned"])
+        self.assertTrue(receipt["processes_stopped"])
+        self.adapter.resume_workspace(self.view)
+        self.assertEqual(self.original.status, "running")
 
 
 if __name__ == "__main__":

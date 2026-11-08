@@ -6,7 +6,8 @@
 [第二批引用与阅读](agent-integration-stage2.md) 已确认并提交 `a892a67`，未推送。
 [第三批 A 上下文原子能力](agent-integration-stage3a.md) 已确认并提交 `925802e`，未推送。
 [第三批 B 持久只读运行](agent-integration-stage3b.md) 已确认并提交 `236967e`，未推送。
-[第四批 A 命令执行](agent-integration-stage4a.md) 已确认，本地提交，未推送。
+[第四批 A 命令执行](agent-integration-stage4a.md) 已确认并提交 `7248d51`，未推送。
+[第四批 B 版本化单文件修改](agent-integration-stage4b.md) 已确认，本地提交，未推送。
 分支：`feat/agent-integration`，基于已验收的 `feat/llm-api@8c25e65`。
 旧分支的 Agent 核心尚未进入 main；新分支保留该依赖，后续先合入核心再整理集成 PR 的基线。
 本计划依据现有代码整理，其他 Agent 生成的计划只作为参考，不自动成为任务要求。

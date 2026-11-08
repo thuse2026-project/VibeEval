@@ -64,6 +64,8 @@ class ExecutionSnapshot(FrozenModel):
     stdout_truncated: bool = False
     stderr_truncated: bool = False
     output_complete: bool = False
+    pause_owned: bool = False
+    file_change: dict | None = None
 
 
 class OperationWaiting(RuntimeError):

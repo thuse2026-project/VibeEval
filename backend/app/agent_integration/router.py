@@ -391,6 +391,28 @@ def operation_output(
     )
 
 
+@router.get("/conversations/{conversation_id}/operations/{operation_id}/change")
+def operation_change(
+    session_id: str,
+    conversation_id: str,
+    operation_id: str,
+    part: str = Query(default="diff", pattern="^(before|after|diff)$"),
+    offset: int = Query(default=0, ge=0),
+    max_chars: int = Query(default=8000, ge=1, le=16000),
+    service=Depends(runtime),
+):
+    return result(
+        lambda: service.operations.read_change(
+            session_id,
+            conversation_id,
+            operation_id,
+            part,
+            offset=offset,
+            max_chars=max_chars,
+        )
+    )
+
+
 @router.post("/conversations/{conversation_id}/runs/{run_id}/compact")
 def request_compaction(
     session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)

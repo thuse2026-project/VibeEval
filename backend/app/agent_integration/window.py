@@ -196,6 +196,15 @@ def _retained_tools(state):
 
 def execution_materials(body):
     """Describe the bounded fragments in a platform execution receipt."""
+    if (
+        isinstance(body, dict)
+        and body.get("status") == "error"
+        and isinstance(body.get("content"), str)
+    ):
+        try:
+            body = json.loads(body["content"])
+        except ValueError:
+            return
     if not isinstance(body, dict) or not isinstance(body.get("execution_id"), str):
         return
     for stream in ("stdout", "stderr"):
@@ -210,6 +219,38 @@ def execution_materials(body):
             "returned_sha256": digest(text),
             "preview": body.get(stream + "_preview_has_more", False),
             "end_offset": len(text),
+        }
+    change = body.get("change")
+    if not isinstance(change, dict):
+        return
+    for part in ("before", "after", "diff", "observed"):
+        identity = change.get(part + "_material_id")
+        if not isinstance(identity, str):
+            continue
+        text = change.get("diff_preview") if part == "diff" else None
+        locator = not isinstance(text, str)
+        is_file = part in ("before", "observed")
+        yield {
+            "material_id": identity,
+            "source_kind": (
+                "workspace_file"
+                if is_file
+                else "file_diff" if part == "diff" else "proposed_file"
+            ),
+            "source_id": (
+                change["path"] if is_file else body["execution_id"] + ":" + part
+            ),
+            "source_version": str(
+                change.get("base_version")
+                if part == "before"
+                else change.get("current_version") if part == "observed" else 1
+            ),
+            "returned_sha256": None if locator else digest(text),
+            "preview": (
+                change.get("diff_preview_has_more", False) if part == "diff" else False
+            ),
+            "locator": locator,
+            "end_offset": None if locator else len(text),
         }
 
 
@@ -235,7 +276,7 @@ def material_manifest(state, payload):
             )
             for result in step.tool_results:
                 call = calls[result.tool_call_id]
-                if call.name == "run_command":
+                if call.name in ("run_command", "write_file", "apply_patch"):
                     try:
                         body = json.loads(result.content)
                     except ValueError:
@@ -256,7 +297,15 @@ def material_manifest(state, payload):
                                 "source_version": part["source_version"],
                                 "original_returned_sha256": part["returned_sha256"],
                                 "window_mode": (
-                                    ("preview" if part["preview"] else "full_material")
+                                    (
+                                        "locator"
+                                        if part.get("locator")
+                                        else (
+                                            "preview"
+                                            if part["preview"]
+                                            else "full_material"
+                                        )
+                                    )
                                     if item
                                     else "compacted" if compacted else "not_included"
                                 ),
@@ -264,7 +313,9 @@ def material_manifest(state, payload):
                                 "visible_sha256": (
                                     part["returned_sha256"] if item else None
                                 ),
-                                "start_offset": 0 if item else None,
+                                "start_offset": (
+                                    0 if item and not part.get("locator") else None
+                                ),
                                 "end_offset": part["end_offset"] if item else None,
                             }
                         )
@@ -464,9 +515,13 @@ def compaction_manifest(request):
                         "material_id": part["material_id"],
                         "source_version": part["source_version"],
                         "window_projection": (
-                            "execution_preview"
-                            if part["preview"]
-                            else "original_fragment"
+                            "locator"
+                            if part.get("locator")
+                            else (
+                                "execution_preview"
+                                if part["preview"]
+                                else "original_fragment"
+                            )
                         ),
                         "returned_sha256": part["returned_sha256"],
                     }

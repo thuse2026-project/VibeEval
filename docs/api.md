@@ -45,7 +45,12 @@ attempts/interactions 和批准/答复接口。提交返回 queued Run，调用 
 `GET /operations/{id}/output`。批准继续使用已有 interactions 接口；输出增量通过现有事件查询。
 默认服务端仍为 read_only；confirm_actions/sandbox_auto 必须由服务端启用并允许客户端收窄。
 版本绑定、执行回执、输出偏移及不重发规则见 [沙箱命令契约](agent-integration-stage4a.md)。
-结构化文件修改/补丁接口待第四批 B；本分支不改前端。
+结构化文件修改/补丁见第四批 B；本分支不改前端。
+
+第四批 B 新增原生 `write_file/apply_patch`，绑定基础版本、修改前后材料、审批 diff 与实际回执，
+操作详情增加 kind/change/file_result。另有 `GET /operations/{id}/change?part=before|after|diff` 分页预览。
+复用现有批准、advance 和取消；仅开放任务的两个可写文件，按单文件原子替换。
+字段与暂停/恢复、交卷门禁及效果未知语义见 [版本化修改契约](agent-integration-stage4b.md)。
 
 ## 考官登录（本轮实现）
 

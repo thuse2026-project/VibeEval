@@ -7,6 +7,13 @@ from .submission_bridge import DockerSubmissionBridge
 
 
 class BoundSandboxAdapter(DockerSubmissionBridge):
+    supports_file_edits = True
+
+    def resume_workspace(self, view):
+        from .execution import resume_workspace
+
+        return resume_workspace(self, view)
+
     def prepare_execution(self, view, config):
         from .execution import prepare_execution
 

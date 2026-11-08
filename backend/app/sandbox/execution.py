@@ -5,6 +5,7 @@ import io
 import json
 import re
 import tarfile
+import time
 from pathlib import Path
 
 from docker.errors import APIError, NotFound
@@ -19,7 +20,7 @@ def names(operation_id):
 
 
 def labels(view, config, image_id):
-    return {
+    result = {
         "vibeeval.role": "agent-execution",
         "vibeeval.session": view.session_id,
         "vibeeval.original": view.sandbox_id,
@@ -27,6 +28,15 @@ def labels(view, config, image_id):
         "vibeeval.request": config["request_sha256"],
         "vibeeval.image": image_id,
     }
+    if config.get("kind") == "file_edit":
+        result["vibeeval.kind"] = "file_edit"
+    return result
+
+
+def capabilities(config):
+    return (
+        ["CHOWN"] if config.get("kind") == "file_edit" else ["SETUID", "SETGID", "KILL"]
+    )
 
 
 def verify(adapter, view, config, obj):
@@ -45,7 +55,7 @@ def verify(adapter, view, config, obj):
         or not host.get("ReadonlyRootfs")
         or host.get("RestartPolicy", {}).get("Name", "no") not in ("", "no")
         or {name.removeprefix("CAP_") for name in host.get("CapAdd", [])}
-        != {"SETUID", "SETGID", "KILL"}
+        != set(capabilities(config))
         or set(host.get("CapDrop", [])) != {"ALL"}
         or not any(
             value in ("no-new-privileges", "no-new-privileges:true")
@@ -89,10 +99,13 @@ def prepare_execution(adapter, view, config):
     encoded = base64.b64encode(
         json.dumps(config, sort_keys=True).encode("utf-8")
     ).decode("ascii")
+    # Linux limits each argv element to 128 KiB. A patch can modify a file of
+    # up to 1 MiB even though the model's edit arguments are much smaller.
+    chunks = [encoded[index : index + 32768] for index in range(0, len(encoded), 32768)]
     try:
         obj = adapter.client.containers.create(
             original.attrs["Image"],
-            ["python", "-I", "-c", source, encoded],
+            ["python", "-I", "-c", source, *chunks],
             entrypoint=[],
             name=name,
             runtime="runsc",
@@ -100,7 +113,7 @@ def prepare_execution(adapter, view, config):
             read_only=True,
             network_mode="none",
             cap_drop=["ALL"],
-            cap_add=["SETUID", "SETGID", "KILL"],
+            cap_add=capabilities(config),
             security_opt=["no-new-privileges"],
             mem_limit="512m",
             memswap_limit="512m",
@@ -138,17 +151,59 @@ def _find(adapter, view, config, handle=None):
 def start_execution(adapter, view, config, handle):
     if view.status != "in_progress":
         raise ValueError("active sandbox required")
-    if adapter._container(view).status != "running":
+    original = adapter._container(view)
+    if original.status != "running":
         raise ValueError("original sandbox has been frozen")
     obj = _find(adapter, view, config, handle)
     if obj.status != "created":
         raise ValueError("execution is not fresh; never restart it")
+    if config.get("kind") == "file_edit":
+        # Caller holds the exam lifecycle lock and the durable workspace holder.
+        # Persist private pause intent only after observing a running original.
+        put_control(
+            obj,
+            "pause.json",
+            json.dumps(
+                {
+                    "operation_id": config["operation_id"],
+                    "request_sha256": config["request_sha256"],
+                }
+            ).encode("ascii"),
+        )
+        original.pause()
+        original.reload()
+        if original.status != "paused":
+            raise ValueError("workspace did not freeze")
     obj.start()  # Exactly one ledger dispatch calls this; recovery only inspects.
 
 
-def _read_progress(obj, config):
+def put_control(obj, name, data):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as output:
+        entry = tarfile.TarInfo(name)
+        entry.size, entry.uid, entry.gid, entry.mode = len(data), 0, 0, 0o600
+        output.addfile(entry, io.BytesIO(data))
+    obj.put_archive("/control", archive.getvalue())
+
+
+def resume_workspace(adapter, view):
+    """Only called under the exam lock after a trusted pause/stop receipt."""
+    if (
+        view.status != "in_progress"
+        or view.deadline_at is None
+        or time.time() >= view.deadline_at
+    ):
+        raise ValueError("frozen or expired workspace cannot resume")
+    original = adapter._container(view)
+    if original.status == "paused":
+        original.unpause()
+    elif original.status != "running":
+        raise ValueError("workspace is not resumable")
+
+
+def _control_json(obj, name, max_size):
     try:
-        stream, _ = obj.get_archive("/control/progress.json")
+        stream, _ = obj.get_archive("/control/" + name)
     except NotFound:
         return None
     data = bytearray()
@@ -167,16 +222,36 @@ def _read_progress(obj, config):
             raise ValueError("invalid progress archive")
         item = entries[0]
         if (
-            item.name != "progress.json"
+            item.name != name
             or not item.isfile()
             or item.uid != 0
-            or item.size > 160000
+            or item.size > max_size
         ):
             raise ValueError("invalid progress entry")
         with archive.extractfile(item) as content:
             receipt = json.load(content)
     if not isinstance(receipt, dict):
         raise ValueError("invalid progress object")
+    return receipt
+
+
+def _pause_owned(obj, config):
+    if config.get("kind") != "file_edit":
+        return False
+    try:
+        marker = _control_json(obj, "pause.json", 512)
+    except (ValueError, KeyError, TypeError, tarfile.TarError):
+        return False
+    return marker == {
+        "operation_id": config["operation_id"],
+        "request_sha256": config["request_sha256"],
+    }
+
+
+def _read_progress(obj, config):
+    receipt = _control_json(obj, "progress.json", 160000)
+    if receipt is None:
+        return None
     if (
         receipt.get("operation_id") != config["operation_id"]
         or receipt.get("request_sha256") != config["request_sha256"]
@@ -205,8 +280,10 @@ def inspect_execution(adapter, view, config, handle=None):
             "status": "unknown",
             "processes_stopped": False,
             "reason_code": "START_NOT_CONFIRMED",
+            "pause_owned": _pause_owned(obj, config),
         }
     stopped = obj.status in ("exited", "dead")
+    pause_owned = _pause_owned(obj, config)
     try:
         receipt = _read_progress(obj, config)
     except (ValueError, KeyError, TypeError, tarfile.TarError):
@@ -214,12 +291,14 @@ def inspect_execution(adapter, view, config, handle=None):
             "status": "unknown",
             "processes_stopped": stopped,
             "reason_code": "RECEIPT_INVALID",
+            "pause_owned": pause_owned,
         }
     if receipt is None:
         return {
             "status": "unknown" if stopped else "running",
             "processes_stopped": stopped,
             "reason_code": "RECEIPT_UNAVAILABLE" if stopped else None,
+            "pause_owned": pause_owned,
         }
     if not stopped:
         receipt = {
@@ -228,7 +307,7 @@ def inspect_execution(adapter, view, config, handle=None):
             "finished_at": None,
             "output_complete": False,
         }
-    return {**receipt, "processes_stopped": stopped}
+    return {**receipt, "processes_stopped": stopped, "pause_owned": pause_owned}
 
 
 def cancel_execution(adapter, view, config, handle=None):
@@ -241,20 +320,17 @@ def cancel_execution(adapter, view, config, handle=None):
             "reason_code": "EXECUTION_NOT_FOUND",
         }
     if obj.status == "created":
+        pause_owned = _pause_owned(obj, config)
         obj.remove(force=True, v=False)  # Disarm any late start for this exact ID.
         remove_control(adapter, view, config)
         return {
             "status": "cancelled",
             "processes_stopped": True,
             "reason_code": "CANCELLED_BEFORE_START",
+            "pause_owned": pause_owned,
         }
     if obj.status not in ("exited", "dead"):
-        archive = io.BytesIO()
-        with tarfile.open(fileobj=archive, mode="w") as output:
-            entry = tarfile.TarInfo("cancel")
-            entry.size, entry.uid, entry.gid, entry.mode = 0, 0, 0, 0o600
-            output.addfile(entry, io.BytesIO())
-        obj.put_archive("/control", archive.getvalue())
+        put_control(obj, "cancel", b"")
         obj.stop(timeout=3)
     return inspect_execution(adapter, view, config, obj.id)
 
@@ -284,6 +360,7 @@ def stop_bound_executions(adapter, view, *, remove=False):
         config = {
             "operation_id": data.get("vibeeval.operation", ""),
             "request_sha256": data.get("vibeeval.request", ""),
+            "kind": data.get("vibeeval.kind", "command"),
         }
         verify(adapter, view, config, obj)
         if obj.status not in ("exited", "dead", "created"):

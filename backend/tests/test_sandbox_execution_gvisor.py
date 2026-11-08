@@ -1,6 +1,7 @@
 """Opt-in acceptance: candidate commands run only in owned Linux/runsc containers."""
 
 import base64
+import hashlib
 import os
 import re
 import time
@@ -160,6 +161,61 @@ class GvisorExecutionTests(unittest.TestCase):
         self.assertEqual(value["reason_code"], "SOURCE_VERSION_CHANGED")
         self.assertIsNone(value["command_started_at"])
         self.assertEqual(value["stdout_b64"], "")
+
+    def start_edit(self, content, *, stale=False):
+        before = self.adapter.read_file(self.view, "src/booking.py")
+        before_sha = hashlib.sha256(before.encode()).hexdigest()
+        self.config = {
+            "operation_id": uuid.uuid4().hex,
+            "request_sha256": "a" * 64,
+            "kind": "file_edit",
+            "timeout_seconds": 10,
+            "max_output_bytes": 1024,
+            "deadline_at": self.view.deadline_at,
+            "expected_digests": {"src/booking.py": "0" * 64 if stale else before_sha},
+            "edit": {
+                "path": "src/booking.py",
+                "before_sha256": before_sha,
+                "after_sha256": hashlib.sha256(content.encode()).hexdigest(),
+                "content_b64": base64.b64encode(content.encode()).decode(),
+            },
+        }
+        self.handle = self.adapter.prepare_execution(self.view, self.config)["handle"]
+        self.adapter.start_execution(self.view, self.config, self.handle)
+        return before
+
+    def test_atomic_file_edit_preserves_task_permissions_and_reports_owned_pause(self):
+        text = "# exact agent replacement\r\nvalue = '中文🙂'\r\n"
+        self.start_edit(text)
+        value = self.finished()
+        self.assertEqual(value["status"], "succeeded", value)
+        self.assertTrue(value["pause_owned"])
+        self.assertEqual(
+            value["file_change"]["after_sha256"],
+            hashlib.sha256(text.encode()).hexdigest(),
+        )
+        self.assertEqual(self.adapter.read_file(self.view, "src/booking.py"), text)
+        self.assertEqual(
+            self.client.containers.get(self.view.sandbox_id).status, "paused"
+        )
+        self.adapter.resume_workspace(self.view)
+        self.adapter.check_ready(self.view)
+
+    def test_large_file_edit_uses_chunked_config_without_partial_write(self):
+        text = "# large exact replacement\n" * 16000
+        self.start_edit(text)
+        value = self.finished()
+        self.assertEqual(value["status"], "succeeded", value)
+        self.assertEqual(self.adapter.read_file(self.view, "src/booking.py"), text)
+        self.adapter.resume_workspace(self.view)
+
+    def test_stale_edit_rejects_before_replace_and_can_restore_original(self):
+        before = self.start_edit("must not replace", stale=True)
+        value = self.finished()
+        self.assertEqual(value["status"], "conflict", value)
+        self.assertTrue(value["pause_owned"])
+        self.assertEqual(self.adapter.read_file(self.view, "src/booking.py"), before)
+        self.adapter.resume_workspace(self.view)
 
 
 if __name__ == "__main__":

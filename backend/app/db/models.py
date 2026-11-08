@@ -498,6 +498,7 @@ class AgentInteraction(Base):
 class AgentOperation(Base):
     __tablename__ = "agent_operations"
     __table_args__ = (
+        CheckConstraint("kind IN ('command','file_edit')", name="kind_valid"),
         ForeignKeyConstraint(
             ["run_id", "conversation_id", "exam_session_id"],
             [
@@ -531,6 +532,7 @@ class AgentOperation(Base):
     )
 
     operation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
     run_id: Mapped[str] = mapped_column(String(128))
     conversation_id: Mapped[str] = mapped_column(String(128))
     exam_session_id: Mapped[str] = mapped_column(String(128))

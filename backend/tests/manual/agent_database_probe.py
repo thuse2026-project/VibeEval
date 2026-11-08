@@ -1,6 +1,6 @@
 """Verify Agent persistence against an owned temporary local PostgreSQL.
 
-From backend/: python tests/manual/agent_database_probe.py [--all-tests]
+From backend/: python tests/manual/agent_database_probe.py [--all-tests | --pattern GLOB]
 Uses an existing postgres:16-alpine image; no project database or .env is changed.
 """
 
@@ -23,7 +23,7 @@ def docker(*args, env=None, check=True):
     )
 
 
-def run(all_tests=False):
+def run(all_tests=False, pattern=None):
     env = dict(os.environ)
     env.update(
         POSTGRES_USER="agent_probe",
@@ -99,7 +99,7 @@ def run(all_tests=False):
             "tests",
         ]
         if not all_tests:
-            args.extend(["-p", "test_agent_integration*.py"])
+            args.extend(["-p", pattern or "test_agent_integration*.py"])
         args.append("-q")
         print(
             f"Temporary PostgreSQL ready: {container_id[:12]} on loopback port {env['POSTGRES_PORT']}",
@@ -118,10 +118,14 @@ def run(all_tests=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--all-tests", action="store_true")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--all-tests", action="store_true")
+    selection.add_argument(
+        "--pattern", help="Run one unittest file pattern against the isolated database"
+    )
     args = parser.parse_args()
     try:
-        code = run(args.all_tests)
+        code = run(args.all_tests, args.pattern)
     except (subprocess.CalledProcessError, RuntimeError) as error:
         # Docker output may include its environment; report only the operation type.
         parser.exit(

@@ -38,6 +38,11 @@ class SandboxOperationFailed(RuntimeError):
 
 
 class SandboxRuntime:
+    supports_file_edits = True
+
+    def resume_workspace(self, view):
+        return self._call("resume_workspace", view)
+
     def __init__(
         self,
         *,
