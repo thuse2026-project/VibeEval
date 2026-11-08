@@ -3,11 +3,14 @@
 状态：2026-11-06 用户确认总体范围，并明确引用与查询阅读分开、本分支只做后端。按批实现，检查确认后提交。
 用户已确认包含主动/被动压缩、文件阅读管理与跨对话阅读的 [上下文管理设计](agent-context-management-plan.md)。
 [第一批持久化底座](agent-integration-stage1.md) 已确认并提交 `add28b6`；
-[第二批引用与阅读](agent-integration-stage2.md) 已确认并提交 `a892a67`，未推送。
-[第三批 A 上下文原子能力](agent-integration-stage3a.md) 已确认并提交 `925802e`，未推送。
-[第三批 B 持久只读运行](agent-integration-stage3b.md) 已确认并提交 `236967e`，未推送。
-[第四批 A 命令执行](agent-integration-stage4a.md) 已确认并提交 `7248d51`，未推送。
-[第四批 B 版本化单文件修改](agent-integration-stage4b.md) 已确认，本地提交，未推送。
+[第二批引用与阅读](agent-integration-stage2.md) 已确认并提交 `a892a67`。
+[第三批 A 上下文原子能力](agent-integration-stage3a.md) 已确认并提交 `925802e`。
+[第三批 B 持久只读运行](agent-integration-stage3b.md) 已确认并提交 `236967e`。
+[第四批 A 命令执行](agent-integration-stage4a.md) 已确认并提交 `7248d51`。
+[第四批 B 版本化单文件修改](agent-integration-stage4b.md) 已确认并提交 `a5496a5`。
+[第五批 A 持久事件订阅](agent-integration-stage5a.md) 已获用户确认，随基本封装提交。
+2026-11-08 用户确认按“基本 Agent 封装”收口并推送；装配、交接与后续边界见
+[基本封装交接](agent-integration-handoff.md)。下述剩余扩展保留为后续计划。
 分支：`feat/agent-integration`，基于已验收的 `feat/llm-api@8c25e65`。
 旧分支的 Agent 核心尚未进入 main；新分支保留该依赖，后续先合入核心再整理集成 PR 的基线。
 本计划依据现有代码整理，其他 Agent 生成的计划只作为参考，不自动成为任务要求。
@@ -264,6 +267,9 @@ A 的阈值规划不标为自动运行闭环已经完成。
 第四批也拆为两步：A 交付持久命令、批准、输出取回、取消与未知执行恢复；
 B 再交付版本化结构文件修改、补丁与变更回传。命令运行时能修改原任务允许写入的文件，
 不等同于独立的文件编辑/补丁审批接口已经完成。
+
+第五批先拆为 A 持久 SSE 事件订阅、作用域游标和断线续接；B 再补供应商文字/工具参数增量流。
+会话分叉/重试、文件检查点等能力继续单独验收，不以事件传输完成代替这些能力。
 
 ## 9. 最终验收场景
 

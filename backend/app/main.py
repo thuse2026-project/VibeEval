@@ -31,6 +31,7 @@ def create_app(
     agent_store=None,
     agent_reading=None,
     agent_runtime=None,
+    agent_event_policy=None,
 ) -> FastAPI:
     app = FastAPI(title="VibeEval API", version="0.1.0")
     app.state.auth = AuthState(load_accounts() if accounts is None else accounts)
@@ -48,6 +49,7 @@ def create_app(
     app.state.agent_store = agent_store
     app.state.agent_reading = agent_reading
     app.state.agent_runtime = agent_runtime
+    app.state.agent_event_policy = agent_event_policy
     if entry_db is None:
         from .admin.submissions import get_submission_reader
         from .submissions.service import SubmissionService

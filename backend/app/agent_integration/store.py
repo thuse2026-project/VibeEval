@@ -221,3 +221,65 @@ class PostgresSessionStore:
                 "next_sequence": items[-1]["sequence"] if items else after_sequence,
                 "has_more": len(rows) > limit,
             }
+
+    def event_page(self, scope_id, conversation_id, *, after_sequence=0, limit=50):
+        """A fixed committed head and its contiguous prefix; no snapshot bodies."""
+        from .event_stream import MAX_SEQUENCE, EventStreamError
+
+        if type(after_sequence) is not int or not 0 <= after_sequence <= MAX_SEQUENCE:
+            raise EventStreamError("AGENT_EVENT_CURSOR_INVALID", 422)
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise SessionError("invalid event page size")
+        with session_scope(self.factory) as db:
+            head = db.execute(
+                select(
+                    AgentConversation.event_sequence,
+                    ExamSession.status,
+                    ExamSession.deadline_at,
+                )
+                .join(
+                    ExamSession,
+                    AgentConversation.exam_session_id == ExamSession.session_id,
+                )
+                .where(
+                    AgentConversation.conversation_id == conversation_id,
+                    AgentConversation.exam_session_id == scope_id,
+                )
+            ).one_or_none()
+            if head is None:
+                raise ConversationNotFound("conversation not found in this scope")
+            sequence, status, deadline = head
+            if after_sequence > sequence:
+                raise EventStreamError("AGENT_EVENT_CURSOR_AHEAD")
+            rows = db.scalars(
+                select(AgentEvent)
+                .where(
+                    AgentEvent.conversation_id == conversation_id,
+                    AgentEvent.sequence > after_sequence,
+                    AgentEvent.sequence <= sequence,
+                )
+                .order_by(AgentEvent.sequence)
+                .limit(limit)
+            ).all()
+            if (
+                [row.sequence for row in rows]
+                != list(range(after_sequence + 1, after_sequence + 1 + len(rows)))
+                or len(rows) < limit
+                and after_sequence + len(rows) < sequence
+            ):
+                raise EventStreamError("AGENT_EVENT_GAP")
+            return {
+                "items": [
+                    {
+                        "sequence": row.sequence,
+                        "kind": row.kind,
+                        "data": row.data_json,
+                        "created_at": row.created_at,
+                    }
+                    for row in rows
+                ],
+                "head_sequence": sequence,
+                "closed": status in ("submitting", "submission_failed", "submitted")
+                or deadline is not None
+                and deadline <= int(self.clock()),
+            }

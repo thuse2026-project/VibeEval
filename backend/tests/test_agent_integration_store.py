@@ -79,6 +79,7 @@ class AgentIntegrationStoreTests(unittest.TestCase):
             restarted.describe,
             restarted.history,
             restarted.events,
+            restarted.event_page,
         ):
             with (
                 self.subTest(read=read.__name__),

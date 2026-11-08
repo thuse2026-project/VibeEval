@@ -52,6 +52,11 @@ attempts/interactions 和批准/答复接口。提交返回 queued Run，调用 
 复用现有批准、advance 和取消；仅开放任务的两个可写文件，按单文件原子替换。
 字段与暂停/恢复、交卷门禁及效果未知语义见 [版本化修改契约](agent-integration-stage4b.md)。
 
+第五批 A 增加 `GET /events/stream`，支持 after_sequence、follow 与绑定对话的 Last-Event-ID 续读。
+使用现有已提交事件，不驱动模型或沙箱；保留 Cookie 和来源头，提供心跳、预算和安全结束帧。
+游标、帧格式、错误与客户端示例见 [事件订阅契约](agent-integration-stage5a.md)。
+模型文字和工具参数的供应商增量流由后续第五批 B 接入。
+
 ## 考官登录（本轮实现）
 
 - 账号由本地初始化命令预配置，无注册接口。

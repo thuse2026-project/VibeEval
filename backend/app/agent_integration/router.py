@@ -1,6 +1,7 @@
 """Owned conversations, user references, and material inspection APIs."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent import create_conversation
@@ -11,6 +12,13 @@ from app.exams.router import require_candidate_session
 from app.llm.config import LLMError, load_settings
 from app.workspace.service import WorkspaceReader
 
+from .event_stream import (
+    MAX_SEQUENCE,
+    EventStream,
+    EventStreamError,
+    resolve_cursor,
+    threaded,
+)
 from .material_store import MaterialStore
 from .reading_types import InputReference, ReadingError
 from .runtime import RuntimeCoordinator
@@ -63,6 +71,14 @@ def result(action):
     except ConversationClosed:
         raise HTTPException(
             409, {"code": "AGENT_SESSION_CLOSED", "message": "考试已结束或正在交卷"}
+        ) from None
+    except EventStreamError as error:
+        raise HTTPException(
+            error.status,
+            {
+                "code": error.code,
+                "message": "事件游标或事件记录暂不可用，请核对连接位置",
+            },
         ) from None
     except SessionConflict:
         raise HTTPException(
@@ -128,6 +144,20 @@ def runtime(request: Request, reader=Depends(reading)):
     )
 
 
+def event_access(
+    request: Request, session_id: str, owned=Depends(require_candidate_session)
+):
+    def check():
+        if not request.app.state.agent_enabled:
+            raise EventStreamError("AGENT_DISABLED", 403)
+        try:
+            require_candidate_session(session_id, request)
+        except HTTPException:
+            raise EventStreamError("AGENT_ACCESS_REVOKED", 404) from None
+
+    return check
+
+
 @router.post("/conversations", status_code=201)
 def create(body: CreateConversationInput, session_id: str, store=Depends(repository)):
     state = create_conversation(session_id)
@@ -183,6 +213,56 @@ def events(
         lambda: store.events(
             session_id, conversation_id, after_sequence=after_sequence, limit=limit
         )
+    )
+
+
+@router.get("/conversations/{conversation_id}/events/stream")
+async def event_subscription(
+    request: Request,
+    session_id: str,
+    conversation_id: str,
+    after_sequence: int | None = Query(default=None, ge=0, le=MAX_SEQUENCE),
+    follow: bool = True,
+    store=Depends(repository),
+    access=Depends(event_access),
+):
+    cursor = result(
+        lambda: resolve_cursor(
+            conversation_id, after_sequence, request.headers.get("Last-Event-ID")
+        )
+    )
+
+    async def page(after, limit):
+        return await threaded(
+            store.event_page,
+            session_id,
+            conversation_id,
+            after_sequence=after,
+            limit=limit,
+        )
+
+    async def check():
+        return await threaded(access)
+
+    stream = EventStream(
+        page,
+        check,
+        request.is_disconnected,
+        policy=request.app.state.agent_event_policy,
+    )
+    try:
+        initial = await stream.prepare(conversation_id, cursor)
+    except Exception as error:
+        # Reuse ordinary HTTP errors before headers; failures during streaming
+        # become sanitized control frames and never turn into tool results.
+        def failed(error=error):
+            raise error
+
+        return result(failed)
+    return StreamingResponse(
+        stream.body(conversation_id, cursor, initial, follow=follow),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
 
 
