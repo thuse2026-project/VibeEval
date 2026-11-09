@@ -58,13 +58,9 @@ class RunStore:
                 self.materials._open(db, scope, lock=True)
             else:
                 # Keep the same lock order, including late receipt recording.
-                from app.db.models import ExamSession
+                from .scopes import resolve_scope
 
-                db.scalar(
-                    select(ExamSession)
-                    .where(ExamSession.session_id == scope)
-                    .with_for_update()
-                )
+                resolve_scope(db, scope, lock=True)
             conv = self.sessions._row(db, scope, cid, lock=True)
             run = db.scalar(
                 select(AgentRun)

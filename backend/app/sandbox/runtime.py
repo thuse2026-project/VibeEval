@@ -59,10 +59,13 @@ class SandboxRuntime:
         self.operation_timeout = operation_timeout
 
     def _call(self, method, view, *args):
+        return self._spawn_call(_operate, method, view, args)
+
+    def _spawn_call(self, operation, method, view, args):
         ctx = multiprocessing.get_context("spawn")
         reader, writer = ctx.Pipe(duplex=False)
         worker = ctx.Process(
-            target=_operate, args=(writer, self.settings, method, view, args)
+            target=operation, args=(writer, self.settings, method, view, args)
         )
         worker.start()
         writer.close()

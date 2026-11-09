@@ -43,7 +43,16 @@ class CreateConversationInput(BaseModel):
     title: str = Field(default="新对话", min_length=1, max_length=200)
 
 
+def phase_resources(request):
+    if request.url.path.startswith("/api/v2/phases/"):
+        return getattr(request.app.state, "stage_resources", None)
+    return None
+
+
 def repository(request: Request, owned: dict = Depends(require_candidate_session)):
+    resources = phase_resources(request)
+    if resources is not None:
+        return PostgresSessionStore(resources.factory, clock=resources.clock)
     if not request.app.state.agent_enabled:
         raise HTTPException(
             403, {"code": "AGENT_DISABLED", "message": "Agent 接口尚未启用"}
@@ -117,6 +126,9 @@ def result(action):
 
 
 def reading(request: Request, store=Depends(repository)):
+    resources = phase_resources(request)
+    if resources is not None:
+        return resources.runtime_for(request.path_params["session_id"]).reader
     configured = request.app.state.agent_reading
     if configured is not None:
         return configured
@@ -136,6 +148,9 @@ def reading(request: Request, store=Depends(repository)):
 
 
 def runtime(request: Request, reader=Depends(reading)):
+    resources = phase_resources(request)
+    if resources is not None:
+        return resources.runtime_for(request.path_params["session_id"])
     configured = request.app.state.agent_runtime
     return (
         configured
@@ -148,12 +163,14 @@ def event_access(
     request: Request, session_id: str, owned=Depends(require_candidate_session)
 ):
     def check():
-        if not request.app.state.agent_enabled:
+        if not request.app.state.agent_enabled and phase_resources(request) is None:
             raise EventStreamError("AGENT_DISABLED", 403)
         try:
             require_candidate_session(session_id, request)
         except HTTPException:
             raise EventStreamError("AGENT_ACCESS_REVOKED", 404) from None
+        except Exception:
+            raise EventStreamError("AGENT_ACCESS_REVOKED", 403) from None
 
     return check
 
@@ -249,6 +266,7 @@ async def event_subscription(
         check,
         request.is_disconnected,
         policy=request.app.state.agent_event_policy,
+        check_each_event=phase_resources(request) is not None,
     )
     try:
         initial = await stream.prepare(conversation_id, cursor)
@@ -342,9 +360,7 @@ def context_window(
     reader=Depends(reading),
 ):
     def action():
-        service = request.app.state.agent_runtime or RuntimeCoordinator(
-            reader, settings=load_settings()
-        )
+        service = runtime(request, reader)
         report = service.preview(session_id, conversation_id)
         materials = report.pop("materials")
         references = report.pop("input_references")

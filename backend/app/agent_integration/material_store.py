@@ -13,15 +13,12 @@ from app.db.models import (
     AgentInputReference,
     AgentMaterial,
     AgentReadObservation,
-    ExamSession,
 )
 from app.db.session import session_scope
 
 from .materials import SourceSnapshot, digest, encoded, fragment
 from .reading_types import ReadingError
 from .store import (
-    ConversationClosed,
-    ConversationNotFound,
     PostgresSessionStore,
     StoredStateInvalid,
 )
@@ -38,18 +35,9 @@ class MaterialStore:
         self.conversations = PostgresSessionStore(factory, clock=clock)
 
     def _open(self, db, scope_id, *, lock=False):
-        query = select(ExamSession).where(ExamSession.session_id == scope_id)
-        if lock:
-            query = query.with_for_update()
-        exam = db.scalar(query)
-        if exam is None:
-            raise ConversationNotFound("exam session unavailable")
-        if (
-            exam.status in ("submitting", "submission_failed", "submitted")
-            or exam.deadline_at is not None
-            and exam.deadline_at <= int(self.clock())
-        ):
-            raise ConversationClosed("exam session no longer accepts new agent reads")
+        from .scopes import assert_open
+
+        assert_open(db, scope_id, int(self.clock()), lock=lock)
 
     def check_open(self, scope_id):
         with session_scope(self.factory) as db:

@@ -14,12 +14,12 @@ from app.db.lifecycle import (
     LifecycleConflict,
     LifecycleNotFound,
     SessionBusy,
-    SessionView,
 )
 from app.db.models import (
     AgentInteraction,
     AgentOperation,
-    ExamSession,
+    AgentScope,
+    StageFileRevision,
     WorkspaceFileRevision,
 )
 from app.db.session import session_scope
@@ -27,7 +27,14 @@ from app.sandbox.runtime import SandboxOperationFailed
 from app.workspace.files import ALLOWED_FILES
 from app.workspace.service import RevisionStoreUnavailable
 
-from .file_changes import ApplyPatch, WriteFile, finish_change, prepare_change
+from .file_changes import (
+    ApplyPatch,
+    StageApplyPatch,
+    StageWriteFile,
+    WriteFile,
+    finish_change,
+    prepare_change,
+)
 from .material_store import call_digest
 from .materials import SourceSnapshot, digest, encoded, fragment
 from .operation_types import ExecutionSnapshot, OperationWaiting
@@ -136,13 +143,9 @@ class OperationService:
 
     @staticmethod
     def target(db, scope):
-        exam = db.get(ExamSession, scope)
-        return SessionView(
-            **{
-                field: getattr(exam, field)
-                for field in SessionView.__dataclass_fields__
-            }
-        )
+        from .scopes import target_view
+
+        return target_view(db, scope)
 
     def assert_target(self, db, row):
         view = self.target(db, row.exam_session_id)
@@ -198,6 +201,18 @@ class OperationService:
             if count >= run.policy_json["runtime"]["max_operations"]:
                 raise RunBudgetExceeded()
             view = self.target(db, scope)
+            scope_row = db.get(AgentScope, scope)
+            if scope_row and scope_row.kind == "phase":
+                from .scopes import assert_open
+
+                _, _, phase_state, _ = assert_open(db, scope, int(self.runs.clock()))
+                capability = (
+                    "write_repository"
+                    if call.name in ("write_file", "apply_patch")
+                    else "use_terminal"
+                )
+                if capability not in phase_state.phase.definition.capabilities:
+                    raise ReadingError("CAPABILITY_DENIED")
             binding = {
                 "sandbox": asdict(view),
                 "policy_sha256": digest(encoded(run.policy_json)),
@@ -220,6 +235,8 @@ class OperationService:
             }
             if not is_edit:
                 config.update(argv=list(args.argv), cwd=args.cwd)
+            if hasattr(view, "writable_files"):
+                config["writable_paths"] = list(view.writable_files)
             row = AgentOperation(
                 operation_id=identity,
                 kind=config["kind"],
@@ -272,6 +289,16 @@ class OperationService:
 
     @staticmethod
     def file_versions(db, scope):
+        binding = db.get(AgentScope, scope)
+        if binding and binding.kind == "phase":
+            rows = db.scalars(
+                select(StageFileRevision).where(
+                    StageFileRevision.workspace_id == binding.workspace_id
+                )
+            )
+            return {
+                r.path: {"version": r.version, "sha256": r.content_sha256} for r in rows
+            }
         return {
             row.path: {"version": row.version, "sha256": row.content_sha256}
             for row in db.scalars(
@@ -311,13 +338,23 @@ class OperationService:
         ):
             self.assert_target(db, row)
             versions = self.file_versions(db, scope)
-            if set(versions) != ALLOWED_FILES:
+            allowed = getattr(self.target(db, scope), "allowed_files", ALLOWED_FILES)
+            if set(versions) != set(allowed):
                 raise ReadingError("FILE_REVISIONS_UNAVAILABLE")
+            view = self.target(db, scope)
+            if (
+                edit_path
+                and hasattr(view, "writable_files")
+                and (view.read_only or edit_path not in view.writable_files)
+            ):
+                raise ReadingError("CAPABILITY_DENIED")
             expected_versions = (
                 {row.args_json["path"]: row.args_json["expected_version"]}
                 if row.kind == "file_edit"
                 else row.args_json["expected_versions"]
             )
+            if any(path not in versions for path in expected_versions):
+                raise ReadingError("SOURCE_UNAVAILABLE")
             if any(
                 versions[path]["version"] != expected
                 for path, expected in expected_versions.items()
@@ -331,10 +368,11 @@ class OperationService:
                 if row.kind == "file_edit":
                     if current["version"] != versions[edit_path]["version"]:
                         raise ReadingError("SOURCE_VERSION_CHANGED")
+                    stage = hasattr(self.target(db, scope), "allowed_files")
                     args_type = (
-                        WriteFile
+                        (StageWriteFile if stage else WriteFile)
                         if row.config_json["tool_name"] == "write_file"
-                        else ApplyPatch
+                        else (StageApplyPatch if stage else ApplyPatch)
                     )
                     change = prepare_change(
                         self.materials,
@@ -379,10 +417,12 @@ class OperationService:
                 )
 
     def data(self, scope, cid, operation_id):
+        from app.stage_resources.types import binding_view
+
         with self.locked(scope, cid, operation_id) as (_, _, _, row):
             return (
                 self._view(row),
-                SessionView(**row.binding_json["sandbox"]),
+                binding_view(row.binding_json["sandbox"]),
                 dict(row.config_json),
                 row.handle,
             )

@@ -79,11 +79,25 @@ def public_messages(state):
 
 class SourceReader:
     def __init__(
-        self, store, *, workspace=None, text_sources: TextSourceProvider | None = None
+        self,
+        store,
+        *,
+        workspace=None,
+        text_sources: TextSourceProvider | None = None,
+        manifest=None,
+        reference_adapter=REFERENCE_ADAPTER,
     ):
         self.store = store
         self.workspace = workspace
         self.text_sources = text_sources
+        self.allowed_files = ALLOWED_FILES if manifest is None else frozenset(manifest)
+        self.validate_file = validate_path if manifest is None else self._manifest_path
+        self.reference_adapter = reference_adapter
+
+    def _manifest_path(self, path):
+        if path not in self.allowed_files:
+            raise ReadingError("SOURCE_UNAVAILABLE")
+        return path
 
     def _workspace(self):
         if self.workspace is None:
@@ -91,7 +105,7 @@ class SourceReader:
         return self.workspace
 
     def _file(self, scope_id, args):
-        validate_path(args.path)
+        self.validate_file(args.path)
         current = self._workspace().read(scope_id, args.path)
         if (
             args.expected_version is not None
@@ -104,7 +118,7 @@ class SourceReader:
 
     def _tree(self, scope_id):
         tree = self._workspace().tree(scope_id)["files"]
-        if {item["path"] for item in tree} != ALLOWED_FILES:
+        if {item["path"] for item in tree} != self.allowed_files:
             raise ReadingError("WORKSPACE_MANIFEST_INVALID")
         return tree
 
@@ -266,15 +280,19 @@ class SourceReader:
         return snapshot
 
     def create_reference(self, scope_id, conversation_id, reference):
-        reference = REFERENCE_ADAPTER.validate_python(reference, strict=True)
+        reference = self.reference_adapter.validate_python(reference, strict=True)
         self.store.conversations.describe(scope_id, conversation_id)
         value = reference.model_dump(mode="json", exclude_none=True)
         snapshot = None
         if reference.kind == "directory":
             path = safe_relative(reference.path)
-            if path != "." and not any(p.startswith(path + "/") for p in ALLOWED_FILES):
+            if path != "." and not any(
+                p.startswith(path + "/") for p in self.allowed_files
+            ):
                 raise ReadingError("SOURCE_UNAVAILABLE")
-        elif reference.kind == "conversation":
+        elif reference.kind in ("file", "selection"):
+            self.validate_file(reference.path)
+        if reference.kind == "conversation":
             source = self.store.conversations.load(scope_id, reference.conversation_id)
             if (
                 reference.expected_revision is not None

@@ -38,13 +38,15 @@ def atomic_json(directory, value):
 
 def file_digest(path):
     root = os.open("/workspace", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    parent = root
+    parent = os.dup(root)
     try:
         parts = path.split("/")
-        if len(parts) == 2:
-            parent = os.open(
-                parts[0], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root
+        for name in parts[:-1]:
+            child = os.open(
+                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
             )
+            os.close(parent)
+            parent = child
         fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
         with os.fdopen(fd, "rb") as source:
             info = os.fstat(source.fileno())
@@ -52,8 +54,7 @@ def file_digest(path):
                 raise ValueError("invalid workspace file")
             return hashlib.sha256(source.read(1048577)).hexdigest()
     finally:
-        if parent != root:
-            os.close(parent)
+        os.close(parent)
         os.close(root)
 
 
@@ -68,7 +69,9 @@ def edit_file(config, cancelled):
     """Fixed platform write; never evaluate or import the proposed contents."""
     edit = config["edit"]
     path = edit["path"]
-    if path not in ("src/booking.py", "tests/test_candidate.py"):
+    if path not in config.get(
+        "writable_paths", ("src/booking.py", "tests/test_candidate.py")
+    ):
         raise ValueError("file is not editable")
     data = base64.b64decode(edit["content_b64"], validate=True)
     if len(data) > 1048576 or b"\x00" in data:
@@ -80,10 +83,20 @@ def edit_file(config, cancelled):
     directory = None
     stage = None
     try:
-        parent, name = path.split("/")
-        directory = os.open(
-            parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root
-        )
+        parts = path.split("/")
+        if any(p in ("", ".", "..") for p in parts) or "\\" in path or ":" in path:
+            raise ValueError("unsafe target path")
+        directory = os.dup(root)
+        for parent in parts[:-1]:
+            info = os.fstat(directory)
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError("unsafe workspace directory")
+            child = os.open(
+                parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+            )
+            os.close(directory)
+            directory = child
+        name = parts[-1]
         for fd in (root, directory):
             info = os.fstat(fd)
             if info.st_uid != 0 or info.st_mode & 0o022:

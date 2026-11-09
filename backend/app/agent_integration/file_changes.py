@@ -6,7 +6,6 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from app.agent.session_types import FrozenModel, ToolResult
-from app.db.models import WorkspaceFileRevision
 from app.workspace.files import encode_content
 
 from .materials import SourceSnapshot, digest, encoded, validate_json_text
@@ -41,6 +40,14 @@ class ApplyPatch(FrozenModel):
     path: WritablePath
     expected_version: int = Field(strict=True, ge=1)
     edits: tuple[Replacement, ...] = Field(min_length=1, max_length=20)
+
+
+class StageWriteFile(WriteFile):
+    path: str = Field(min_length=1, max_length=500)
+
+
+class StageApplyPatch(ApplyPatch):
+    path: str = Field(min_length=1, max_length=500)
 
 
 def proposed_text(before, args):
@@ -145,7 +152,9 @@ def finish_change(service, db, conv, run, row, snapshot):
         text = service.backend.read_file(view, plan["path"])
         validate_json_text(text)
         actual_digest = digest(text)
-        revision = db.get(WorkspaceFileRevision, (row.exam_session_id, plan["path"]))
+        from .scopes import revision_row
+
+        revision = revision_row(db, row.exam_session_id, plan["path"])
         if revision is None:
             raise ReadingError("FILE_REVISIONS_UNAVAILABLE")
         if revision.content_sha256 != actual_digest:

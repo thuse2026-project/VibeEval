@@ -125,8 +125,10 @@ class EventStream:
         policy=None,
         clock=time.monotonic,
         sleep=asyncio.sleep,
+        check_each_event=False,
     ):
         self.page, self.access, self.disconnected = page, access, disconnected
+        self.check_each_event = check_each_event
         self.policy, self.clock, self.sleep = (
             policy or EventStreamPolicy(),
             clock,
@@ -194,6 +196,8 @@ class EventStream:
                         ],
                     }
                 for item in page["items"]:
+                    if self.check_each_event:
+                        await self.access()
                     if await self.disconnected():
                         return
                     if self.clock() - started >= policy.max_seconds:

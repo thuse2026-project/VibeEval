@@ -153,6 +153,56 @@ class ExamFlowAttempt(Base):
     state_json: Mapped[dict] = mapped_column(JSONB)
 
 
+class StageWorkspace(Base):
+    __tablename__ = "stage_workspaces"
+    workspace_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+    )
+    attempt_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_flow_attempts.attempt_id", ondelete="CASCADE")
+    )
+    stage_id: Mapped[str] = mapped_column(String(128), unique=True)
+    spec_json: Mapped[dict] = mapped_column(JSONB)
+    sandbox_resource_key: Mapped[str] = mapped_column(String(64), unique=True)
+    sandbox_image_ref: Mapped[str] = mapped_column(String(512))
+    sandbox_backend_ref: Mapped[str] = mapped_column(String(128))
+    sandbox_id: Mapped[str | None] = mapped_column(String(255))
+    read_only: Mapped[bool] = mapped_column(Boolean)
+    status: Mapped[str] = mapped_column(String(16))
+    current_phase_id: Mapped[str | None] = mapped_column(String(128))
+    permission_epoch: Mapped[int] = mapped_column(BigInteger)
+    artifact_json: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class StageFileRevision(Base):
+    __tablename__ = "stage_file_revisions"
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("stage_workspaces.workspace_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    path: Mapped[str] = mapped_column(String(500), primary_key=True)
+    version: Mapped[int] = mapped_column(BigInteger)
+    content_sha256: Mapped[str] = mapped_column(String(64))
+
+
+class AgentScope(Base):
+    """Legacy IDs remain unchanged; multi-stage Agent IDs identify one phase."""
+
+    __tablename__ = "agent_scopes"
+    scope_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+    )
+    kind: Mapped[str] = mapped_column(String(16))
+    phase_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("stage_workspaces.workspace_id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(String(16))
+    permission_epoch: Mapped[int] = mapped_column(BigInteger)
+
+
 class WorkspaceFileRevision(Base):
     __tablename__ = "workspace_file_revisions"
     __table_args__ = (
@@ -199,7 +249,7 @@ class AgentConversation(Base):
 
     conversation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     exam_session_id: Mapped[str] = mapped_column(
-        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+        ForeignKey("agent_scopes.scope_id", ondelete="CASCADE")
     )
     title: Mapped[str] = mapped_column(String(200))
     revision: Mapped[int] = mapped_column(BigInteger)
@@ -251,7 +301,7 @@ class AgentMaterial(Base):
 
     material_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     exam_session_id: Mapped[str] = mapped_column(
-        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+        ForeignKey("agent_scopes.scope_id", ondelete="CASCADE")
     )
     material_key: Mapped[str] = mapped_column(String(64))
     source_kind: Mapped[str] = mapped_column(String(40))

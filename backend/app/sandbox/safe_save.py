@@ -81,7 +81,8 @@ def remove_writer(client, view):
 
 
 def save_file(adapter, view, path, expected_digest, content):
-    validate_path(path, write=True)
+    validator = getattr(adapter, "validate_path", validate_path)
+    validator(path, write=True)
     data = encode_content(content)
     if (
         not isinstance(expected_digest, str)
@@ -155,7 +156,7 @@ def save_file(adapter, view, path, expected_digest, content):
                 "python",
                 "-I",
                 "-c",
-                WRITE_SCRIPT,
+                getattr(adapter, "write_script", WRITE_SCRIPT),
                 path,
                 expected_digest,
                 str(view.deadline_at),

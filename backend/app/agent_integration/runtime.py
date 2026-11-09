@@ -5,6 +5,7 @@ in learn-claude-code s01/s08; local storage, policy and recovery are project cod
 No upstream CLI/SDK is invoked and no command executes on the host.
 """
 
+import asyncio
 from dataclasses import replace
 
 from pydantic import ValidationError
@@ -27,7 +28,7 @@ from app.agent.session_types import (
 from app.llm.client import LLMClient
 from app.llm.config import ContextLimitError, LLMError
 
-from .file_changes import ApplyPatch, WriteFile
+from .file_changes import ApplyPatch, StageApplyPatch, StageWriteFile, WriteFile
 from .materials import encoded, validate_json_text
 from .operation_types import OperationWaiting, ReadExecution, RunCommand
 from .operations import OperationService
@@ -46,6 +47,13 @@ from .window import ContextCapacityError, WindowPolicy, inspect_window
 
 
 def runtime_registry(reader, mode, actions_available=False, file_edits_available=False):
+    stage = getattr(reader.workspace, "supports_stage_resources", False)
+    capabilities = getattr(reader.workspace, "capabilities", None)
+    command_type = RunCommand
+    if stage:
+        from app.stage_resources.types import StageRunCommand
+
+        command_type = StageRunCommand
     if mode == "chat_only":
         return ToolRegistry()
     reads = ReadToolService(reader).registry
@@ -73,27 +81,30 @@ def runtime_registry(reader, mode, actions_available=False, file_edits_available
         )
     )
     if actions_available and mode in ("confirm_actions", "sandbox_auto"):
-        registry = registry.with_tools(
-            (
-                ToolDefinition(
-                    "run_command",
-                    "Execute argv in an isolated runsc operation sharing the authorized workspace. No implicit shell: use explicit /bin/bash arguments for shell syntax. The turn may wait for approval and for the complete receipt. Nonzero exit is a program outcome. Output is bounded and archived by material IDs; expected_versions can pin observed files.",
-                    RunCommand,
-                ),
+        if capabilities is None or "use_terminal" in capabilities:
+            registry = registry.with_tools(
+                (
+                    ToolDefinition(
+                        "run_command",
+                        "Execute argv in an isolated runsc operation sharing the authorized workspace. No implicit shell: use explicit /bin/bash arguments for shell syntax. The turn may wait for approval and for the complete receipt. Nonzero exit is a program outcome. Output is bounded and archived by material IDs; expected_versions can pin observed files.",
+                        command_type,
+                    ),
+                )
             )
-        )
-        if file_edits_available:
+        if file_edits_available and (
+            capabilities is None or "write_repository" in capabilities
+        ):
             registry = registry.with_tools(
                 (
                     ToolDefinition(
                         "write_file",
                         "Propose replacing one existing writable file. Pin expected_version from a real read. The server stores before/after/diff materials and may pause for approval. No create, delete, rename or multi-file transaction. A proposal is not an applied change.",
-                        WriteFile,
+                        StageWriteFile if stage else WriteFile,
                     ),
                     ToolDefinition(
                         "apply_patch",
                         "Propose ordered exact text replacements in one writable file, pinned by expected_version. Each old_text must occur exactly once at its stage; ambiguous or absent context fails the entire proposal without writing. Matching preserves line endings; no fuzzy match. The server may require approval before applying.",
-                        ApplyPatch,
+                        StageApplyPatch if stage else ApplyPatch,
                     ),
                 )
             )
@@ -120,8 +131,10 @@ class RuntimeCoordinator:
         window_policy=None,
         clock=None,
         execution_backend=None,
+        access_monitor=None,
     ):
         self.reader, self.settings, self.client = reader, settings, client
+        self.access_monitor = access_monitor
         self.policy, self.window_policy = (
             policy or RunPolicy(),
             window_policy or WindowPolicy(),
@@ -216,9 +229,15 @@ class RuntimeCoordinator:
         failure_usage = None
         try:
             if kind == "model":
-                response = await call_model(request, tools=registry, client=observed)
+                response = await self._guard_provider(
+                    call_model(request, tools=registry, client=observed), scope
+                )
             else:
-                response = (await call_compaction(request, client=observed)).response
+                response = (
+                    await self._guard_provider(
+                        call_compaction(request, client=observed), scope
+                    )
+                ).response
         except LLMError as exc:
             failure_usage = exc.usage
             overflow, uncertain = isinstance(exc, ContextLimitError), exc.uncertain
@@ -275,6 +294,30 @@ class RuntimeCoordinator:
             settings=settings,
             window_policy=window,
         )
+
+    async def _guard_provider(self, awaitable, scope):
+        if self.access_monitor is None:
+            return await awaitable
+
+        async def monitor():
+            while True:
+                await asyncio.sleep(0.25)
+                await asyncio.to_thread(self.access_monitor, scope)
+
+        request = asyncio.create_task(awaitable)
+        watcher = asyncio.create_task(monitor())
+        try:
+            done, _ = await asyncio.wait(
+                (request, watcher), return_when=asyncio.FIRST_COMPLETED
+            )
+            if watcher in done:
+                watcher.result()
+            return request.result()
+        finally:
+            for task in (request, watcher):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(request, watcher, return_exceptions=True)
 
     async def advance(self, scope, cid, run_id):
         result = await self._advance(scope, cid, run_id)

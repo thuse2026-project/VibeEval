@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.agent.session_types import ConversationState, SessionConflict, SessionError
-from app.db.models import AgentConversation, AgentEvent, ExamSession
+from app.db.models import AgentConversation, AgentEvent
 from app.db.session import session_scope
 
 
@@ -97,21 +97,9 @@ class PostgresSessionStore:
         now = int(self.clock())
         try:
             with session_scope(self.factory) as db:
-                exam = db.scalar(
-                    select(ExamSession)
-                    .where(ExamSession.session_id == checked.scope_id)
-                    .with_for_update()
-                )
-                if exam is None:
-                    raise ConversationNotFound("exam session not found")
-                if (
-                    exam.status in ("submitting", "submission_failed", "submitted")
-                    or exam.deadline_at is not None
-                    and exam.deadline_at <= now
-                ):
-                    raise ConversationClosed(
-                        "exam session no longer accepts new conversations"
-                    )
+                from .scopes import assert_open
+
+                assert_open(db, checked.scope_id, now, lock=True)
                 row = AgentConversation(
                     conversation_id=checked.id,
                     exam_session_id=checked.scope_id,
@@ -231,24 +219,14 @@ class PostgresSessionStore:
         if type(limit) is not int or not 1 <= limit <= 200:
             raise SessionError("invalid event page size")
         with session_scope(self.factory) as db:
-            head = db.execute(
-                select(
-                    AgentConversation.event_sequence,
-                    ExamSession.status,
-                    ExamSession.deadline_at,
-                )
-                .join(
-                    ExamSession,
-                    AgentConversation.exam_session_id == ExamSession.session_id,
-                )
-                .where(
-                    AgentConversation.conversation_id == conversation_id,
-                    AgentConversation.exam_session_id == scope_id,
-                )
-            ).one_or_none()
-            if head is None:
-                raise ConversationNotFound("conversation not found in this scope")
-            sequence, status, deadline = head
+            from .scopes import assert_open
+
+            sequence = self._row(db, scope_id, conversation_id).event_sequence
+            try:
+                assert_open(db, scope_id, int(self.clock()))
+                closed = False
+            except ConversationClosed:
+                closed = True
             if after_sequence > sequence:
                 raise EventStreamError("AGENT_EVENT_CURSOR_AHEAD")
             rows = db.scalars(
@@ -279,7 +257,5 @@ class PostgresSessionStore:
                     for row in rows
                 ],
                 "head_sequence": sequence,
-                "closed": status in ("submitting", "submission_failed", "submitted")
-                or deadline is not None
-                and deadline <= int(self.clock()),
+                "closed": closed,
             }

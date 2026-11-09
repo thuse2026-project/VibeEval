@@ -13,6 +13,36 @@ from app.exams.postgres import PostgresEntryStore
 from app.main import create_app
 
 
+def build_stage_app(
+    questions,
+    specs,
+    *,
+    factory=None,
+    settings=None,
+    client=None,
+    snapshots=None,
+    sandbox=None,
+    accounts=None,
+):
+    """Complete stage resource assembly. Model secrets remain in server settings."""
+    import os
+
+    from app.stage_resources import StageResources, StageSandboxRuntime
+
+    factory = factory or get_session_factory()
+    if sandbox is None:
+        sandbox = StageSandboxRuntime(
+            backend_ref=os.environ["SANDBOX_BACKEND_REF"],
+            docker_url=os.environ.get(
+                "SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"
+            ),
+        )
+    resources = StageResources(
+        factory, specs, sandbox, snapshots=snapshots, settings=settings, client=client
+    )
+    return build_app(questions, resources, factory=factory, accounts=accounts)
+
+
 def build_app(questions, resources, *, factory=None, accounts=None):
     factory = factory or get_session_factory()
     flow = ExamFlowService(PostgresFlowStore(factory), questions, resources)
