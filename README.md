@@ -28,6 +28,24 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [工作区文件版本](docs/workspace-file-revisions.md)：持久版本表、同一会话事务内的摘要观察接口与接入验证。
 - [应用容器部署](docs/application-deployment.md)：前后端打包、共享持久卷、可选 gVisor 维护进程及升级回退。
 - [工作区终端与文件接入](docs/workspace-terminal-handoff.md)：真实 PTY、文件读写、持久版本冲突和联合测试。
+- [模型 API 接入](docs/llm-api.md)：后端私有配置、模型列表、文本调用及本地连通性验证。
+- [Agent API 原子能力](docs/agent-primitives.md)：文本调用、会话状态、原生工具交互与上下文接口入口。
+- [Agent API 会话范围](docs/agent-session-design.md)：参考 Codex/Claude SDK 源码，定义会话、轮次、原生工具交互、上下文和上下游接口。
+- [Agent 会话第一批](docs/agent-session-stage1.md)：本地状态转换、工具结果配对、快照与存储接口，以及不访问网络的运行示例。
+- [Agent 会话第二批](docs/agent-session-stage2.md)：原生工具调用、全局 prompt、完整请求预览与两次 API 调用示例。
+- [Agent 会话第三批](docs/agent-session-stage3.md)：显式压缩、检查点采用、原始历史保留与快照恢复后续调。
+- [Agent 接入契约与示例](docs/agent-session-stage4.md)：组员接入入口、标识与状态、存储并发、跨会话读取、错误及完整模拟流程。
+- [Agent 整体验收修正](docs/agent-session-audit.md)：模型截断处理、快照状态一致性和响应角色校验的回归记录。
+- [Agent 后端接入计划](docs/agent-integration-plan.md)：新分支的引用、主动查询阅读、执行、批准、数据库和事件协议范围。
+- [Agent 上下文管理](docs/agent-context-management-plan.md)：阅读材料、跨对话读取、主动/被动压缩及恢复的已确认设计。
+- [Agent 接入第一批](docs/agent-integration-stage1.md)：PostgreSQL 会话保存、考试归属、事务事件和基础 HTTP 接口。
+- [Agent 接入第二批](docs/agent-integration-stage2.md)：用户引用、工作区查询阅读、跨对话取材与不可变材料，复用核心原生工具协议。
+- [Agent 接入第三批 A](docs/agent-integration-stage3a.md)：长 Turn 安全压缩、材料窗口投影、预算检查和只读窗口查询。
+- [Agent 接入第三批 B](docs/agent-integration-stage3b.md)：持久只读循环、主动/被动压缩、批准/提问、调用用量与未知结果恢复。
+- [Agent 接入第四批 A](docs/agent-integration-stage4a.md)：持久沙箱命令、批准与版本绑定、输出材料、取消和不重放的执行恢复。
+- [Agent 接入第四批 B](docs/agent-integration-stage4b.md)：版本化单文件写入、精确替换补丁、审批 diff、暂停归属和实际文件版本回传。
+- [Agent 接入第五批 A](docs/agent-integration-stage5a.md)：持久 SSE 事件订阅、对话游标、断线续接、心跳和连接预算。
+- [基本 Agent 封装交接](docs/agent-integration-handoff.md)：服务端装配、上游调用顺序、已交付能力、验证结果和后续边界。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 

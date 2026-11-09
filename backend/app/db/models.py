@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -11,9 +12,11 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -137,6 +140,421 @@ class WorkspaceFileRevision(Base):
     path: Mapped[str] = mapped_column(String(500), primary_key=True)
     version: Mapped[int] = mapped_column(BigInteger)
     content_sha256: Mapped[str] = mapped_column(String(64))
+
+
+class AgentConversation(Base):
+    __tablename__ = "agent_conversations"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "exam_session_id",
+            name="uq_agent_conversations_identity_scope",
+        ),
+        CheckConstraint("revision >= 0 AND event_sequence >= 1", name="counters_valid"),
+        CheckConstraint("length(btrim(title)) > 0", name="title_not_blank"),
+        CheckConstraint(
+            "created_at >= 0 AND updated_at >= created_at", name="timeline_order"
+        ),
+        CheckConstraint(
+            "jsonb_typeof(state_json) = 'object' AND "
+            "coalesce(state_json->>'id', '') = conversation_id AND "
+            "coalesce(state_json->>'scope_id', '') = exam_session_id AND "
+            "coalesce(state_json->>'revision', '') = revision::text",
+            name="state_identity",
+        ),
+        Index(
+            "ix_agent_conversations_exam_created",
+            "exam_session_id",
+            "created_at",
+            "conversation_id",
+        ),
+    )
+
+    conversation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    exam_session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    revision: Mapped[int] = mapped_column(BigInteger)
+    event_sequence: Mapped[int] = mapped_column(BigInteger)
+    state_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentEvent(Base):
+    __tablename__ = "agent_events"
+    __table_args__ = (
+        CheckConstraint("sequence >= 1 AND created_at >= 0", name="counters_valid"),
+        CheckConstraint("length(btrim(kind)) > 0", name="kind_not_blank"),
+        CheckConstraint("jsonb_typeof(data_json) = 'object'", name="data_object"),
+    )
+
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_conversations.conversation_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(80))
+    data_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentMaterial(Base):
+    __tablename__ = "agent_materials"
+    __table_args__ = (
+        UniqueConstraint(
+            "exam_session_id", "material_key", name="uq_agent_materials_scope_key"
+        ),
+        UniqueConstraint(
+            "material_id", "exam_session_id", name="uq_agent_materials_identity_scope"
+        ),
+        CheckConstraint(
+            "material_key ~ '^[0-9a-f]{64}$' AND content_sha256 ~ '^[0-9a-f]{64}$' AND source_sha256 ~ '^[0-9a-f]{64}$'",
+            name="digests_valid",
+        ),
+        CheckConstraint(
+            "size_bytes = octet_length(content_text) AND size_bytes <= 8388608 AND created_at >= 0",
+            name="size_timeline_valid",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata_json) = 'object'", name="metadata_object"
+        ),
+    )
+
+    material_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    exam_session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE")
+    )
+    material_key: Mapped[str] = mapped_column(String(64))
+    source_kind: Mapped[str] = mapped_column(String(40))
+    source_id: Mapped[str] = mapped_column(String(512))
+    source_version: Mapped[str] = mapped_column(String(200))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    content_text: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    metadata_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentInputReference(Base):
+    __tablename__ = "agent_input_references"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "exam_session_id"],
+            [
+                "agent_conversations.conversation_id",
+                "agent_conversations.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["material_id", "exam_session_id"],
+            ["agent_materials.material_id", "agent_materials.exam_session_id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(reference_json) = 'object' AND created_at >= 0",
+            name="data_timeline_valid",
+        ),
+        Index(
+            "ix_agent_input_references_conversation",
+            "conversation_id",
+            "created_at",
+            "reference_id",
+        ),
+    )
+
+    reference_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    material_id: Mapped[str | None] = mapped_column(String(128))
+    reference_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentReadObservation(Base):
+    __tablename__ = "agent_read_observations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "exam_session_id"],
+            [
+                "agent_conversations.conversation_id",
+                "agent_conversations.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["material_id", "exam_session_id"],
+            ["agent_materials.material_id", "agent_materials.exam_session_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "conversation_id",
+            "step_id",
+            "tool_call_id",
+            name="uq_agent_read_observations_call",
+        ),
+        CheckConstraint("call_sha256 ~ '^[0-9a-f]{64}$'", name="digest_valid"),
+        CheckConstraint(
+            "action_kind IN ('query', 'read') AND status IN ('succeeded', 'error', 'denied')",
+            name="known_status",
+        ),
+        CheckConstraint(
+            "(status = 'succeeded' AND material_id IS NOT NULL) OR (status != 'succeeded' AND material_id IS NULL)",
+            name="material_status",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(result_json) = 'object' AND created_at >= 0",
+            name="data_timeline_valid",
+        ),
+        Index(
+            "ix_agent_read_observations_conversation",
+            "conversation_id",
+            "created_at",
+            "observation_id",
+        ),
+    )
+
+    observation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    turn_id: Mapped[str] = mapped_column(String(128))
+    step_id: Mapped[str] = mapped_column(String(128))
+    tool_call_id: Mapped[str] = mapped_column(String(128))
+    tool_name: Mapped[str] = mapped_column(String(64))
+    call_sha256: Mapped[str] = mapped_column(String(64))
+    action_kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))
+    material_id: Mapped[str | None] = mapped_column(String(128))
+    result_json: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "exam_session_id"],
+            [
+                "agent_conversations.conversation_id",
+                "agent_conversations.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "conversation_id", "request_key", name="uq_agent_runs_request"
+        ),
+        UniqueConstraint(
+            "run_id",
+            "conversation_id",
+            "exam_session_id",
+            name="uq_agent_runs_identity_scope",
+        ),
+        CheckConstraint("kind IN ('turn', 'compact')", name="kind_valid"),
+        CheckConstraint(
+            "status IN ('queued','running','waiting_approval','waiting_user_input','waiting_operation','completed','failed','interrupted','unknown','capacity_exceeded','budget_exhausted','expired')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "model_calls >= 0 AND compaction_calls >= 0 AND tool_calls >= 0 AND overflow_retries BETWEEN 0 AND 1",
+            name="counters_valid",
+        ),
+        CheckConstraint(
+            "created_at >= 0 AND updated_at >= created_at AND deadline_at > created_at",
+            name="timeline_valid",
+        ),
+        CheckConstraint(
+            "(lease_token IS NULL) = (lease_expires_at IS NULL)", name="lease_complete"
+        ),
+        Index(
+            "uq_agent_runs_active_conversation",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('queued','running','waiting_approval','waiting_user_input','waiting_operation')"
+            ),
+        ),
+    )
+
+    run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    turn_id: Mapped[str | None] = mapped_column(String(128))
+    request_key: Mapped[str] = mapped_column(String(128))
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(32))
+    input_json: Mapped[dict] = mapped_column(JSONB)
+    policy_json: Mapped[dict] = mapped_column(JSONB)
+    tools_sha256: Mapped[str] = mapped_column(String(64))
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    compaction_calls: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[int] = mapped_column(Integer, default=0)
+    overflow_retries: Mapped[int] = mapped_column(Integer, default=0)
+    compact_requested: Mapped[str | None] = mapped_column(String(16))
+    lease_token: Mapped[str | None] = mapped_column(String(128))
+    lease_expires_at: Mapped[int | None] = mapped_column(BigInteger)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
+    deadline_at: Mapped[int] = mapped_column(BigInteger)
+
+
+class AgentAttempt(Base):
+    __tablename__ = "agent_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id", "conversation_id", "exam_session_id"],
+            [
+                "agent_runs.run_id",
+                "agent_runs.conversation_id",
+                "agent_runs.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("run_id", "sequence", name="uq_agent_attempts_sequence"),
+        CheckConstraint("kind IN ('model', 'compaction')", name="kind_valid"),
+        CheckConstraint(
+            "status IN ('prepared','running','adopted','rejected','failed','unknown','late')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "sequence >= 1 AND source_revision >= 0 AND created_at >= 0",
+            name="counters_valid",
+        ),
+        Index(
+            "uq_agent_attempts_pending_run",
+            "run_id",
+            unique=True,
+            postgresql_where=text("status IN ('prepared','running')"),
+        ),
+    )
+
+    attempt_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(128))
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    sequence: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16))
+    trigger: Mapped[str] = mapped_column(String(16))
+    step_id: Mapped[str | None] = mapped_column(String(128))
+    source_revision: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(16))
+    request_json: Mapped[dict] = mapped_column(JSONB)
+    manifest_json: Mapped[dict | None] = mapped_column(JSONB)
+    response_json: Mapped[dict | None] = mapped_column(JSONB)
+    usage_json: Mapped[dict | None] = mapped_column(JSONB)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    sent_at: Mapped[int | None] = mapped_column(BigInteger)
+    finished_at: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class AgentInteraction(Base):
+    __tablename__ = "agent_interactions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id", "conversation_id", "exam_session_id"],
+            [
+                "agent_runs.run_id",
+                "agent_runs.conversation_id",
+                "agent_runs.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "run_id", "step_id", "tool_call_id", name="uq_agent_interactions_call"
+        ),
+        CheckConstraint("kind IN ('approval','user_input')", name="kind_valid"),
+        CheckConstraint(
+            "status IN ('pending','approved','rejected','answered','expired','cancelled')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "call_sha256 ~ '^[0-9a-f]{64}$' AND expires_at > created_at",
+            name="binding_valid",
+        ),
+    )
+
+    interaction_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(128))
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    step_id: Mapped[str] = mapped_column(String(128))
+    tool_call_id: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(16))
+    call_sha256: Mapped[str] = mapped_column(String(64))
+    binding_json: Mapped[dict] = mapped_column(JSONB)
+    request_json: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(16))
+    answer_json: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    expires_at: Mapped[int] = mapped_column(BigInteger)
+    finished_at: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class AgentOperation(Base):
+    __tablename__ = "agent_operations"
+    __table_args__ = (
+        CheckConstraint("kind IN ('command','file_edit')", name="kind_valid"),
+        ForeignKeyConstraint(
+            ["run_id", "conversation_id", "exam_session_id"],
+            [
+                "agent_runs.run_id",
+                "agent_runs.conversation_id",
+                "agent_runs.exam_session_id",
+            ],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "run_id", "step_id", "tool_call_id", name="uq_agent_operations_call"
+        ),
+        CheckConstraint(
+            "status IN ('requested','waiting_approval','preparing','prepared','dispatching','running','succeeded','failed','conflict','denied','cancelled','timed_out','unknown')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "revision >= 0 AND created_at >= 0 AND updated_at >= created_at",
+            name="timeline_valid",
+        ),
+        CheckConstraint(
+            "call_sha256 ~ '^[0-9a-f]{64}$' AND binding_sha256 ~ '^[0-9a-f]{64}$'",
+            name="digests_valid",
+        ),
+        Index(
+            "uq_agent_operations_workspace_holder",
+            "exam_session_id",
+            unique=True,
+            postgresql_where=text("holds_workspace"),
+        ),
+    )
+
+    operation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    run_id: Mapped[str] = mapped_column(String(128))
+    conversation_id: Mapped[str] = mapped_column(String(128))
+    exam_session_id: Mapped[str] = mapped_column(String(128))
+    turn_id: Mapped[str] = mapped_column(String(128))
+    step_id: Mapped[str] = mapped_column(String(128))
+    tool_call_id: Mapped[str] = mapped_column(String(128))
+    call_sha256: Mapped[str] = mapped_column(String(64))
+    args_json: Mapped[dict] = mapped_column(JSONB)
+    binding_json: Mapped[dict] = mapped_column(JSONB)
+    binding_sha256: Mapped[str] = mapped_column(String(64))
+    config_json: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(32))
+    policy_decision: Mapped[str | None] = mapped_column(String(16))
+    reason_code: Mapped[str | None] = mapped_column(String(80))
+    handle: Mapped[str | None] = mapped_column(String(128))
+    receipt_json: Mapped[dict | None] = mapped_column(JSONB)
+    result_json: Mapped[dict | None] = mapped_column(JSONB)
+    revision: Mapped[int] = mapped_column(Integer)
+    holds_workspace: Mapped[bool] = mapped_column(Boolean)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[int] = mapped_column(BigInteger)
 
 
 class Snapshot(Base):

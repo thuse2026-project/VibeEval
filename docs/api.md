@@ -14,6 +14,49 @@
 - 文件版本冲突、越界路径、只读文件和冻结后操作的错误约定。
 - 终端退出、断开及错误消息的约定。
 
+## 模型 API（新增）
+
+模型 API 新增独立考官联调接口：`GET /api/v1/admin/llm/config`、
+`GET /api/v1/admin/llm/models`、`POST /api/v1/admin/llm/chat`。
+沿用下述考官 Cookie 和 POST 来源头；请求、响应、限额及错误码见
+[模型 API 契约](llm-api.md#http-契约)。内部原子函数与后续批次见 [Agent 原子函数](agent-primitives.md)。
+本批尚未接入候选人工作台。
+
+Agent 接入分支另增考生归属下的会话创建、列表、历史和事务事件查询，默认关闭；
+契约、开关及数据库迁移见 [Agent 接入第一批](agent-integration-stage1.md)。
+这些记录接口不直接执行模型或沙箱命令。
+
+第二批另增同一对话下的 `POST/GET /references`、`GET /references/{reference_id}`、
+`GET /materials/{material_id}`、`GET /reads`，用于引用输入、材料预览和实际阅读查询。
+内部阅读服务复用上一分支原生 tool call/result；没有开放浏览器伪造工具回执的接口。
+版本、选区、工具和后续边界见 [Agent 接入第二批](agent-integration-stage2.md)。
+
+第三批 A 新增同一对话下的 `GET /context?offset=0&limit=20`，只读返回当前窗口预览、
+预算估算、压缩边界与材料可见情况，不返回正文、系统 prompt 或 Key，不触发模型。
+stage=preview 不表示已经向供应商发送；契约与运行编排边界见 [第三批 A](agent-integration-stage3a.md)。
+
+第三批 B 接通 `POST /turns`、`POST /compactions` 及 `/runs/{run_id}` 下的 advance/interrupt/compact、
+attempts/interactions 和批准/答复接口。提交返回 queued Run，调用 advance 在后端运行只读循环；
+等待交互时答复后再 advance。请求、预算、错误和恢复语义见 [持久只读运行契约](agent-integration-stage3b.md)。
+浏览器不提交模型/工具成功回执；本批尚不提供命令或文件修改。
+
+第四批 A 增加原生 `run_command/read_execution_output`、`waiting_operation` 和
+`GET /operations`、`GET /operations/{id}`、`POST /operations/{id}/cancel`、
+`GET /operations/{id}/output`。批准继续使用已有 interactions 接口；输出增量通过现有事件查询。
+默认服务端仍为 read_only；confirm_actions/sandbox_auto 必须由服务端启用并允许客户端收窄。
+版本绑定、执行回执、输出偏移及不重发规则见 [沙箱命令契约](agent-integration-stage4a.md)。
+结构化文件修改/补丁见第四批 B；本分支不改前端。
+
+第四批 B 新增原生 `write_file/apply_patch`，绑定基础版本、修改前后材料、审批 diff 与实际回执，
+操作详情增加 kind/change/file_result。另有 `GET /operations/{id}/change?part=before|after|diff` 分页预览。
+复用现有批准、advance 和取消；仅开放任务的两个可写文件，按单文件原子替换。
+字段与暂停/恢复、交卷门禁及效果未知语义见 [版本化修改契约](agent-integration-stage4b.md)。
+
+第五批 A 增加 `GET /events/stream`，支持 after_sequence、follow 与绑定对话的 Last-Event-ID 续读。
+使用现有已提交事件，不驱动模型或沙箱；保留 Cookie 和来源头，提供心跳、预算和安全结束帧。
+游标、帧格式、错误与客户端示例见 [事件订阅契约](agent-integration-stage5a.md)。
+模型文字和工具参数的供应商增量流由后续第五批 B 接入。
+
 ## 考官登录（本轮实现）
 
 - 账号由本地初始化命令预配置，无注册接口。

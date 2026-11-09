@@ -1,0 +1,43 @@
+# 上游来源与改写边界
+
+本目录的会话部分在 VibeEval 内用 Python 实现，不调用 Codex/Claude SDK 或 CLI。
+本批按下列官方公开源码的结构与处理方式进行移植、精简和适配，保留来源版本与许可证。
+Claude Code 官方仓库本身不作为本批完整运行时的代码来源；Claude 部分来自公开的 Agent SDK。
+
+| 本地模块 | 参考/移植内容 | 上游固定版本 |
+| --- | --- | --- |
+| `session_types.py` | 会话级状态与单轮状态分开，单轮持有待处理调用、取消和用量；Python 类型及可序列化结构为本地适配 | [Codex SessionState](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/state/session.rs)、[TurnState](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/state/turn.rs) |
+| `session_types.py` | 工具调用 ID、工具结果关联 ID、错误结果和助手输出等消息结构；原始工具参数保留为兼容 API 的 JSON 字符串 | [Claude Agent SDK types.py](https://github.com/anthropics/claude-agent-sdk-python/blob/3be907edb9c86269d30d1427a77937dd788d6419/src/claude_agent_sdk/types.py) |
+| `session.py` 的 `render_history` | 中断后在模型历史投影中补齐工具调用的明确中断结果，不修改已保存的原始结果 | [Codex normalize.rs](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/context_manager/normalize.rs) |
+| `tools.py`、`model.py` | 声明给模型的工具与具体工具调用分开，按名称校验调用；将消息分解成结构化对象后验证。本地改写为 Chat Completions 协议，没有移植上游执行器 | [Codex router.rs](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/tools/router.rs)、[Claude message_parser.py](https://github.com/anthropics/claude-agent-sdk-python/blob/3be907edb9c86269d30d1427a77937dd788d6419/src/claude_agent_sdk/_internal/message_parser.py) |
+| `compaction.py`、`context.py` | 压缩结果与历史替换元数据分开，用摘要与保留消息重建模型输入；本地改写为完整 Turn 边界，保留所有原始记录，显式采用摘要 | [Codex compact.rs](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/compact.rs#L732)、[rollout_reconstruction.rs](https://github.com/openai/codex/blob/695961ee88a2c84c0919814a4345b94a2d10f3ca/codex-rs/core/src/session/rollout_reconstruction.rs#L190) |
+
+这里没有整文件复制上游实现。状态转换、乐观版本存储、输入校验与测试是围绕本项目 API 边界的 Python 改写。
+不声称与上游类型或全部行为兼容；SDK 网络传输、执行器、审批、调度、多 Agent 等不在本批移植范围。
+后续移植需继续按具体模块记录来源，不将第三方镜像中的未核实代码作为官方开源实现。
+
+上游声明随附于 `upstream/`：
+
+- `LICENSE-Codex.txt`、`NOTICE-Codex.txt`：Codex，Apache-2.0。
+- `LICENSE-Claude-Agent-SDK.txt`：Claude Agent SDK Python，MIT。
+
+本文件记录技术来源及附带声明，不改变仓库其他部分的许可范围。
+
+第二批 `prompts.py` 是本项目撰写的短全局 prompt，没有复制 Claude Code 私有 prompt。
+续调元数据处理依据 [OpenRouter 官方协议](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens)。
+第三批压缩 prompt 也是本项目撰写；没有复制上游完整压缩调度或 token 预算算法。
+
+接入第三批 A 在既有 checkpoint/replacement-history 适配上扩展活动 Turn 的完整工具交换边界；
+`coverage_digest` 固定已经覆盖的步骤及用户任务，后续尾部增长不使既有检查点失效。
+这些类型、预算估算与边界校验为本地实现，不声称复刻上游内部 token 计数。
+`app.agent_integration.window` 的分层整理、外置预览和摘要准备沿用已研究的
+[learn-claude-code s08 固定版本](https://github.com/shareAI-lab/learn-claude-code/blob/7226f555d48900076eba126acf37c9ed5f002b5d/s08_context_compact/code.py)
+的结构思路；本小步独立重写为原生消息投影，不复制其宿主文件写入或自动循环代码。
+
+接入第三批 B 的 `RuntimeCoordinator` 依据同一固定版本的
+[s01 循环](https://github.com/shareAI-lab/learn-claude-code/blob/7226f555d48900076eba126acf37c9ed5f002b5d/s01_agent_loop/code.py)
+与 s08 分层压缩结构重写：模型输出原生调用，外层处理后回填结果并续调。
+项目自行实现 PostgreSQL 请求账本、租约、等待交互和停止/恢复；没有复制教学脚本的宿主执行器，
+没有引入 CLI/SDK 运行时。本批未直接复制其源码文本；该参考项目采用 MIT，来源说明见上下文计划。
+只识别明确结构化超窗错误作为一次补救信号，OpenRouter 字段依据
+[官方错误协议](https://openrouter.ai/docs/api_reference/errors-and-debugging)。

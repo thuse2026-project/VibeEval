@@ -38,6 +38,11 @@ class SandboxOperationFailed(RuntimeError):
 
 
 class SandboxRuntime:
+    supports_file_edits = True
+
+    def resume_workspace(self, view):
+        return self._call("resume_workspace", view)
+
     def __init__(
         self,
         *,
@@ -110,6 +115,18 @@ class SandboxRuntime:
 
     def delete_sandbox(self, view):
         return self._call("delete_sandbox", view)
+
+    def prepare_execution(self, view, config):
+        return self._call("prepare_execution", view, config)
+
+    def start_execution(self, view, config, handle):
+        return self._call("start_execution", view, config, handle)
+
+    def inspect_execution(self, view, config, handle=None):
+        return self._call("inspect_execution", view, config, handle)
+
+    def cancel_execution(self, view, config, handle=None):
+        return self._call("cancel_execution", view, config, handle)
 
 
 def create_submission_sandbox():
