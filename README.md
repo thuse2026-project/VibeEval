@@ -46,6 +46,7 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 - [Agent 接入第四批 B](docs/agent-integration-stage4b.md)：版本化单文件写入、精确替换补丁、审批 diff、暂停归属和实际文件版本回传。
 - [Agent 接入第五批 A](docs/agent-integration-stage5a.md)：持久 SSE 事件订阅、对话游标、断线续接、心跳和连接预算。
 - [基本 Agent 封装交接](docs/agent-integration-handoff.md)：服务端装配、上游调用顺序、已交付能力、验证结果和后续边界。
+- [多阶段考试适配方案](docs/multi-stage-exam-plan.md)：四阶段流程、阶段工作区与 Agent 权限、文字和代码答卷，以及分批实施与验收。
 
 原始需求文档保留讨论背景；README 维护开发入口、目录与协作约定。接口草案允许经组内讨论调整，不要求照搬。
 
