@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from exam_flow_support import MemoryFlowStore, Questions, Resources, definition
 
-from app.exam_flow import ExamFlowService, FlowError
+from app.exam_flow import ExamFlowService, FlowError, PublicQuestion
 from app.exam_flow.types import FlowState, digest
 
 
@@ -328,3 +328,164 @@ class FlowTests(unittest.TestCase):
         value["stages"][0]["phases"][0]["duration_seconds"] = 0
         with self.assertRaises(ValueError):
             self.service.attach("other", value)
+
+    def test_delayed_transition_keeps_its_original_start_and_deadline(self):
+        self.answering()
+        self.submit()
+        scheduled = self.view()["transition_deadline_at"]
+        self.now = scheduled + 7
+        self.service.run_due()
+        phase = self.view()["current_phase"]
+        self.assertEqual(phase["started_at"], scheduled)
+        self.assertEqual(phase["deadline_at"], scheduled + 20)
+
+    def test_late_worker_submits_an_already_expired_transition_stage(self):
+        self.answering()
+        self.submit()
+        waiting = self.view()
+        second = waiting["current_stage"]["id"]
+        scheduled = waiting["transition_deadline_at"]
+        self.now = scheduled + 25
+        self.service.run_due()
+        state = self.store.load("owned")
+        self.assertEqual(state.stage_index, 2)
+        self.assertEqual(state.stages[1].phases[0].started_at, scheduled)
+        self.assertEqual(state.stages[1].phases[0].deadline_at, scheduled + 20)
+        self.assertEqual(
+            self.service.receipt("owned", second)["close_reason"], "expired"
+        )
+        self.assertEqual(self.view()["transition_deadline_at"], self.now + 60)
+
+    def test_failed_automatic_activation_begins_timing_after_recovery(self):
+        self.answering()
+        self.submit()
+        self.now = self.view()["transition_deadline_at"] + 3
+        self.resources.fail["open"] = 1
+        self.service.run_due()
+        self.assertIsNone(self.view()["current_phase"]["started_at"])
+        self.now += 5
+        self.service.run_due()
+        self.assertEqual(self.view()["current_phase"]["started_at"], self.now)
+
+    def test_questions_and_receipt_do_not_follow_provider_changes(self):
+        active = self.answering()
+        phase = active["current_phase"]["id"]
+        original = self.service.get_questions("owned", phase)
+        self.questions.questions = lambda *_: [
+            PublicQuestion(id="replacement", title="Changed", body="changed")
+        ]
+        self.service = ExamFlowService(
+            self.store, self.questions, self.resources, clock=lambda: self.now
+        )
+        self.assertEqual(self.service.get_questions("owned", phase), original)
+        self.service.save_answer("owned", phase, "item", 0, "original answer")
+        receipt = self.submit()
+        content = self.service.export_submission("owned", receipt["stage_id"])[
+            "content"
+        ]
+        self.assertEqual(content["phases"][1]["questions"], original)
+
+    def test_question_failure_keeps_phase_pending_and_clock_stopped(self):
+        self.ready()
+        self.start()
+        provider = self.questions.questions
+
+        def unavailable(*_):
+            raise RuntimeError("private provider key")
+
+        self.questions.questions = unavailable
+        pending = self.finish()
+        self.assertEqual(pending["error_code"], "QUESTION_PROVIDER_UNAVAILABLE")
+        self.assertEqual(pending["current_phase"]["status"], "pending")
+        self.assertIsNone(pending["current_phase"]["deadline_at"])
+        self.assertEqual(pending["capabilities"], [])
+        self.assertNotIn("private", str(pending))
+        self.questions.questions = provider
+        self.now += 5
+        self.service.run_due()
+        self.assertEqual(self.view()["current_phase"]["started_at"], self.now)
+
+    def test_legacy_active_record_pins_once_without_resetting_clock(self):
+        active = self.answering()
+        phase = active["current_phase"]["id"]
+        self.store.values["owned"].phase.questions = None
+        self.questions.calls.clear()
+        first = self.service.get_questions("owned", phase)
+        self.assertEqual(self.service.get_questions("owned", phase), first)
+        self.assertEqual(len(self.questions.calls), 1)
+        self.assertEqual(
+            self.view()["current_phase"]["deadline_at"],
+            active["current_phase"]["deadline_at"],
+        )
+
+    def test_validator_cannot_mutate_question_snapshot_or_candidate_answer(self):
+        active = self.answering()
+        phase = active["current_phase"]["id"]
+
+        def mutating_validator(context, question, value):
+            question.answer_schema["injected"] = True
+            value["answer"] = "mutated"
+
+        self.questions.validate_answer = mutating_validator
+        saved = self.service.save_answer(
+            "owned", phase, "item", 0, {"answer": "original"}
+        )
+        self.assertEqual(saved["value"], {"answer": "original"})
+        self.assertNotIn(
+            "injected", self.service.get_questions("owned", phase)[0]["answer_schema"]
+        )
+
+    def test_invalid_json_characters_fail_before_persistence(self):
+        active = self.answering()
+        phase, stage = active["current_phase"]["id"], active["current_stage"]["id"]
+        for value in (
+            float("nan"),
+            {"answer": "bad\x00"},
+            {"answer": "bad\ud800"},
+            {"bad\x00": "value"},
+        ):
+            with self.subTest(value=repr(value)):
+                self.assertCode(
+                    "ANSWER_INVALID",
+                    lambda: self.service.save_answer("owned", phase, "item", 0, value),
+                )
+        self.assertEqual(self.service.answers("owned", phase), {})
+        self.assertCode(
+            "NOTES_INVALID",
+            lambda: self.service.save_notes("owned", phase, 0, "bad\x00"),
+        )
+        self.assertCode(
+            "SUMMARY_INVALID",
+            lambda: self.service.save_summary("owned", stage, 0, "bad\ud800"),
+        )
+        saved = self.service.save_answer(
+            "owned", phase, "item", 0, {"answer": "literal \\u0000"}
+        )
+        self.assertEqual(saved["revision"], 1)
+
+    def test_summary_can_be_restored_only_in_current_final_phase(self):
+        active = self.answering()
+        stage = active["current_stage"]["id"]
+        self.assertIsNone(self.service.summary("owned", stage)["value"])
+        saved = self.service.save_summary("owned", stage, 0, "verification details")
+        restarted = ExamFlowService(
+            self.store, self.questions, self.resources, clock=lambda: self.now
+        )
+        self.assertEqual(restarted.summary("owned", stage), saved)
+        future = active["stages"][1]["id"]
+        self.assertCode(
+            "STAGE_NOT_SUBMITTABLE", lambda: restarted.summary("owned", future)
+        )
+        self.submit()
+        self.assertCode("PHASE_CLOSED", lambda: restarted.summary("owned", stage))
+
+    def test_adapter_flow_errors_cannot_expose_private_error_text(self):
+        self.ready()
+
+        def failed(*_):
+            raise FlowError("private adapter api_key", 503)
+
+        self.resources.activate_phase = failed
+        pending = self.start()
+        self.assertEqual(pending["error_code"], "RESOURCE_OPEN_FAILED")
+        self.assertNotIn("private", str(pending))

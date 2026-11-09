@@ -1,6 +1,8 @@
 """Persistent examination flow; adapters own questions, Agent work and sandboxes."""
 
+import json
 import time
+from copy import deepcopy
 from uuid import uuid4
 
 from .store import FlowStore
@@ -110,8 +112,12 @@ class ExamFlowService:
         )
 
     @staticmethod
-    def _schedule(state, kind):
-        state.operation = Operation(id=identifier("operation"), kind=kind)
+    def _schedule(state, kind, *, scheduled_start_at=None):
+        state.operation = Operation(
+            id=identifier("operation"),
+            kind=kind,
+            scheduled_start_at=scheduled_start_at,
+        )
         if kind == "open":
             state.phase.permission_epoch += 1
         state.retry_at = 0
@@ -237,23 +243,90 @@ class ExamFlowService:
             raise FlowError("AUTHORIZATION_REVOKED", 403)
         return self._context(state)
 
-    def _questions(self, state):
-        reference = state.phase.definition.question_ref
-        if reference is None:
-            raise FlowError("QUESTIONS_NOT_AVAILABLE", 403)
+    def _read_questions(self, context, reference):
         try:
             values = [
-                PublicQuestion.model_validate(q)
-                for q in self.questions.questions(self._context(state), reference)
+                PublicQuestion.model_validate(
+                    q.model_dump(mode="json") if isinstance(q, PublicQuestion) else q
+                )
+                for q in self.questions.questions(context, reference)
             ]
             if len(values) > 100 or len({q.id for q in values}) != len(values):
                 raise ValueError("invalid public question list")
+            self._validate_json(
+                [q.model_dump(mode="json") for q in values],
+                "QUESTION_PROVIDER_UNAVAILABLE",
+            )
             return values
         except Exception:
             raise FlowError("QUESTION_PROVIDER_UNAVAILABLE", 503) from None
 
+    def _pin_questions(self, session_id, phase_id, *, operation=None):
+        """Pin before opening; legacy active records pin on their first read."""
+        state = self.store.load(session_id)
+        if operation is not None:
+            if state.operation != operation:
+                return False
+        else:
+            self._active(state, phase_id)
+        if state.phase.id != phase_id:
+            return False
+        if (
+            state.phase.definition.question_ref is None
+            or state.phase.questions is not None
+        ):
+            return True
+        values = self._read_questions(
+            self._context(state), state.phase.definition.question_ref
+        )
+        with self.store.edit(session_id) as current:
+            if operation is not None:
+                if current.operation != operation:
+                    return False
+            else:
+                self._active(current, phase_id)
+            if current.phase.questions is None:
+                current.phase.questions = values
+        return True
+
+    @staticmethod
+    def _questions(state):
+        if state.phase.definition.question_ref is None:
+            raise FlowError("QUESTIONS_NOT_AVAILABLE", 403)
+        if state.phase.questions is None:
+            raise FlowError("QUESTION_PROVIDER_UNAVAILABLE", 503)
+        return state.phase.questions
+
+    @staticmethod
+    def _validate_json(value, code, *, limit=None):
+        try:
+            encoded = json.dumps(
+                value, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+            pending = [value]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, str) and "\x00" in item:
+                    raise ValueError("JSONB cannot represent NUL")
+                if isinstance(item, dict):
+                    pending.extend(item.keys())
+                    pending.extend(item.values())
+                elif isinstance(item, (list, tuple)):
+                    pending.extend(item)
+        except (ValueError, TypeError, RecursionError):
+            raise FlowError(code, 422) from None
+        if limit is not None and len(encoded) > limit:
+            raise FlowError("ANSWER_TOO_LARGE", 422)
+
+    @classmethod
+    def _validate_text(cls, text, limit, code):
+        if not isinstance(text, str) or len(text) > limit:
+            raise FlowError(code, 422)
+        cls._validate_json(text, code)
+
     def get_questions(self, session_id, phase_id):
         self.reconcile(session_id)
+        self._pin_questions(session_id, phase_id)
         state = self.store.load(session_id)
         self._active(state, phase_id)
         return [q.model_dump(mode="json") for q in self._questions(state)]
@@ -261,9 +334,12 @@ class ExamFlowService:
     def save_answer(self, session_id, phase_id, item_id, expected_revision, value):
         self.reconcile(session_id)
         # Validate bounded JSON before calling a question adapter or opening a lock.
-        draft = Draft(value=value)
-        if len(draft.model_dump_json().encode()) > 65536:
-            raise FlowError("ANSWER_TOO_LARGE", 422)
+        try:
+            draft = Draft(value=value)
+        except ValueError:
+            raise FlowError("ANSWER_INVALID", 422) from None
+        self._validate_json(draft.value, "ANSWER_INVALID", limit=65536)
+        self._pin_questions(session_id, phase_id)
         with self.store.edit(session_id) as state:
             self._permit(state, phase_id, "edit_answers")
             question = next(
@@ -272,13 +348,17 @@ class ExamFlowService:
             if question is None:
                 raise FlowError("QUESTION_NOT_FOUND", 404)
             try:
-                self.questions.validate_answer(self._context(state), question, value)
+                self.questions.validate_answer(
+                    self._context(state),
+                    question.model_copy(deep=True),
+                    deepcopy(draft.value),
+                )
             except ValueError:
                 raise FlowError("ANSWER_INVALID", 422) from None
             except Exception:
                 raise FlowError("QUESTION_PROVIDER_UNAVAILABLE", 503) from None
             current = state.phase.answers.setdefault(item_id, Draft())
-            self._save(current, expected_revision, value)
+            self._save(current, expected_revision, draft.value)
             result = current.model_dump(mode="json")
         return result
 
@@ -299,8 +379,7 @@ class ExamFlowService:
 
     def save_notes(self, session_id, phase_id, expected, text):
         self.reconcile(session_id)
-        if not isinstance(text, str) or len(text) > 20000:
-            raise FlowError("NOTES_INVALID", 422)
+        self._validate_text(text, 20000, "NOTES_INVALID")
         with self.store.edit(session_id) as state:
             self._permit(state, phase_id, "edit_notes")
             self._save(state.stage.notes, expected, text)
@@ -314,11 +393,9 @@ class ExamFlowService:
         return state.stage.notes.model_dump(mode="json")
 
     def _set_summary(self, state, text):
-        if (
-            not isinstance(text, str)
-            or len(text) > state.stage.definition.summary_limit
-        ):
-            raise FlowError("SUMMARY_INVALID", 422)
+        self._validate_text(
+            text, state.stage.definition.summary_limit, "SUMMARY_INVALID"
+        )
         self._save(state.stage.summary, state.stage.summary.revision, text)
 
     def save_summary(self, session_id, stage_id, expected, text):
@@ -335,6 +412,17 @@ class ExamFlowService:
             self._set_summary(state, text)
             result = state.stage.summary.model_dump(mode="json")
         return result
+
+    def summary(self, session_id, stage_id):
+        self.reconcile(session_id)
+        state = self.store.load(session_id)
+        self._active(state, state.phase.id)
+        if (
+            state.stage.id != stage_id
+            or state.stage.phase_index != len(state.stage.phases) - 1
+        ):
+            raise FlowError("STAGE_NOT_SUBMITTABLE")
+        return state.stage.summary.model_dump(mode="json")
 
     def receipt(self, session_id, stage_id):
         state = self.store.load(session_id)
@@ -374,7 +462,8 @@ class ExamFlowService:
         }
 
     def _complete(self, state, result):
-        kind = state.operation.kind
+        operation = state.operation
+        kind, previous_error = operation.kind, state.error_code
         stage, phase = state.stage, state.phase
         state.operation, state.error_code, state.retry_at = None, None, 0
         if kind == "prepare":
@@ -388,7 +477,11 @@ class ExamFlowService:
             self._event(state, "stage.ready")
         elif kind == "open":
             state.status, stage.status, phase.status = "running", "active", "active"
-            phase.started_at = self._now()
+            phase.started_at = (
+                operation.scheduled_start_at
+                if operation.scheduled_start_at is not None and previous_error is None
+                else self._now()
+            )
             phase.deadline_at = phase.started_at + phase.definition.duration_seconds
             self._event(state, "phase.started")
         elif kind == "close":
@@ -445,8 +538,9 @@ class ExamFlowService:
                         state.transition_deadline_at is not None
                         and self._now() >= state.transition_deadline_at
                     ):
+                        scheduled = state.transition_deadline_at
                         state.transition_deadline_at = None
-                        self._schedule(state, "open")
+                        self._schedule(state, "open", scheduled_start_at=scheduled)
                     else:
                         return
                 if state.retry_at > self._now():
@@ -461,6 +555,10 @@ class ExamFlowService:
                 if operation.kind == "prepare":
                     self.resources.prepare(context, definition, operation.id)
                 elif operation.kind == "open":
+                    if not self._pin_questions(
+                        session_id, context.phase_id, operation=operation
+                    ):
+                        continue
                     self.resources.activate_phase(
                         context, phase_definition, operation.id
                     )
@@ -474,11 +572,15 @@ class ExamFlowService:
                             raise ValueError("artifact belongs to another workspace")
                     elif result is not None:
                         raise ValueError("text stage must not export a code artifact")
-            except Exception:
+            except Exception as error:
                 with self.store.edit(session_id) as current:
                     if current.operation == operation:
                         current.error_code = (
-                            "RESOURCE_" + operation.kind.upper() + "_FAILED"
+                            error.code
+                            if isinstance(error, FlowError)
+                            and error.code
+                            in ("QUESTION_PROVIDER_UNAVAILABLE", "ATTEMPT_SIZE_LIMIT")
+                            else ("RESOURCE_" + operation.kind.upper() + "_FAILED")
                         )
                         current.failure_count += 1
                         current.retry_at = self._now() + self.retry_seconds
@@ -514,6 +616,7 @@ class ExamFlowService:
             "transition_deadline_at": state.transition_deadline_at,
             "error_code": state.error_code,
             "failure_count": state.failure_count,
+            "retry_at": state.retry_at if state.error_code else None,
             "current_stage": {
                 "id": state.stage.id,
                 "key": state.stage.definition.key,

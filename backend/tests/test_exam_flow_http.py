@@ -155,3 +155,34 @@ class FlowHttpTests(unittest.TestCase):
             "vibeeval_exam_flow", self.client.cookies.get(ENTRY_COOKIE), path="/api/v2"
         )
         self.assertEqual(fresh.get("/api/v2/attempts/current").status_code, 503)
+
+    def test_summary_restore_and_typed_openapi_contract(self):
+        active = self.begin()
+        phase, stage = active["current_phase"]["id"], active["current_stage"]["id"]
+        self.command(f"/api/v2/phases/{phase}/finish", "finish")
+        path = f"/api/v2/stages/{stage}/summary"
+        saved = self.client.put(
+            path,
+            json={"expected_revision": 0, "text": "implementation and verification"},
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(self.client.get(path).json(), saved.json())
+        self.assertEqual(self.client.get(path).headers["cache-control"], "no-store")
+        specification = self.client.get("/openapi.json").json()
+        response = specification["paths"]["/api/v2/attempts/current"]["get"][
+            "responses"
+        ]["200"]
+        self.assertEqual(
+            response["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/AttemptView",
+        )
+        phase_schema = specification["components"]["schemas"]["CurrentPhase"][
+            "properties"
+        ]
+        self.assertNotIn("questions", phase_schema)
+        self.assertNotIn("answers", phase_schema)
+        self.assertIn(
+            "get", specification["paths"]["/api/v2/stages/{stage_id}/summary"]
+        )
+        self.command(f"/api/v2/stages/{stage}/submit", "submit")
+        self.assertEqual(self.client.get(path).status_code, 409)

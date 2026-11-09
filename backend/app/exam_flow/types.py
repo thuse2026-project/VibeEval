@@ -182,6 +182,7 @@ class PhaseState(BaseModel):
     close_reason: Literal["manual", "expired"] | None = None
     permission_epoch: int = 0
     answers: dict[str, Draft] = Field(default_factory=dict)
+    questions: list[PublicQuestion] | None = None
 
 
 class Receipt(Contract):
@@ -212,6 +213,7 @@ class StageState(BaseModel):
 class Operation(Contract):
     id: Identifier
     kind: Literal["prepare", "open", "close", "seal"]
+    scheduled_start_at: int | None = Field(default=None, ge=0)
 
 
 class FlowState(BaseModel):
@@ -273,6 +275,12 @@ class FlowState(BaseModel):
                 if phase.definition != definition or phase.id in phase_ids:
                     raise ValueError("phase definition or identity changed")
                 phase_ids.add(phase.id)
+                if phase.questions is not None and (
+                    phase.definition.question_ref is None
+                    or len(phase.questions) > 100
+                    or len({q.id for q in phase.questions}) != len(phase.questions)
+                ):
+                    raise ValueError("invalid frozen question list")
                 if phase.status != "pending" and (
                     phase.started_at is None
                     or phase.deadline_at is None

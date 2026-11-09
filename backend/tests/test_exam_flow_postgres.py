@@ -3,6 +3,7 @@
 import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,7 +16,8 @@ from sqlalchemy.orm import sessionmaker
 from app.db.config import get_database_url
 from app.db.lifecycle import LifecycleConflict, SessionLifecycle
 from app.db.models import ExamFlowAttempt, ExamSession, Invitation
-from app.exam_flow import ExamFlowService, FlowError, PostgresFlowStore
+from app.exam_flow import ExamFlowService, FlowError, PostgresFlowStore, PublicQuestion
+from app.exam_flow.types import digest
 
 
 @unittest.skipUnless(
@@ -187,3 +189,53 @@ class FlowPostgresTests(unittest.TestCase):
         with self.assertRaises(LifecycleConflict):
             with SessionLifecycle(self.factory).lock_session(self.sid):
                 self.fail("legacy operations must be fenced inside the admission lock")
+
+    def test_frozen_question_snapshot_survives_provider_change_and_restart(self):
+        active = self.answering()
+        phase = active["current_phase"]["id"]
+        original = self.flow.get_questions(self.sid, phase)
+        self.questions.questions = lambda *_: [
+            PublicQuestion(id="new", title="Changed", body="changed")
+        ]
+        restored = self.new_service()
+        self.assertEqual(restored.get_questions(self.sid, phase), original)
+        restored.save_answer(self.sid, phase, "item", 0, "answer")
+        view = restored.current(self.sid)
+        receipt = restored.submit(
+            self.sid, view["current_stage"]["id"], view["state_version"], "submit"
+        )
+        content = restored.export_submission(self.sid, receipt["stage_id"])["content"]
+        self.assertEqual(content["phases"][1]["questions"], original)
+
+    def test_delayed_transition_is_durable_across_workers(self):
+        view = self.answering()
+        self.flow.submit(
+            self.sid, view["current_stage"]["id"], view["state_version"], "submit"
+        )
+        scheduled = self.flow.current(self.sid)["transition_deadline_at"]
+        self.now = scheduled + 5
+        self.new_service().run_due()
+        phase = self.flow.current(self.sid)["current_phase"]
+        self.assertEqual(phase["started_at"], scheduled)
+        self.assertEqual(phase["deadline_at"], scheduled + 20)
+
+    def test_legacy_json_defaults_do_not_rewrite_submitted_material(self):
+        view = self.answering()
+        receipt = self.flow.submit(
+            self.sid, view["current_stage"]["id"], view["state_version"], "submit"
+        )
+        with self.factory.begin() as db:
+            row = db.get(ExamFlowAttempt, self.sid)
+            value = deepcopy(row.state_json)
+            for stage in value["stages"]:
+                for phase in stage["phases"]:
+                    phase.pop("questions", None)
+                if stage["submission"] is not None:
+                    for phase in stage["submission"]["phases"]:
+                        phase.pop("questions", None)
+                    stage["receipt"]["content_sha256"] = digest(stage["submission"])
+            row.state_json = value
+            original = value["stages"][0]["submission"]
+        exported = self.new_service().export_submission(self.sid, receipt["stage_id"])
+        self.assertEqual(exported["content"], original)
+        self.assertEqual(exported["receipt"]["content_sha256"], digest(original))
