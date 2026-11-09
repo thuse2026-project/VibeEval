@@ -451,6 +451,10 @@ class SessionLifecycle:
                 )
                 if row is None:
                     raise LifecycleNotFound("Exam session was not found")
+                if row.exam_mode == "multi_stage":
+                    raise LifecycleConflict(
+                        "Use the multi-stage examination coordinator"
+                    )
                 locked = LockedSession(session, row, self.clock)
                 yield locked
         except OperationalError as error:

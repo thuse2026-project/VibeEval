@@ -12,6 +12,9 @@ from .admin.overview import router as overview_router
 from .admin.router import AuthState, current_session, router
 from .admin.submissions import router as submission_router
 from .agent_integration.router import router as agent_router
+from .exam_flow.router import bridge as exam_flow_bridge
+from .exam_flow.router import router as exam_flow_router
+from .exam_flow.types import FlowError
 from .exams.router import router as entry_router
 from .exams.store import configured_store
 from .llm.router import router as llm_router
@@ -32,6 +35,7 @@ def create_app(
     agent_reading=None,
     agent_runtime=None,
     agent_event_policy=None,
+    exam_flow=None,
 ) -> FastAPI:
     app = FastAPI(title="VibeEval API", version="0.1.0")
     app.state.auth = AuthState(load_accounts() if accounts is None else accounts)
@@ -50,6 +54,7 @@ def create_app(
     app.state.agent_reading = agent_reading
     app.state.agent_runtime = agent_runtime
     app.state.agent_event_policy = agent_event_policy
+    app.state.exam_flow = exam_flow
     if entry_db is None:
         from .admin.submissions import get_submission_reader
         from .submissions.service import SubmissionService
@@ -70,6 +75,16 @@ def create_app(
     app.include_router(entry_router)
     app.include_router(candidate_submission_router)
     app.include_router(agent_router)
+    app.include_router(exam_flow_bridge)
+    app.include_router(exam_flow_router)
+
+    @app.exception_handler(FlowError)
+    async def examination_flow_error(request: Request, error: FlowError):
+        return JSONResponse(
+            {"detail": {"code": error.code}},
+            status_code=error.status,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.exception_handler(SQLAlchemyError)
     async def database_unavailable(request: Request, error: SQLAlchemyError):
@@ -82,7 +97,9 @@ def create_app(
     @app.middleware("http")
     async def private_responses(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith(("/api/v1/admin", "/api/v1/sessions")):
+        if request.url.path.startswith(
+            ("/api/v1/admin", "/api/v1/sessions", "/api/v2")
+        ):
             response.headers["Cache-Control"] = "no-store"
         return response
 

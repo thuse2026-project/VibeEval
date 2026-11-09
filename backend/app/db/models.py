@@ -61,6 +61,9 @@ class Invitation(Base):
 class ExamSession(Base):
     __tablename__ = "exam_sessions"
     __table_args__ = (
+        CheckConstraint(
+            "exam_mode IN ('single', 'multi_stage')", name="known_exam_mode"
+        ),
         CheckConstraint("length(btrim(session_id)) > 0", name="session_id_not_blank"),
         CheckConstraint("browser_hash ~ '^[0-9a-f]{64}$'", name="browser_hash_format"),
         CheckConstraint("length(btrim(status)) > 0", name="status_not_blank"),
@@ -106,6 +109,7 @@ class ExamSession(Base):
     )
 
     session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    exam_mode: Mapped[str] = mapped_column(String(16), server_default=text("'single'"))
     invitation_hash: Mapped[str] = mapped_column(
         ForeignKey("invitations.token_hash"), unique=True
     )
@@ -124,6 +128,29 @@ class ExamSession(Base):
     lifecycle_error_code: Mapped[str | None] = mapped_column(String(64))
     lifecycle_error_at: Mapped[int | None] = mapped_column(BigInteger)
     invitation: Mapped[Invitation] = relationship(back_populates="session")
+
+
+class ExamFlowAttempt(Base):
+    __tablename__ = "exam_flow_attempts"
+    __table_args__ = (
+        CheckConstraint("revision >= 0", name="revision_nonnegative"),
+        CheckConstraint("wake_at IS NULL OR wake_at >= 0", name="wake_nonnegative"),
+        CheckConstraint(
+            "state_json->>'session_id' = session_id AND "
+            "state_json->>'id' = attempt_id AND "
+            "(state_json->>'revision')::bigint = revision",
+            name="state_identity",
+        ),
+        Index("ix_exam_flow_attempts_wake_at", "wake_at"),
+    )
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id", ondelete="CASCADE"), primary_key=True
+    )
+    attempt_id: Mapped[str] = mapped_column(String(128), unique=True)
+    revision: Mapped[int] = mapped_column(BigInteger)
+    wake_at: Mapped[int | None] = mapped_column(BigInteger)
+    state_json: Mapped[dict] = mapped_column(JSONB)
 
 
 class WorkspaceFileRevision(Base):

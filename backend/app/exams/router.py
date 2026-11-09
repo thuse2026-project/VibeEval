@@ -94,6 +94,11 @@ def require_candidate_session(session_id: str, request: Request) -> dict:
     session = recover(request)
     if session is None or session["session_id"] != session_id:
         raise HTTPException(404, "会话不存在或无权访问，请使用原浏览器恢复")
+    flow = getattr(request.app.state, "exam_flow", None)
+    if flow is not None and flow.manages(session_id):
+        raise HTTPException(
+            409, {"code": "EXAM_MODE_MISMATCH", "message": "请使用多阶段考试接口"}
+        )
     return session
 
 

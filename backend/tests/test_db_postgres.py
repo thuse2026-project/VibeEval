@@ -88,6 +88,7 @@ class PostgreSQLTests(unittest.TestCase):
             {
                 "invitations",
                 "exam_sessions",
+                "exam_flow_attempts",
                 "snapshots",
                 "submissions",
                 "workspace_file_revisions",

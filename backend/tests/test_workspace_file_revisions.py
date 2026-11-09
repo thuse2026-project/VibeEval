@@ -271,7 +271,23 @@ class WorkspaceFileRevisionTests(unittest.TestCase):
         command.downgrade(self.migration, "0004")
         try:
             self.assertFalse(inspect(self.engine).has_table("workspace_file_revisions"))
-            self.assertEqual(self.lifecycle.get_session("ses_1"), before)
+            # The current ORM includes columns added after 0004 (exam_mode in
+            # 0011). Read the historical view's explicit columns, then exercise
+            # the current lifecycle again after upgrading to head below.
+            fields = tuple(before.__dataclass_fields__)
+            with self.engine.connect() as connection:
+                historical = (
+                    connection.execute(
+                        select(*(getattr(ExamSession, name) for name in fields)).where(
+                            ExamSession.session_id == "ses_1"
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+            self.assertEqual(
+                dict(historical), {name: getattr(before, name) for name in fields}
+            )
         finally:
             command.upgrade(self.migration, "head")
         self.assertEqual(self.lifecycle.get_session("ses_1"), before)
