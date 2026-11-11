@@ -6,7 +6,11 @@ import ts from 'typescript';
 async function load(relative) {
   const source = readFileSync(new URL(relative, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } });
-  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+  const clockSource=readFileSync(new URL('../src/shared/clock.ts',import.meta.url),'utf8');
+  const clockCode=ts.transpileModule(clockSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+  const clockURL=`data:text/javascript;base64,${Buffer.from(clockCode).toString('base64')}`;
+  const linked=outputText.replace(/(['"])\.\.\/\.\.\/shared\/clock\1/g,JSON.stringify(clockURL));
+  return import(`data:text/javascript;base64,${Buffer.from(linked).toString('base64')}`);
 }
 const { SaveQueue } = await load('../src/candidate/workspace/SaveQueue.ts');
 

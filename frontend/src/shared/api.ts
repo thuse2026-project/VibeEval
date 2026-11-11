@@ -9,7 +9,7 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-export async function api<T>(path: string, body?: unknown, base = '/api/v1/admin'): Promise<T> {
+export async function api<T>(path: string, body?: unknown, base = '/api/v1/admin', timeoutMs = 10000): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${base}/${path}`, {
@@ -17,7 +17,7 @@ export async function api<T>(path: string, body?: unknown, base = '/api/v1/admin
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-VibeEval-Request': '1' },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new ApiError(0, '暂时无法连接服务，请检查网络或确认后端已启动，然后重试。');

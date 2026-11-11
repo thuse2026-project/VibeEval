@@ -61,6 +61,20 @@ export interface SubmitResponse {
   snapshot_id: string
 }
 
+export interface ApiClient {
+  verifyToken(token: string): Promise<VerifyTokenResponse>
+  getStatus(sessionId: string): Promise<SessionStatusResponse>
+  listFiles(sessionId: string): Promise<FileEntry[]>
+  readFile(sessionId: string, path: string): Promise<FileContentResponse>
+  saveFile(
+    sessionId: string,
+    path: string,
+    expectedVersion: number,
+    content: string,
+  ): Promise<SaveFileResponse>
+  submit(sessionId: string, idempotencyKey: string): Promise<SubmitResponse>
+}
+
 export type MultiStageStatus = 'admitted' | 'preparing' | 'ready' | 'running' | 'completed'
 export type StageStatus = 'locked' | 'preparing' | 'ready' | 'active' | 'sealing' | 'submitted'
 export type PhaseKind = 'exploring' | 'answering' | 'implementing' | 'debugging'
@@ -101,18 +115,4 @@ export interface MultiStageAttemptState {
   current_phase: PhaseState
   capabilities: StageCapabilities
   stages: StageState[]
-}
-
-export interface ApiClient {
-  verifyToken(token: string): Promise<VerifyTokenResponse>
-  getStatus(sessionId: string): Promise<SessionStatusResponse>
-  listFiles(sessionId: string): Promise<FileEntry[]>
-  readFile(sessionId: string, path: string): Promise<FileContentResponse>
-  saveFile(
-    sessionId: string,
-    path: string,
-    expectedVersion: number,
-    content: string,
-  ): Promise<SaveFileResponse>
-  submit(sessionId: string, idempotencyKey: string): Promise<SubmitResponse>
 }

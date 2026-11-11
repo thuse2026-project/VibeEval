@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from .admin.accounts import load_accounts
+from .admin.evaluation import router as evaluation_router
 from .admin.overview import router as overview_router
 from .admin.router import AuthState, current_session, router
 from .admin.submissions import router as submission_router
@@ -47,6 +48,7 @@ def create_app(
     app.include_router(router)
     app.include_router(overview_router)
     app.include_router(submission_router)
+    app.include_router(evaluation_router)
     app.include_router(entry_router)
     app.include_router(candidate_submission_router)
 

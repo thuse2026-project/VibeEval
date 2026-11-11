@@ -12,12 +12,13 @@ type Props = {
   openFiles: Array<{ path: string; readonly: boolean; dirty: boolean }>
   activePath: string | null
   content: string
+  editorRevision: number
   activeReadonly: boolean
   saveState: SaveState
   sessionId: string | null
   busy: boolean
   onSelectFile: (path: string) => void
-  onEdit: (content: string) => void
+  onEdit: (path: string, content: string) => void
   onSubmit: () => Promise<void>
 }
 
@@ -36,6 +37,7 @@ export function WorkspaceScreen({
   openFiles,
   activePath,
   content,
+  editorRevision,
   activeReadonly,
   saveState,
   sessionId,
@@ -73,7 +75,7 @@ export function WorkspaceScreen({
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
-        <button className="submit" disabled={busy} onClick={() => { setSubmitError(null); setConfirmSubmit(true) }}>
+        <button className="submit" disabled={busy || remaining<=0} onClick={() => { setSubmitError(null); setConfirmSubmit(true) }}>
           提交答卷
         </button>
       </div>
@@ -104,6 +106,8 @@ export function WorkspaceScreen({
 
         <CodeEditor
           tabs={openFiles}
+          busy={busy}
+          loadRevision={editorRevision}
           path={activePath ?? '选择文件'}
           value={content}
           readOnly={activeReadonly}
@@ -113,7 +117,7 @@ export function WorkspaceScreen({
       </div>
 
       <div hidden={!termOpen}>
-        <TerminalPane sessionId={sessionId} />
+        <TerminalPane sessionId={sessionId} inputEnabled={!busy} />
       </div>
       {!termOpen && (
         <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
@@ -145,7 +149,7 @@ export function WorkspaceScreen({
             {submitError && <div className="banner banner-error">{submitError}</div>}
             <div className="modal-actions">
               <button className="btn" autoFocus disabled={submitting} onClick={() => setConfirmSubmit(false)}>返回工作台</button>
-              <button className="btn primary" disabled={submitting} onClick={() => void submit()}>
+              <button className="btn primary" disabled={submitting || remaining<=0} onClick={() => void submit()}>
                 {submitting ? '提交中…' : '确认提交'}
               </button>
             </div>

@@ -113,6 +113,6 @@ function App() {
   </div>;
 }
 
-const candidateEntry = window.location.pathname === '/entry' || window.location.pathname === '/entry/';
+const candidateEntry = window.location.pathname === '/' || window.location.pathname === '/entry' || window.location.pathname === '/entry/';
 const workspace = window.location.pathname === '/workspace' || window.location.pathname === '/workspace/';
 createRoot(document.getElementById('root')!).render(workspace ? <Suspense fallback={<p role="status">正在加载工作台…</p>}><CandidateWorkspace /></Suspense> : candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);

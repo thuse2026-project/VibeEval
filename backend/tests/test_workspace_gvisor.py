@@ -41,7 +41,12 @@ class WorkspaceRealTests(unittest.TestCase):
 
         from app.sandbox.safe_save import WRITE_SCRIPT, remove_writer
 
-        client = docker.DockerClient(base_url="unix:///var/run/docker.sock", timeout=20)
+        client = docker.DockerClient(
+            base_url=os.environ.get(
+                "SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"
+            ),
+            timeout=20,
+        )
         adapter = BoundSandboxAdapter(client, "save-fault-test")
         view = SimpleNamespace(
             session_id="save-" + uuid.uuid4().hex,
@@ -141,7 +146,12 @@ class WorkspaceRealTests(unittest.TestCase):
         import docker
 
         image = os.environ["SANDBOX_IMAGE_REF"]
-        runtime = SandboxRuntime(backend_ref="workspace-test")
+        runtime = SandboxRuntime(
+            backend_ref="workspace-test",
+            docker_url=os.environ.get(
+                "SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"
+            ),
+        )
         entry = PostgresEntryStore(factory=self.factory)
         lifecycle = SessionLifecycle(self.factory)
         token, _ = entry.invite(

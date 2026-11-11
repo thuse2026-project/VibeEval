@@ -1,0 +1,31 @@
+import { test, expect } from '@playwright/test';
+
+test('examiner evaluates the real final submission and sees persisted 60/60 with process ungraded', async ({ page }) => {
+  test.skip(!process.env.VIBEEVAL_E2E_ADMIN_PASSWORD, 'Provide the private test examiner password');
+  await page.goto('/admin');
+  await page.getByLabel('账号', {exact:true}).fill(process.env.VIBEEVAL_E2E_ADMIN_USER ?? 'examiner');
+  await page.getByLabel('密码', {exact:true}).fill(process.env.VIBEEVAL_E2E_ADMIN_PASSWORD);
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await page.getByLabel('考核场次').selectOption('final-release1-manual');
+  await page.getByRole('link',{name:'查看答卷'}).click();
+  const panel=page.locator('.evaluation-panel');
+  await expect(panel.getByText('改了哪里',{exact:true})).toBeVisible();
+  const booking=panel.locator('.change-item').filter({hasText:'src/booking.py'});
+  await expect(booking).toBeVisible();
+  await booking.locator('summary').click();
+  await expect(booking.locator('pre')).toContainText('not booking.cancelled');
+  await expect(panel.locator('.change-item').filter({hasText:'README.md'})).toHaveCount(0);
+  await expect(panel.getByText('未评 / 40',{exact:true})).toBeVisible();
+  await expect(panel.getByText('暂无总分',{exact:true})).toBeVisible();
+  await panel.getByRole('button',{name:/评测快照|评测已提交答卷/}).click();
+  await expect(panel.getByText('60 / 60',{exact:true})).toBeVisible({timeout:110000});
+  await expect(panel.getByText('8 / 8 项通过',{exact:true})).toBeVisible();
+  await expect(panel.locator('.test-results li')).toHaveCount(8);
+  await page.reload();
+  await expect(page.locator('.evaluation-panel').getByText('60 / 60',{exact:true})).toBeVisible();
+  await page.screenshot({path:'../runtime/examiner-evaluation-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await expect(page.locator('.evaluation-panel').getByText('暂无总分',{exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({path:'../runtime/examiner-evaluation-mobile.png',fullPage:true});
+});

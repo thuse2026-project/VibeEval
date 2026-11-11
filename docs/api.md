@@ -402,3 +402,11 @@ PUT `/file` 已提供，沿用 `path/expected_version/content` 请求和 `path/n
 交卷前前端应 flush 并等待保存成功。冻结会先停止遗留写入容器，再导出稳定文件；固定 staging 文件不属于答卷。API 与维护进程需同时升级适配器，不能混用新保存模块和旧冻结模块。保存不会延长考试截止时间。详细恢复语义见 [工作区交接](workspace-terminal-handoff.md)。
 
 本期固定六文件，只有 `src/booking.py`、预建的 `tests/test_candidate.py` 可编辑；草案中 `src/main.py` 的可写示例已被陈智恒确认的会议室题目权限取代。只读文件不能由终端删除或替换。
+
+## 考官快照评测（Release 1 补充）
+
+- `GET /api/v1/admin/submissions/{submission_id}/evaluation`：考官 Cookie 鉴权，返回相对实际发布版本的文件变化/差异、`report` 与最近尝试 `last_attempt`、结果满分 60、过程满分 40。GET 不启动环境。只支持已提交快照和明确配置的题目版本；演示数据不评分。
+- `POST` 同一路径：额外要求 `X-VibeEval-Request: 1`。考官主动触发一次独立 gVisor 评测，成功返回持久化报告；单 worker 同时只执行一轮，忙时 409。调用方需允许约 120 秒等待，超时后可 GET 查看是否已落盘，不能用网络超时推断零分。
+- `status=completed` 表示评测执行完成，`passed/total` 为可信公开行为测试通过数，`score=passed/8*60`，`tests` 为 8 项逐项状态和分值，`output` 为环境外可信测试控制器生成的记录。候选代码失败可为 0 分；`infrastructure_failed` 的 `score=null`，不可作为零分。
+- 报告包含 `run_id/submission_id/snapshot_id/task_version/image_ref/rule_version/baseline_sha256/evaluated_at`。每轮原子追加文件，不改冻结快照；失败重试后仍展示此前同版本的成功结果，同时提示最近失败。过程分与总分为 null。新写考生测试不增加分母，公开测试通过不等同完整能力结论。
+- 仅当前版本 `python-debug-01:f898a77` 有评分规则，未知题目版本返回 409；答卷缺失 404，环境或存储不可用 503。完整报告文件与快照同卷备份；本轮不新增数据库迁移。

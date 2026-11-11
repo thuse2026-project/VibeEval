@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../shared/api';
 import { returnToOverview } from './navigation';
 import { formatTime, type DataSource, type SubmissionData } from './types';
+import Evaluation from './Evaluation';
 
 type Props = {
   submissionId: string; source: DataSource; search: string; onNavigate: (url: string) => void;
@@ -38,7 +39,7 @@ export default function Detail({ submissionId, source, search, onNavigate, onExp
         event.preventDefault(); onNavigate(back);
       }
     }}>返回考务总览</a><button className="secondary" disabled={loggingOut} onClick={onLogout}>{loggingOut ? '正在退出…' : '退出登录'}</button></div>
-    <div className="section-label">只读调阅</div><h1 id="detail-title">答卷详情</h1>
+    <div className="section-label">答卷调阅与评测</div><h1 id="detail-title">答卷详情</h1>
     {source === 'demo' && <p className="demo-banner" role="status"><strong>演示数据</strong> · 此答卷和测试输出为虚构记录，仅供预览。</p>}
     {logoutError && <p className="error" role="alert">{logoutError}</p>}
     {loading ? <p className="list-message" role="status">正在读取提交快照…</p>
@@ -51,6 +52,7 @@ export default function Detail({ submissionId, source, search, onNavigate, onExp
           <p><span>提交编号</span><code>{data.submission_id}</code></p>
           <p><span>快照编号</span><code>{data.snapshot_id}</code></p>
         </div>
+        {source==='live'&&<Evaluation key={data.submission_id} submissionId={data.submission_id} onExpired={onExpired}/>}
         <p className="live-note">这里显示提交时固定的文件内容，只读展示，不读取或修改考生当前工作区。</p>
         <section className="snapshot-panel" aria-labelledby="snapshot-title">
           <div className="records-title"><h2 id="snapshot-title">提交代码快照</h2><span>{data.files.length} 个文本文件</span></div>
@@ -63,11 +65,11 @@ export default function Detail({ submissionId, source, search, onNavigate, onExp
                 : <pre tabIndex={0} aria-label="只读文件内容"><code>{selected?.content}</code></pre>}
             </div></div>}
         </section>
-        <section className="test-output-panel" aria-labelledby="output-title"><div className="records-title"><h2 id="output-title">公开测试输出</h2></div>
-          {data.public_test_output === null ? <p className="list-message">尚未提供公开测试结果。</p>
+        <section className="test-output-panel" aria-labelledby="output-title"><div className="records-title"><h2 id="output-title">原答卷附带输出</h2></div>
+          {data.public_test_output === null ? <p className="list-message">交卷时未附带终端输出；平台评测结果见上方。</p>
             : data.public_test_output === '' ? <p className="list-message">已记录测试结果，输出为空。</p>
               : <pre tabIndex={0} aria-label="公开测试原始输出"><code>{data.public_test_output}</code></pre>}
-          <p className="output-note">保留原始输出，不根据文字自动推断分数或通过率。</p>
+          <p className="output-note">此处为随原答卷存档的输出；上方独立平台评测结果另行保存，不修改原始快照。</p>
         </section>
       </>}
   </section>;

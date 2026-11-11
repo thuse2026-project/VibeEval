@@ -3,10 +3,12 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-export function TerminalPane({ sessionId }: { sessionId: string | null }) {
+export function TerminalPane({ sessionId, inputEnabled }: { sessionId: string | null; inputEnabled: boolean }) {
   const container = useRef<HTMLDivElement>(null)
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState('终端未连接')
+  const allowInput=useRef(inputEnabled)
+  allowInput.current=inputEnabled
 
   useEffect(() => {
     if (!container.current) return
@@ -27,7 +29,7 @@ export function TerminalPane({ sessionId }: { sessionId: string | null }) {
       }))
     }
     const input = term.onData(data => {
-      if (socket?.readyState !== WebSocket.OPEN) return
+      if (!allowInput.current||socket?.readyState !== WebSocket.OPEN) return
       let chunk = ''
       let bytes = 0
       for (const char of data) {
@@ -74,7 +76,7 @@ export function TerminalPane({ sessionId }: { sessionId: string | null }) {
     }
   }, [sessionId, attempt])
 
-  return <div className="terminal">
+  return <div className="terminal-pane">
     <div className="terminal-head">
       <span role="status">{sessionId ? status : '终端已禁用：当前不能写入'}</span>
       <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>

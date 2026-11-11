@@ -1,4 +1,5 @@
 import type { FileContentResponse, FileEntry, SaveFileResponse, SubmitResponse } from '../../shared/types';
+import {observeServerTime} from '../../shared/clock';
 
 export type CandidateSession = {
   session_id: string;
@@ -17,6 +18,7 @@ export class WorkspaceError extends Error {
 
 export async function workspaceRequest<T>(path: string, method = 'GET', body?: unknown, key?: string): Promise<T> {
   let response: Response;
+  const started=performance.now();
   try {
     response = await fetch(`/api/v1/sessions/${path}`, {
       method, credentials: 'same-origin', cache: 'no-store',
@@ -27,6 +29,7 @@ export async function workspaceRequest<T>(path: string, method = 'GET', body?: u
   } catch {
     throw new WorkspaceError(0, '连接中断或请求超时。操作结果未确认，请查询状态或重新读取核对。');
   }
+  observeServerTime(response,started);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     const detail = payload.detail;

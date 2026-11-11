@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { WorkspaceScreen } from './WorkspaceScreen';
 import { GradingScreen } from './GradingScreen';
 import { PreparationScreen } from './PreparationScreen';
-import { workspaceApi, workspaceRequest, type CandidateSession } from './api';
+import { workspaceApi, workspaceRequest, WorkspaceError, type CandidateSession } from './api';
+import {serverNow} from '../../shared/clock';
 import { SaveQueue } from './SaveQueue';
 import type { FileContentResponse, FileEntry, SubmitResponse } from '../../shared/types';
 import './workspace.css';
@@ -15,7 +16,9 @@ export default function CandidateWorkspace() {
   const [busy, setBusy] = useState(false);
   const [rules, setRules] = useState(false);
   const [receipt, setReceipt] = useState<SubmitResponse | null>(null);
-  const [clock, setClock] = useState(Date.now());
+  const [clock, setClock] = useState(serverNow());
+  const [editorRevision,setEditorRevision]=useState(0);
+  const activeRef=useRef<string|null>(null);
   const [recovery, setRecovery] = useState<FileContentResponse | null>(null);
   const [reload, setReload] = useState(0);
   const [, render] = useState(0);
@@ -41,7 +44,7 @@ export default function CandidateWorkspace() {
       return current;
     } catch (failure) {
       if (request !== statusRequest.current) return null;
-      setSession(null);
+      if(failure instanceof WorkspaceError&&[401,404,410].includes(failure.status))setSession(null);
       setError((failure as Error).message);
       return null;
     }
@@ -65,7 +68,7 @@ export default function CandidateWorkspace() {
   }, [sid, refresh]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    const timer = window.setInterval(() => setClock(serverNow()), 1000);
     const pending = timers.current;
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (Object.values(queue.drafts).some(draft => draft.dirty) || submitting.current) event.preventDefault();
@@ -79,12 +82,17 @@ export default function CandidateWorkspace() {
   }, [queue]);
 
   const select = useCallback(async (path: string) => {
+    activeRef.current=path;
     setActive(path);
     setRecovery(null);
-    if (queue.drafts[path]) return;
+    const cached=queue.drafts[path];
+    if(cached?.dirty||cached?.error)return;
     try {
       const file = await workspaceApi.read(sidRef.current, path);
+      const latest=queue.drafts[path];
+      if(latest?.dirty||latest?.error||(latest&&latest.version>file.version))return;
       queue.load(path, file.content, file.version, files.find(entry => entry.path === path)?.readonly ?? true);
+      if(activeRef.current===path)setEditorRevision(value=>value+1);
     } catch (failure) { setError((failure as Error).message); }
   }, [queue, files]);
 
@@ -98,6 +106,7 @@ export default function CandidateWorkspace() {
       const file = await workspaceApi.read(sid, first.path);
       if (!alive) return;
       queue.load(file.path, file.content, file.version, first.readonly);
+      activeRef.current=file.path;
       setActive(file.path);
       setFiles(result.files);
     }).catch(failure => { if (alive) setError((failure as Error).message); });
@@ -114,12 +123,11 @@ export default function CandidateWorkspace() {
     finally { await refresh(); setBusy(false); }
   }
 
-  function edit(content: string) {
-    if (!active || !writable) return;
-    queue.edit(active, content);
-    const old = timers.current.get(active);
+  function edit(path:string,content: string) {
+    if (!writable||submitting.current) return;
+    queue.edit(path, content);
+    const old = timers.current.get(path);
     if (old) window.clearTimeout(old);
-    const path = active;
     timers.current.set(path, window.setTimeout(() => {
       timers.current.delete(path);
       if (!submitting.current) void queue.save(path).catch(() => undefined);
@@ -149,32 +157,61 @@ export default function CandidateWorkspace() {
     catch (failure) { setError((failure as Error).message); }
   }
 
-  if (receipt) return <div className="candidate-workspace"><GradingScreen submissionId={receipt.submission_id} snapshotId={receipt.snapshot_id} /></div>;
-  if (!session || session.status !== 'in_progress') return <PreparationScreen session={session} busy={busy} rules={rules} error={error}
+  async function resolve(useLocal:boolean) {
+    if(!recovery||!writable||busy)return;
+    const draft=queue.drafts[recovery.path];
+    if(!draft||draft.readonly)return;
+    if(!window.confirm(useLocal?'按刚读取的服务器版本保存本地修改？如果服务器再变化会拒绝覆盖。':'放弃此文件本地修改，使用服务器内容？'))return;
+    setBusy(true);
+    try {
+      await queue.settle();
+      if(useLocal){draft.version=recovery.version;draft.error=undefined;draft.dirty=true;await queue.save(recovery.path);}
+      else {
+        const fresh=await workspaceApi.read(sidRef.current,recovery.path);
+        if(fresh.version!==recovery.version||fresh.content!==recovery.content){setRecovery(fresh);throw new Error('服务器内容已再次变化，请核对后重新选择。');}
+        queue.load(fresh.path,fresh.content,fresh.version,draft.readonly);setEditorRevision(value=>value+1);
+      }
+      setRecovery(null);setError('');
+    }catch(failure){setError((failure as Error).message);}
+    finally{setBusy(false);}
+  }
+
+  useEffect(()=>{
+    if(!sid||session?.status!=='submitted'||receipt)return;
+    let cancelled=false;
+    void workspaceApi.submit(sid,submitKey.current).then(value=>{if(!cancelled)setReceipt(value);})
+      .catch(failure=>{if(!cancelled)setError(failure.message);});
+    return()=>{cancelled=true;};
+  },[sid,session?.status,receipt]);
+
+  const unsaved=Object.entries(queue.drafts).filter(([,draft])=>draft.dirty);
+  const unsavedView=unsaved.length>0&&<section className="workspace-alert" aria-label="未保存草稿"><h2>以下本地草稿尚未确认保存，不属于已提交答卷</h2>
+    {unsaved.map(([path,draft])=><label key={path}>{path}<textarea readOnly aria-label={`未保存草稿 ${path}`} value={draft.content}/></label>)}</section>;
+
+  if (receipt) return <div className="candidate-workspace">{unsavedView}<GradingScreen submissionId={receipt.submission_id} snapshotId={receipt.snapshot_id} /></div>;
+  if (!session || session.status !== 'in_progress') return <div className="candidate-workspace">{unsavedView}<PreparationScreen session={session} busy={busy} rules={rules} error={error}
     onRules={setRules} onTransition={action => void transition(action)} onRefresh={() => void refresh()}
-    onReceipt={() => void submit().catch(failure => setError(failure.message))} />;
+    onReceipt={() => void submit().catch(failure => setError(failure.message))} /></div>;
 
   const current = active ? queue.drafts[active] : undefined;
   const drafts = Object.values(queue.drafts);
-  return <div className="candidate-workspace">
-    {error && <div role="alert" className="workspace-alert">{error}<button onClick={() => { setError(''); setReload(value => value + 1); }}>重试读取</button></div>}
+  return <div className="candidate-workspace workspace-active">
+    {error && <div role="alert" className="workspace-alert">{error}<button onClick={() => { setError(''); if(active)void select(active);else setReload(value => value + 1); }}>重试读取</button></div>}
     {current?.error && <div role="alert" className="workspace-alert">{current.error} 本地修改已保留。
-      <button onClick={() => void compare()}>重新读取并比较</button>
+      <button disabled={!writable} onClick={() => void compare()}>重新读取并比较</button>
     </div>}
     {recovery && current && recovery.path === active && <div className="workspace-recovery">
       <h2>服务器版本 {recovery.version}（本地内容仍保留在编辑器）</h2><pre>{recovery.content}</pre>
-      <button onClick={() => { queue.load(recovery.path, recovery.content, recovery.version, current.readonly); setRecovery(null); }}>使用服务器内容（放弃本地修改）</button>
-      <button onClick={() => {
-        current.version = recovery.version; current.error = undefined; current.dirty = true;
-        setRecovery(null); void queue.save(recovery.path).catch(() => undefined);
-      }}>确认用本地内容覆盖此版本</button>
+      <button disabled={!writable} onClick={()=>void resolve(false)}>使用服务器内容（放弃本地修改）</button>
+      <button disabled={!writable} onClick={()=>void resolve(true)}>确认用本地内容覆盖此版本</button>
       <button onClick={() => setRecovery(null)}>取消，继续保留本地内容</button>
     </div>}
     <WorkspaceScreen title={session.exam_info.title} remaining={remaining} files={files}
+      editorRevision={editorRevision}
       openFiles={Object.entries(queue.drafts).map(([path, draft]) => ({ path, readonly: draft.readonly, dirty: draft.dirty }))}
       activePath={active} content={current?.content ?? ''} activeReadonly={!writable || !current || current.readonly}
       saveState={queue.saving ? 'saving' : drafts.some(draft => draft.error) ? 'error' : drafts.some(draft => draft.dirty) ? 'idle' : 'saved'}
-      sessionId={writable ? sid ?? null : null} onSelectFile={select} onEdit={edit} onSubmit={submit} busy={busy}
+      sessionId={session.status==='in_progress'&&remaining>0&&files.length>0 ? sid ?? null : null} onSelectFile={select} onEdit={edit} onSubmit={submit} busy={busy}
     />
   </div>;
 }

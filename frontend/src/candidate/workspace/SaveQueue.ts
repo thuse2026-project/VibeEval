@@ -60,4 +60,6 @@ export class SaveQueue {
       throw new Error('仍有文件未保存，请处理后再提交。');
     }
   }
+
+  async settle() { await this.tail; }
 }
