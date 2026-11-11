@@ -61,6 +61,48 @@ export interface SubmitResponse {
   snapshot_id: string
 }
 
+export type MultiStageStatus = 'admitted' | 'preparing' | 'ready' | 'running' | 'completed'
+export type StageStatus = 'locked' | 'preparing' | 'ready' | 'active' | 'sealing' | 'submitted'
+export type PhaseKind = 'exploring' | 'answering' | 'implementing' | 'debugging'
+
+export interface StageState {
+  ordinal: number
+  kind: PhaseKind
+  title: string
+  duration_seconds: number
+  weight: number
+  status: StageStatus
+}
+
+export interface PhaseState {
+  kind: PhaseKind
+  status: 'pending' | 'active' | 'closed'
+  started_at: number | null
+  deadline_at: number | null
+  remaining_seconds: number | null
+}
+
+export interface StageCapabilities {
+  read_repository: boolean
+  write_repository: boolean
+  use_terminal: boolean
+  use_agent: boolean
+  edit_answers: boolean
+  read_notes: boolean
+  edit_notes: boolean
+}
+
+export interface MultiStageAttemptState {
+  attempt_id: string
+  status: MultiStageStatus
+  server_now: string
+  state_version: number
+  current_stage: Pick<StageState, 'ordinal' | 'status' | 'kind' | 'title'>
+  current_phase: PhaseState
+  capabilities: StageCapabilities
+  stages: StageState[]
+}
+
 export interface ApiClient {
   verifyToken(token: string): Promise<VerifyTokenResponse>
   getStatus(sessionId: string): Promise<SessionStatusResponse>
