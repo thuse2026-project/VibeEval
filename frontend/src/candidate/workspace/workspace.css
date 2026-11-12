@@ -138,6 +138,31 @@
 .candidate-workspace .receipt-check { display: flex; gap: 12px; margin-top: 22px; font-size: 13px; }
 .candidate-workspace .receipt-check > span { color: #15803d; }
 .candidate-workspace .receipt-check p { color: #64748b; margin: 4px 0 0; font-size: 12px; }
+.candidate-workspace .agent-open { color: #dbeafe; border-color: #475569; background: #1e293b; }
+.candidate-workspace .agent-open:hover:not(:disabled) { color: #fff; background: #334155; }
+.candidate-workspace .agent-scrim { position: fixed; inset: 0; z-index: 110; border: 0; border-radius: 0; background: #0f172a66; padding: 0; }
+.candidate-workspace .agent-panel { position: fixed; z-index: 111; inset: 0 0 0 auto; display: flex; flex-direction: column; width: min(440px, 100vw); background: #f8fafc; border-left: 1px solid #cbd5e1; box-shadow: -12px 0 40px #0f172a26; }
+.candidate-workspace .agent-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; background: #fff; border-bottom: 1px solid #e2e8f0; }
+.candidate-workspace .agent-panel-head h2 { font-size: 16px; }
+.candidate-workspace .agent-panel-head span { display: block; margin-top: 3px; color: #64748b; font-size: 11px; }
+.candidate-workspace .agent-close { width: 32px; height: 32px; padding: 0; font-size: 20px !important; }
+.candidate-workspace .agent-conversation-bar { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+.candidate-workspace .agent-conversation-bar select { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #334155; }
+.candidate-workspace .agent-messages { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+.candidate-workspace .agent-empty { padding: 18px 8px; color: #64748b; font-size: 13px; text-align: center; }
+.candidate-workspace .agent-message { max-width: 94%; margin: 0 0 12px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; overflow-wrap: anywhere; }
+.candidate-workspace .agent-message.user { margin-left: auto; border-color: #bfdbfe; background: #eff6ff; }
+.candidate-workspace .agent-message b, .candidate-workspace .agent-interaction b { color: #334155; font-size: 12px; }
+.candidate-workspace .agent-message p { margin: 5px 0 0; color: #1e293b; font-size: 13px; white-space: pre-wrap; }
+.candidate-workspace .agent-run-state { margin: 8px 0; color: #475569; font-size: 12px; }
+.candidate-workspace .agent-interaction { margin: 12px 0; padding: 12px; border: 1px solid #fbbf24; border-radius: 6px; background: #fffbeb; }
+.candidate-workspace .agent-interaction pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #475569; font: 11px/1.5 "Cascadia Code", Consolas, monospace; }
+.candidate-workspace .agent-actions, .candidate-workspace .agent-answer { display: flex; justify-content: flex-end; gap: 8px; }
+.candidate-workspace .agent-answer { flex-direction: column; }
+.candidate-workspace .agent-answer textarea, .candidate-workspace .agent-composer textarea { width: 100%; min-height: 72px; resize: vertical; padding: 9px; border: 1px solid #cbd5e1; border-radius: 5px; font: inherit; font-size: 13px; }
+.candidate-workspace .agent-error { margin: 0 12px 10px; padding: 9px 11px; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; border-radius: 5px; font-size: 12px; overflow-wrap: anywhere; }
+.candidate-workspace .agent-resume { margin: 0 12px 10px; }
+.candidate-workspace .agent-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; padding: 12px; border-top: 1px solid #e2e8f0; background: #fff; }
 @media (max-width: 900px) {
   .candidate-workspace .preparation-columns { grid-template-columns: 1fr; }
   .candidate-workspace .preparation-aside { grid-template-columns: 1fr 1fr; }

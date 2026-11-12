@@ -4,6 +4,7 @@ import { FileTree } from '../../shared/components/FileTree'
 import { TerminalPane } from '../../shared/components/TerminalGateway'
 import { formatRemaining } from '../../shared/format'
 import type { FileEntry, SaveState } from '../../shared/types'
+import { AgentPanel } from './AgentPanel'
 
 type Props = {
   title: string
@@ -51,6 +52,7 @@ export function WorkspaceScreen({
   const [confirmSubmit, setConfirmSubmit] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [agentOpen, setAgentOpen] = useState(false)
 
   const submit = async () => {
     setSubmitting(true)
@@ -75,6 +77,7 @@ export function WorkspaceScreen({
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
+        <button className="agent-open" disabled={!sessionId} onClick={() => setAgentOpen(true)}>Agent</button>
         <button className="submit" disabled={busy || remaining<=0} onClick={() => { setSubmitError(null); setConfirmSubmit(true) }}>
           提交答卷
         </button>
@@ -129,6 +132,7 @@ export function WorkspaceScreen({
           折叠
         </button>
       )}
+      {agentOpen && <AgentPanel sessionId={sessionId} onClose={() => setAgentOpen(false)} />}
       <footer className="ide-statusbar"><span>{activePath ?? '请选择文件'}{activeReadonly ? ' · 只读' : ' · 可编辑'}</span><span>5 秒自动保存 · Python 3.12 · UTF-8</span></footer>
       {confirmSubmit && (
         <div className="modal-backdrop">
