@@ -239,11 +239,13 @@ export function AgentPanel({ sessionId, onClose, onWorkspaceChange }: Props) {
     }
   }, [sessionId, conversationId, refresh])
 
+  const runId = run?.run_id
+  const runStatus = run?.status
   useEffect(() => {
-    if (!run || advancing || !['queued', 'waiting_operation'].includes(run.status)) return
-    const timer = window.setTimeout(() => void advance(run.run_id), 1200)
+    if (!runId || !runStatus || advancing || !['queued', 'waiting_operation'].includes(runStatus)) return
+    const timer = window.setTimeout(() => void advance(runId), 1200)
     return () => window.clearTimeout(timer)
-  }, [run, advancing, advance])
+  }, [runId, runStatus, advancing, advance])
 
   const send = async () => {
     if (!sessionId || !draft.trim() || busy || run && activeStatuses.has(run.status)) return
