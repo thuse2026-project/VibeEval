@@ -3,7 +3,15 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-export function TerminalPane({ sessionId, inputEnabled }: { sessionId: string | null; inputEnabled: boolean }) {
+export function TerminalPane({
+  sessionId,
+  inputEnabled,
+  onCollapse,
+}: {
+  sessionId: string | null
+  inputEnabled: boolean
+  onCollapse?: () => void
+}) {
   const container = useRef<HTMLDivElement>(null)
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState('终端未连接')
@@ -79,7 +87,10 @@ export function TerminalPane({ sessionId, inputEnabled }: { sessionId: string | 
   return <div className="terminal-pane">
     <div className="terminal-head">
       <span role="status">{sessionId ? status : '终端已禁用：当前不能写入'}</span>
-      <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>
+      <div className="terminal-actions">
+        <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>
+        {onCollapse && <button onClick={onCollapse}>折叠</button>}
+      </div>
     </div>
     <div ref={container} className="terminal-body" />
   </div>

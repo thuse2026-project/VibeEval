@@ -14,9 +14,9 @@ const apiSource = readFileSync(new URL('../src/candidate/workspace/api.ts', impo
 const apiUrl = moduleUrl(apiSource);
 const agentSource = readFileSync(new URL('../src/candidate/workspace/agentApi.ts', import.meta.url), 'utf8')
   .replace(/(['"])\.\/api\1/g, JSON.stringify(apiUrl));
-const { agentApi } = await import(moduleUrl(agentSource));
+const { agentApi, streamAgentEvents } = await import(moduleUrl(agentSource));
 
-test('Agent requests stay same-origin and turns request read-only mode', async () => {
+test('Agent requests stay same-origin and turns request confirmed actions', async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
   try {
@@ -29,9 +29,43 @@ test('Agent requests stay same-origin and turns request read-only mode', async (
     assert.equal(url, '/api/v1/sessions/session%2Fa/agent/conversations/conversation%20b/turns');
     assert.equal(init.credentials, 'same-origin');
     assert.equal(init.headers['X-VibeEval-Request'], '1');
-    assert.equal(JSON.parse(init.body).mode, 'read_only');
+    assert.equal(JSON.parse(init.body).mode, 'confirm_actions');
     assert.equal(JSON.parse(init.body).text, 'Explain this code');
     assert.ok(JSON.parse(init.body).request_key);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Agent operation and interrupt endpoints remain scoped to the conversation', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, init });
+      return new Response(JSON.stringify({ items: [], run_id: 'run/1', status: 'interrupted' }), { status: 200 });
+    };
+    await agentApi.operations('session/a', 'conversation b');
+    await agentApi.interrupt('session/a', 'conversation b', 'run/1');
+    assert.equal(requests[0].url, '/api/v1/sessions/session%2Fa/agent/conversations/conversation%20b/operations?limit=100');
+    assert.equal(requests[1].url, '/api/v1/sessions/session%2Fa/agent/conversations/conversation%20b/runs/run%2F1/interrupt');
+    assert.equal(requests[1].init.method, 'POST');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Agent event stream sends the browser header and decodes durable events', async () => {
+  const originalFetch = globalThis.fetch;
+  const frames = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, '/api/v1/sessions/session%2Fa/agent/conversations/conversation%20b/events/stream?after_sequence=7');
+      assert.equal(init.headers['X-VibeEval-Request'], '1');
+      return new Response('retry: 1000\n\nevent: agent.event\ndata: {"sequence":8,"kind":"run.completed","data":{}}\n\n');
+    };
+    await streamAgentEvents('session/a', 'conversation b', 7, new AbortController().signal, frame => frames.push(frame));
+    assert.deepEqual(frames, [{ event: 'agent.event', data: { sequence: 8, kind: 'run.completed', data: {} } }]);
   } finally {
     globalThis.fetch = originalFetch;
   }
