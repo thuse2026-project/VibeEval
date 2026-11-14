@@ -5,6 +5,7 @@ import { PreparationScreen } from './PreparationScreen';
 import { workspaceApi, workspaceRequest, WorkspaceError, type CandidateSession } from './api';
 import {serverNow} from '../../shared/clock';
 import { SaveQueue } from './SaveQueue';
+import type { AgentFileChange } from './AgentPanelV2';
 import type { FileContentResponse, FileEntry, SubmitResponse } from '../../shared/types';
 import './workspace.css';
 
@@ -21,6 +22,7 @@ export default function CandidateWorkspace() {
   const activeRef=useRef<string|null>(null);
   const [recovery, setRecovery] = useState<FileContentResponse | null>(null);
   const [reload, setReload] = useState(0);
+  const [agentConflicts, setAgentConflicts] = useState<string[]>([]);
   const [, render] = useState(0);
   const timers = useRef(new Map<string, number>());
   const submitKey = useRef(crypto.randomUUID());
@@ -172,9 +174,31 @@ export default function CandidateWorkspace() {
         queue.load(fresh.path,fresh.content,fresh.version,draft.readonly);setEditorRevision(value=>value+1);
       }
       setRecovery(null);setError('');
+      setAgentConflicts(paths => paths.filter(path => path !== recovery.path));
     }catch(failure){setError((failure as Error).message);}
     finally{setBusy(false);}
   }
+
+  const handleAgentWorkspaceChange = useCallback(async (change: AgentFileChange) => {
+    const draft = queue.drafts[change.path];
+    if (change.version !== null && draft && draft.version >= change.version) return;
+    try {
+      const file = await workspaceApi.read(sidRef.current, change.path);
+      const latest = queue.drafts[change.path];
+      if (latest?.dirty || latest?.error) {
+        setAgentConflicts(paths => paths.includes(change.path) ? paths : [...paths, change.path]);
+        if (activeRef.current === change.path) setRecovery(file);
+        return;
+      }
+      const readonly = latest?.readonly ?? files.find(entry => entry.path === change.path)?.readonly ?? true;
+      queue.load(change.path, file.content, file.version, readonly);
+      setFiles(items => items.map(item => item.path === change.path ? { ...item, version: file.version } : item));
+      setAgentConflicts(paths => paths.filter(path => path !== change.path));
+      if (activeRef.current === change.path) setEditorRevision(value => value + 1);
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  }, [files, queue]);
 
   useEffect(()=>{
     if(!sid||session?.status!=='submitted'||receipt)return;
@@ -200,6 +224,10 @@ export default function CandidateWorkspace() {
     {current?.error && <div role="alert" className="workspace-alert">{current.error} 本地修改已保留。
       <button disabled={!writable} onClick={() => void compare()}>重新读取并比较</button>
     </div>}
+    {agentConflicts.length > 0 && <div role="alert" className="workspace-alert">
+      Agent 已修改 {agentConflicts.join('、')}；你的未保存草稿仍保留在编辑器中，请比较后选择版本。
+      {active && agentConflicts.includes(active) && <button disabled={!writable} onClick={() => void compare()}>查看服务器版本</button>}
+    </div>}
     {recovery && current && recovery.path === active && <div className="workspace-recovery">
       <h2>服务器版本 {recovery.version}（本地内容仍保留在编辑器）</h2><pre>{recovery.content}</pre>
       <button disabled={!writable} onClick={()=>void resolve(false)}>使用服务器内容（放弃本地修改）</button>
@@ -211,7 +239,8 @@ export default function CandidateWorkspace() {
       openFiles={Object.entries(queue.drafts).map(([path, draft]) => ({ path, readonly: draft.readonly, dirty: draft.dirty }))}
       activePath={active} content={current?.content ?? ''} activeReadonly={!writable || !current || current.readonly}
       saveState={queue.saving ? 'saving' : drafts.some(draft => draft.error) ? 'error' : drafts.some(draft => draft.dirty) ? 'idle' : 'saved'}
-      sessionId={session.status==='in_progress'&&remaining>0&&files.length>0 ? sid ?? null : null} onSelectFile={select} onEdit={edit} onSubmit={submit} busy={busy}
+      sessionId={session.status==='in_progress'&&remaining>0&&files.length>0 ? sid ?? null : null} onSelectFile={select} onEdit={edit}
+      onAgentWorkspaceChange={handleAgentWorkspaceChange} onSubmit={submit} busy={busy}
     />
   </div>;
 }

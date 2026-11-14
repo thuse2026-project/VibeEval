@@ -4,6 +4,7 @@ import { FileTree } from '../../shared/components/FileTree'
 import { TerminalPane } from '../../shared/components/TerminalGateway'
 import { formatRemaining } from '../../shared/format'
 import type { FileEntry, SaveState } from '../../shared/types'
+import { AgentPanel, type AgentFileChange } from './AgentPanelV2'
 
 type Props = {
   title: string
@@ -19,6 +20,7 @@ type Props = {
   busy: boolean
   onSelectFile: (path: string) => void
   onEdit: (path: string, content: string) => void
+  onAgentWorkspaceChange: (change: AgentFileChange) => void
   onSubmit: () => Promise<void>
 }
 
@@ -44,6 +46,7 @@ export function WorkspaceScreen({
   busy,
   onSelectFile,
   onEdit,
+  onAgentWorkspaceChange,
   onSubmit,
 }: Props) {
   const [leftTab, setLeftTab] = useState<'files' | 'problem'>('files')
@@ -51,6 +54,7 @@ export function WorkspaceScreen({
   const [confirmSubmit, setConfirmSubmit] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [agentOpen, setAgentOpen] = useState(false)
 
   const submit = async () => {
     setSubmitting(true)
@@ -75,12 +79,13 @@ export function WorkspaceScreen({
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
+        <button className="agent-open" disabled={!sessionId} onClick={() => setAgentOpen(true)}>Agent</button>
         <button className="submit" disabled={busy || remaining<=0} onClick={() => { setSubmitError(null); setConfirmSubmit(true) }}>
           提交答卷
         </button>
       </div>
 
-      <div className="ide-main has-no-ai">
+      <div className={`ide-main ${agentOpen ? 'with-agent' : ''}`}>
         <aside className="sidebar">
           <div className="tabs">
             <button className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>
@@ -90,45 +95,43 @@ export function WorkspaceScreen({
               题目
             </button>
           </div>
-          {leftTab === 'files' ? (
-            <FileTree files={files} activePath={activePath} onSelect={onSelectFile} />
-          ) : (
-            <div className="problem-pane">
-              <span className="pane-caption">任务说明</span>
-              <h2>会议室预约缺陷修复</h2>
-              <p>修复会议室预约的首尾相接冲突、取消后仍占用时段两个缺陷，并补充回归测试。</p>
-              <button onClick={() => onSelectFile('README.md')}>打开完整题目说明</button>
-              <h3>公开测试</h3><code className="test-command">python -m unittest discover -s tests -p 'test_*.py' -v</code>
-              <p className="muted">原始题目有两项预期失败；实际结果以终端为准。</p>
-            </div>
-          )}
+          <div className="sidebar-scroll">
+            {leftTab === 'files' ? (
+              <FileTree files={files} activePath={activePath} onSelect={onSelectFile} />
+            ) : (
+              <div className="problem-pane">
+                <span className="pane-caption">任务说明</span>
+                <h2>当前编程任务</h2>
+                <p>完整题面、运行命令和验收要求以当前题目的 README.md 为准。</p>
+                <button onClick={() => onSelectFile('README.md')}>打开完整题目说明</button>
+                <p className="muted">运行测试和调试请使用下方真实终端。</p>
+              </div>
+            )}
+          </div>
         </aside>
 
-        <CodeEditor
-          tabs={openFiles}
-          busy={busy}
-          loadRevision={editorRevision}
-          path={activePath ?? '选择文件'}
-          value={content}
-          readOnly={activeReadonly}
-          onSelect={onSelectFile}
-          onChange={onEdit}
-        />
+        <section className="workspace-center">
+          <CodeEditor
+            tabs={openFiles}
+            busy={busy}
+            loadRevision={editorRevision}
+            path={activePath ?? '选择文件'}
+            value={content}
+            readOnly={activeReadonly}
+            onSelect={onSelectFile}
+            onChange={onEdit}
+          />
+          <div className="terminal-slot" hidden={!termOpen}>
+            <TerminalPane sessionId={sessionId} inputEnabled={!busy} onCollapse={() => setTermOpen(false)} />
+          </div>
+          {!termOpen && (
+            <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
+              展开终端
+            </button>
+          )}
+        </section>
+        {agentOpen && <AgentPanel sessionId={sessionId} onClose={() => setAgentOpen(false)} onWorkspaceChange={onAgentWorkspaceChange} />}
       </div>
-
-      <div hidden={!termOpen}>
-        <TerminalPane sessionId={sessionId} inputEnabled={!busy} />
-      </div>
-      {!termOpen && (
-        <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
-          展开终端
-        </button>
-      )}
-      {termOpen && (
-        <button className="terminal-close" onClick={() => setTermOpen(false)} title="折叠终端">
-          折叠
-        </button>
-      )}
       <footer className="ide-statusbar"><span>{activePath ?? '请选择文件'}{activeReadonly ? ' · 只读' : ' · 可编辑'}</span><span>5 秒自动保存 · Python 3.12 · UTF-8</span></footer>
       {confirmSubmit && (
         <div className="modal-backdrop">
