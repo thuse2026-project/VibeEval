@@ -16,6 +16,21 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 起始镜像基线是第一题 1 项失败、第二题 2 项失败。两题均应实际运行到业务断言。出现找不到 Python、导入失败、依赖缺失或工作区错误时，先恢复测试环境。 [列统计公开测试](../problems/datasette-r2/column-statistics/test_public.py) · [筛选与分页公开测试](../problems/datasette-r2/facet-pagination/test_public.py)
 
+## 模型配置与开联测场次
+
+复用私有联测服务时，模型由服务端统一配置。访问联测服务的 `/r2-preview/model`，返回 `{"configured":true}` 表示服务端已加载模型名和 API Key。测试员只需领考生入场凭证。另起服务时，由有权限的维护者在后端进程环境或仓库根目录的本地 `.env` 配置 `LLM_API_KEY`、`LLM_MODEL` 和所用提供商的 `LLM_BASE_URL`。真实 Key 通过服务端的私有配置管理。
+
+当前预览使用预设的 Datasette 两题流程。开一轮联测由维护者在服务端发新的考生入场凭证。登录联测服务器，在 `backend/` 目录使用预览后端相同的 Python 和 PostgreSQL 连接配置运行：
+
+```sh
+python -m app.exams.provision \
+  --candidate-id r2-check-01 --name "联测考生" \
+  --exam-id datasette-agent-acceptance --title "Datasette Agent 联测" \
+  --duration-minutes 120 --valid-hours 24
+```
+
+同一场次每次复跑用新的 `--candidate-id`，同一组联测可沿用 `--exam-id`。把命令输出的 `tok_…` 私下发给对应测试员。用实际预览地址的 `/entry?mode=r2` 入场。若浏览器还在恢复旧会话，用新浏览器配置或无痕窗口。预览会在首次入场后自动关联两题。网页 Agent 面板的「＋」用于在当前题里开新对话。
+
 ## 第一题 · 业务拓展 · 补齐列统计
 
 **1. 只读计划。** 选择「只读计划」，发送：
