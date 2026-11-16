@@ -214,7 +214,7 @@ def fail_step(
 
 
 def release_context_rejected_step(state, step_id):
-    """Release an empty logical step after a definitive context-limit rejection.
+    """Release an empty logical step after a definitive provider rejection.
 
     The integration attempt ledger retains the dispatched request and rejection.
     No accepted response or message is removed. Generic failures cannot use this

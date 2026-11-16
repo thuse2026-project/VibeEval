@@ -1,5 +1,7 @@
+import asyncio
 import os
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -12,6 +14,7 @@ from .admin.overview import router as overview_router
 from .admin.router import AuthState, current_session, router
 from .admin.submissions import router as submission_router
 from .agent_integration.router import router as agent_router
+from .agent_integration.worker import StageAgentWorker
 from .exam_flow.router import bridge as exam_flow_bridge
 from .exam_flow.router import router as exam_flow_router
 from .exam_flow.types import FlowError
@@ -46,8 +49,22 @@ def create_app(
     agent_event_policy=None,
     exam_flow=None,
     stage_resources=None,
+    stage_agent_worker=False,
 ) -> FastAPI:
-    app = FastAPI(title="VibeEval API", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app):
+        if app.state.stage_agent_worker is None:
+            yield
+            return
+        stop = asyncio.Event()
+        task = asyncio.create_task(app.state.stage_agent_worker.serve(stop))
+        try:
+            yield
+        finally:
+            stop.set()
+            await task
+
+    app = FastAPI(title="VibeEval API", version="0.1.0", lifespan=lifespan)
     app.state.auth = AuthState(load_accounts() if accounts is None else accounts)
     app.state.entry = (
         entry_store if entry_store is not None else configured_store(entry_db)
@@ -72,6 +89,13 @@ def create_app(
         and getattr(exam_flow.resources, "supports_stage_resources", False)
     ):
         app.state.stage_resources = exam_flow.resources
+    app.state.stage_agent_worker = (
+        StageAgentWorker(
+            app.state.stage_resources, clock=app.state.stage_resources.clock
+        )
+        if stage_agent_worker and app.state.stage_resources is not None
+        else None
+    )
     if entry_db is None:
         from .admin.submissions import get_submission_reader
         from .submissions.service import SubmissionService

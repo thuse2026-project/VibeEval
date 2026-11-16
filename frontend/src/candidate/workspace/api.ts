@@ -16,11 +16,11 @@ export class WorkspaceError extends Error {
   }
 }
 
-export async function workspaceRequest<T>(path: string, method = 'GET', body?: unknown, key?: string): Promise<T> {
+export async function workspaceRequest<T>(path: string, method = 'GET', body?: unknown, key?: string, prefix = '/api/v1/sessions/'): Promise<T> {
   let response: Response;
   const started=performance.now();
   try {
-    response = await fetch(`/api/v1/sessions/${path}`, {
+    response = await fetch(`${prefix}${path}`, {
       method, credentials: 'same-origin', cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'X-VibeEval-Request': '1', ...(key ? { 'Idempotency-Key': key } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),

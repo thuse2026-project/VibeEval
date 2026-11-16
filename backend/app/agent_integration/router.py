@@ -43,6 +43,11 @@ class CreateConversationInput(BaseModel):
     title: str = Field(default="新对话", min_length=1, max_length=200)
 
 
+class RenameConversationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    title: str = Field(min_length=1, max_length=200)
+
+
 def phase_resources(request):
     if request.url.path.startswith("/api/v2/phases/"):
         return getattr(request.app.state, "stage_resources", None)
@@ -201,6 +206,16 @@ def conversations(
 @router.get("/conversations/{conversation_id}")
 def conversation(session_id: str, conversation_id: str, store=Depends(repository)):
     return result(lambda: store.describe(session_id, conversation_id))
+
+
+@router.patch("/conversations/{conversation_id}")
+def rename_conversation(
+    body: RenameConversationInput,
+    session_id: str,
+    conversation_id: str,
+    store=Depends(repository),
+):
+    return result(lambda: store.rename(session_id, conversation_id, body.title))
 
 
 @router.get("/conversations/{conversation_id}/history")
@@ -377,47 +392,87 @@ def context_window(
     return result(action)
 
 
+def server_driven(request):
+    return (
+        phase_resources(request) is not None
+        and getattr(request.app.state, "stage_agent_worker", None) is not None
+    )
+
+
+def run_transport(request, run):
+    return {**run, "server_driven": server_driven(request)}
+
+
 @router.post("/conversations/{conversation_id}/turns", status_code=202)
 def submit_turn(
-    body: RunInput, session_id: str, conversation_id: str, service=Depends(runtime)
+    body: RunInput,
+    session_id: str,
+    conversation_id: str,
+    request: Request,
+    service=Depends(runtime),
 ):
-    return result(lambda: service.submit(session_id, conversation_id, body))
+    run = result(lambda: service.submit(session_id, conversation_id, body))
+    return run_transport(request, run)
 
 
 @router.post("/conversations/{conversation_id}/compactions", status_code=202)
 def submit_compaction(
-    body: CompactInput, session_id: str, conversation_id: str, service=Depends(runtime)
+    body: CompactInput,
+    session_id: str,
+    conversation_id: str,
+    request: Request,
+    service=Depends(runtime),
 ):
-    return result(
+    run = result(
         lambda: service.submit(session_id, conversation_id, body, kind="compact")
     )
+    return run_transport(request, run)
 
 
 @router.get("/conversations/{conversation_id}/runs")
 def runs(
     session_id: str,
     conversation_id: str,
+    request: Request,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     service=Depends(runtime),
 ):
-    return result(
+    page = result(
         lambda: service.store.list(
             session_id, conversation_id, offset=offset, limit=limit
         )
     )
+    return {**page, "items": [run_transport(request, run) for run in page["items"]]}
 
 
 @router.get("/conversations/{conversation_id}/runs/{run_id}")
-def run(session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)):
-    return result(lambda: service.store.get(session_id, conversation_id, run_id))
+def run(
+    session_id: str,
+    conversation_id: str,
+    run_id: str,
+    request: Request,
+    service=Depends(runtime),
+):
+    return run_transport(
+        request, result(lambda: service.store.get(session_id, conversation_id, run_id))
+    )
 
 
 @router.post("/conversations/{conversation_id}/runs/{run_id}/advance")
 async def advance_run(
-    session_id: str, conversation_id: str, run_id: str, service=Depends(runtime)
+    session_id: str,
+    conversation_id: str,
+    run_id: str,
+    request: Request,
+    service=Depends(runtime),
 ):
     try:
+        if server_driven(request):
+            return run_transport(
+                request,
+                await threaded(service.store.get, session_id, conversation_id, run_id),
+            )
         return await service.advance(session_id, conversation_id, run_id)
     except Exception as error:
         return result(lambda raised=error: (_ for _ in ()).throw(raised))

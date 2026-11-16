@@ -3,9 +3,13 @@
 import asyncio
 import json
 import os
+import secrets
 import tempfile
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -20,9 +24,16 @@ from app.agent import create_conversation
 from app.agent_integration.reading_types import ReadingError
 from app.agent_integration.runtime_types import RunInput
 from app.agent_integration.store import ConversationNotFound, PostgresSessionStore
-from app.db.models import AgentOperation, AgentRun, StageFileRevision, StageWorkspace
+from app.db.models import (
+    AgentOperation,
+    AgentRun,
+    ExamSession,
+    StageFileRevision,
+    StageWorkspace,
+)
 from app.exam_flow import ExamFlowService, FlowError, PostgresFlowStore
 from app.exams.postgres import PostgresEntryStore
+from app.exams.store import digest
 from app.llm.config import LLMSettings
 from app.main import create_app
 from app.stage_resources import StageResources
@@ -243,14 +254,25 @@ class StageResourceTests(unittest.TestCase):
             completion(),
         ]
         run = runtime.submit(phase, cid, RunInput(request_key="reads", text="read"))
-        self.assertEqual(
-            asyncio.run(runtime.advance(phase, cid, run["run_id"]))["status"],
-            "completed",
-        )
+        with patch.object(
+            self.sandbox,
+            "read_files",
+            side_effect=AssertionError("directory discovery must not read file bodies"),
+        ):
+            self.assertEqual(
+                asyncio.run(runtime.advance(phase, cid, run["run_id"]))["status"],
+                "completed",
+            )
         retained = PostgresSessionStore(self.factory).load(phase, cid)
         results = retained.turns[0].steps[0].tool_results
         self.assertEqual(len(results), 5)
         self.assertFalse(any(r.is_error for r in results), results)
+        glob = json.loads(json.loads(results[1].content)["text"])
+        self.assertEqual(
+            {entry["path"] for entry in glob["items"]},
+            {path for path in FILES if path.endswith(".py")},
+        )
+        self.assertTrue(all("version" not in entry for entry in glob["items"]))
         self.assertEqual(json.loads(results[3].content)["text"], FILES["solution.py"])
         self.assertEqual(json.loads(results[4].content)["text"], FILES["solution.py"])
 
@@ -431,6 +453,121 @@ class StageResourceTests(unittest.TestCase):
         self.now += 5
         self.flow.reconcile(self.sid)
         self.assertEqual(self.current()["current_stage"]["ordinal"], 4)
+
+    def test_background_run_completes_and_can_be_stopped_without_browser_advance(self):
+        phase = self.begin()["current_phase"]["id"]
+        cid = self.conversation(phase)
+        runtime = self.gateway.runtime_for(phase)
+        browser = secrets.token_urlsafe(32)
+        with self.factory.begin() as db:
+            db.get(ExamSession, self.sid).browser_hash = digest(browser)
+        app = create_app(
+            {},
+            entry_store=PostgresEntryStore(self.factory),
+            exam_flow=self.flow,
+            stage_agent_worker=True,
+        )
+        headers = {"X-VibeEval-Request": "1"}
+        cookies = {"vibeeval_exam_flow": browser}
+        path = f"/api/v2/phases/{phase}/agent/conversations/{cid}"
+        self.model.responses = [completion("计划完成")]
+
+        with TestClient(app, headers=headers, cookies=cookies) as client:
+            queued = client.post(
+                path + "/turns",
+                json={
+                    "request_key": "worker-plan",
+                    "text": "只给计划",
+                    "intent": "plan",
+                },
+            )
+            self.assertEqual(queued.status_code, 202)
+            self.assertTrue(queued.json()["server_driven"])
+            run_path = path + "/runs/" + queued.json()["run_id"]
+            for _ in range(30):
+                current = client.get(run_path).json()
+                if current.get("status") == "completed":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(current["status"], "completed")
+            self.assertTrue(current["server_driven"])
+
+            entered, cancelled = Event(), Event()
+
+            class Delayed:
+                async def complete(_, payload):
+                    entered.set()
+                    try:
+                        await asyncio.sleep(30)
+                    finally:
+                        cancelled.set()
+
+            runtime.client = Delayed()
+            queued = client.post(
+                path + "/turns",
+                json={
+                    "request_key": "worker-stop",
+                    "text": "只读",
+                    "intent": "plan",
+                },
+            ).json()
+            self.assertTrue(entered.wait(2))
+            run_path = path + "/runs/" + queued["run_id"]
+            self.assertEqual(client.get(run_path).json()["status"], "running")
+            self.assertEqual(
+                client.post(run_path + "/interrupt").json()["status"], "interrupted"
+            )
+            self.assertTrue(cancelled.wait(2))
+            self.assertEqual(client.get(run_path).json()["status"], "interrupted")
+
+    def test_slow_read_retries_when_a_new_version_is_saved_during_io(self):
+        phase = self.coding()["current_phase"]["id"]
+        entered, release = Event(), Event()
+        read_file = self.sandbox.read_file
+
+        def delayed(view, path):
+            content = read_file(view, path)
+            if not entered.is_set():
+                entered.set()
+                release.wait(3)
+            return content
+
+        with patch.object(self.sandbox, "read_file", side_effect=delayed):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                pending = pool.submit(self.gateway.read, self.sid, phase, "solution.py")
+                self.assertTrue(entered.wait(2))
+                try:
+                    saved = pool.submit(
+                        self.gateway.save, self.sid, phase, "solution.py", 1, "new\n"
+                    )
+                    self.assertEqual(saved.result(2)["new_version"], 2)
+                finally:
+                    release.set()
+                self.assertEqual(pending.result(2)["content"], "new\n")
+
+    def test_slow_read_does_not_return_content_after_phase_closes(self):
+        phase = self.coding()["current_phase"]["id"]
+        entered, release = Event(), Event()
+        read_file = self.sandbox.read_file
+
+        def delayed(view, path):
+            content = read_file(view, path)
+            entered.set()
+            release.wait(3)
+            return content
+
+        with (
+            patch.object(self.sandbox, "read_file", side_effect=delayed),
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            pending = pool.submit(self.gateway.read, self.sid, phase, "solution.py")
+            self.assertTrue(entered.wait(2))
+            try:
+                pool.submit(self.submit, "close-during-read").result(2)
+            finally:
+                release.set()
+            with self.assertRaises(FlowError):
+                pending.result(2)
 
     def test_http_files_agent_and_terminal_use_v2_identity_and_phase_permissions(self):
         entry = PostgresEntryStore(self.factory)

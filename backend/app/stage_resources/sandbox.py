@@ -182,9 +182,11 @@ class StageSandboxAdapter(BoundSandboxAdapter):
         return True
 
     def read_file(self, view, path):
-        self.view = view
         validate_file(view, path)
-        obj = self._container(view)
+        return self._read_archive(view, self._container(view), path)
+
+    @staticmethod
+    def _read_archive(view, obj, path):
         if obj.status not in ("running", "paused"):
             raise ValueError("workspace is not readable")
         stream, _ = obj.get_archive("/workspace/" + path)
@@ -192,8 +194,12 @@ class StageSandboxAdapter(BoundSandboxAdapter):
             stream, path, validator=lambda p: validate_file(view, p)
         )
 
-    def read_files(self, view):
-        return {p: self.read_file(view, p) for p in view.allowed_files}
+    def read_files(self, view, paths=None):
+        paths = view.allowed_files if paths is None else paths
+        for path in paths:
+            validate_file(view, path)
+        obj = self._container(view)
+        return {p: self._read_archive(view, obj, p) for p in paths}
 
     def save_file(self, view, path, expected_digest, content):
         self.view = view
@@ -351,6 +357,9 @@ class StageSandboxRuntime(SandboxRuntime):
     def read_file(self, view, path):
         validate_file(view, path)
         return self._call("read_file", view, path)
+
+    def read_paths(self, view, paths):
+        return self._call("read_files", view, tuple(paths))
 
     def save_file(self, view, path, expected_digest, content):
         validate_file(view, path, write=True)

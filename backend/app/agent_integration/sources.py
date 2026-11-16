@@ -17,6 +17,8 @@ from .reading_types import (
     ReadSource,
 )
 
+SEARCH_FILES_PER_PAGE = 16
+
 
 class TextSourceProvider(Protocol):
     """Trusted server adapter for question/dependency/output text, scoped by exam.
@@ -117,12 +119,18 @@ class SourceReader:
         )
 
     def _tree(self, scope_id):
-        tree = self._workspace().tree(scope_id)["files"]
+        workspace = self._workspace()
+        list_paths = getattr(workspace, "list_paths", None)
+        tree = (
+            list_paths(scope_id)
+            if list_paths is not None
+            else workspace.tree(scope_id)["files"]
+        )
         if {item["path"] for item in tree} != self.allowed_files:
             raise ReadingError("WORKSPACE_MANIFEST_INVALID")
         return tree
 
-    def _query(self, name, source_id, items, args, metadata=None):
+    def _query(self, name, source_id, items, args, metadata=None, *, path_page=None):
         # Inspect one extra match only, and advertise truncation/pagination.
         page = list(islice(items, args.offset, args.offset + args.limit + 1))
         body = {
@@ -131,6 +139,8 @@ class SourceReader:
             "next_offset": args.offset + len(page[: args.limit]),
             "has_more": len(page) > args.limit,
         }
+        if path_page is not None:
+            body.update(path_page)
         text = encoded(body)
         return SourceSnapshot(
             "query",
@@ -172,20 +182,39 @@ class SourceReader:
 
     def search(self, scope_id, args):
         safe_relative(args.pattern, pattern=True)
-        tree = self._tree(scope_id)
+        paths = sorted(
+            path for path in self.allowed_files if matches(path, args.pattern)
+        )
+        end = args.path_offset + SEARCH_FILES_PER_PAGE
+        path_page = {
+            "path_offset": args.path_offset,
+            "next_path_offset": end if end < len(paths) else None,
+        }
         query = args.query if args.case_sensitive else args.query.casefold()
         versions = {}
 
         def hits():
-            for item in tree:
-                if not matches(item["path"], args.pattern):
-                    continue
-                current = self._workspace().read(scope_id, item["path"])
-                versions[item["path"]] = current["version"]
+            page = paths[args.path_offset : end]
+            if not page:
+                return
+            workspace = self._workspace()
+            read_many = getattr(workspace, "read_many", None)
+            contents = (
+                read_many(scope_id, page)
+                if len(page) > 1 and read_many is not None
+                else None
+            )
+            for path in page:
+                current = (
+                    contents[path]
+                    if contents is not None
+                    else workspace.read(scope_id, path)
+                )
+                versions[path] = current["version"]
                 for number, line in enumerate(current["content"].splitlines(), 1):
                     if query in (line if args.case_sensitive else line.casefold()):
                         yield {
-                            "path": item["path"],
+                            "path": path,
                             "version": current["version"],
                             "line": number,
                             "excerpt": line[:300],
@@ -203,7 +232,9 @@ class SourceReader:
                 "query": args.query,
                 "pattern": args.pattern,
                 "case_sensitive": args.case_sensitive,
+                **path_page,
             },
+            path_page=path_page,
         )
         return SourceSnapshot(
             snapshot.kind,

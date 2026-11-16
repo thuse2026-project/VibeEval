@@ -6,6 +6,7 @@ import os
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 import httpx
 import test_agent_integration_reading as reading_tests
@@ -385,6 +386,50 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
         self.assertEqual(attempts[2]["trigger"], "threshold")
         self.assertEqual(done["total_tokens"], 40)
 
+    def test_rejected_threshold_compaction_continues_and_is_not_retried(self):
+        self.workspace.contents["src/main.py"] = "main " * 1200
+        self.workspace.contents["src/booking.py"] = "booking " * 750
+        second_read = completion(calls=(("read_file", {"path": "src/booking.py"}),))
+        service = self.coordinator(
+            [
+                READ,
+                second_read,
+                completion("overlong summary " * 800),
+                READ,
+                completion(),
+            ],
+            window=WindowPolicy(soft_request_chars=14000),
+        )
+        run = self.submit(service)
+        done = self.advance(service, run)
+        self.assertEqual(
+            (done["status"], done["compaction_calls"], done["total_tokens"]),
+            ("completed", 1, 50),
+        )
+        attempts = service.store.attempts(self.scope, self.initial.id, run["run_id"])[
+            "items"
+        ]
+        self.assertEqual(
+            (attempts[2]["status"], attempts[2]["error_code"]),
+            ("rejected", "COMPACTION_NOT_ADOPTED"),
+        )
+        self.assertEqual(
+            self.conversations.load(self.scope, self.initial.id).context_generation, 0
+        )
+
+    def test_rejected_threshold_compaction_still_stops_above_hard_limit(self):
+        self.historical_turn()
+        service = self.coordinator(
+            [completion("overlong summary " * 800)],
+            window=WindowPolicy(
+                soft_request_chars=6000, hard_request_chars=6000, keep_recent_turns=0
+            ),
+        )
+        done = self.advance(service, self.submit(service))
+        self.assertEqual(done["status"], "failed")
+        self.assertEqual(done["error_code"], "COMPACTION_NOT_ADOPTED")
+        self.assertEqual((done["model_calls"], done["compaction_calls"]), (0, 1))
+
     def test_definitive_overflow_gets_one_compaction_and_one_retry(self):
         self.historical_turn()
         overflow = (
@@ -554,7 +599,99 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
         done = self.advance(service, run)
         self.assertEqual(done["status"], "budget_exhausted")
         self.assertEqual(self.workspace.calls, 0)
-        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(done["error_code"], "RUN_TOKEN_BUDGET_EXHAUSTED")
+        self.assertEqual(self.requests, [])
+
+    def test_plan_only_exposes_short_reads_and_finalizes_after_repeated_evidence(self):
+        self.workspace.contents["src/main.py"] = "needle " * 150
+        service = self.coordinator(
+            [READ, READ, READ, completion("已有足够证据，开始给计划。")],
+            policy=RunPolicy(mode="confirm_actions"),
+        )
+        run = self.submit(service, intent="plan", mode="confirm_actions")
+        done = self.advance(service, run)
+        self.assertEqual((done["status"], done["model_calls"]), ("completed", 4))
+        offered = {t["function"]["name"] for t in self.requests[0]["tools"]}
+        self.assertIn("read_file", offered)
+        self.assertFalse(
+            offered & {"run_command", "write_file", "apply_patch", "compact_context"}
+        )
+        self.assertNotIn("tools", self.requests[-1])
+
+    def test_unstructured_provider_tool_call_is_not_a_final_answer(self):
+        service = self.coordinator(
+            [READ, completion("我接下来会查看文件。\n<｜｜DSML｜｜ calls>")],
+            policy=RunPolicy(max_model_calls=2),
+        )
+        done = self.advance(service, self.submit(service))
+        self.assertEqual(
+            (done["status"], done["error_code"]),
+            ("failed", "MODEL_TOOL_ARGUMENTS_INVALID"),
+        )
+
+    def test_unexpected_runtime_error_does_not_leave_a_live_run(self):
+        service = self.coordinator([READ])
+        run = self.submit(service)
+        with patch.object(service.store, "snapshot", side_effect=ValueError):
+            done = self.advance(service, run)
+        self.assertEqual(
+            (done["status"], done["error_code"]),
+            ("unknown", "AGENT_RUNTIME_ERROR"),
+        )
+
+    def test_malformed_tool_arguments_can_be_corrected_once(self):
+        invalid = completion(calls=(("read_file", {}),))
+        final = completion()
+        final["usage"].update(prompt_cache_hit_tokens=6, prompt_cache_miss_tokens=2)
+        service = self.coordinator([invalid, READ, final])
+        done = self.advance(service, self.submit(service))
+        self.assertEqual((done["status"], self.workspace.calls), ("completed", 1))
+        self.assertTrue(
+            any(
+                "invalid arguments" in m["content"]
+                for m in self.requests[1]["messages"]
+                if m["role"] == "system"
+            )
+        )
+        with self.factory() as db:
+            last = db.scalar(
+                select(AgentAttempt).where(
+                    AgentAttempt.run_id == done["run_id"], AgentAttempt.sequence == 3
+                )
+            )
+            self.assertEqual(last.usage_json["prompt_cache_hit_tokens"], 6)
+
+    def test_last_model_call_answers_with_existing_read_results(self):
+        service = self.coordinator(
+            [READ, completion("已根据读取结果给出计划。")],
+            policy=RunPolicy(max_model_calls=2),
+        )
+        done = self.advance(service, self.submit(service))
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual([r.get("tool_choice") for r in self.requests], ["auto", None])
+        self.assertNotIn("tools", self.requests[-1])
+        final_messages = self.requests[-1]["messages"]
+        self.assertFalse(
+            any(m["role"] == "tool" or m.get("tool_calls") for m in final_messages)
+        )
+        self.assertIn("src/main.py", final_messages[-1]["content"])
+        self.assertIn("Now answer my request", final_messages[-1]["content"])
+        self.assertIn("needle", self.requests[-1]["messages"][-1]["content"])
+        self.assertEqual((done["model_calls"], done["tool_calls"]), (2, 1))
+
+    def test_last_model_call_rejects_an_unexpected_tool_call(self):
+        service = self.coordinator([READ, READ], policy=RunPolicy(max_model_calls=2))
+        done = self.advance(service, self.submit(service))
+        self.assertEqual(done["status"], "failed")
+        self.assertEqual(self.workspace.calls, 1)
+        self.assertEqual(done["total_tokens"], 20)
+        with self.factory() as db:
+            last = db.scalar(
+                select(AgentAttempt).where(
+                    AgentAttempt.run_id == done["run_id"], AgentAttempt.sequence == 2
+                )
+            )
+            self.assertIsNone(last.response_json)
 
     def test_explicit_selection_is_input_not_an_autonomous_read_in_chat_only_mode(self):
         ref = self.reader.create_reference(
@@ -704,7 +841,7 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
         self.assertEqual(after.compactions, ())
         self.assertEqual(len(self.requests), 1)
 
-    def test_parallel_tool_budget_stops_before_second_read(self):
+    def test_parallel_tool_budget_skips_second_read_and_finishes(self):
         service = self.coordinator(
             [
                 completion(
@@ -712,13 +849,15 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
                         ("read_file", {"path": "src/main.py"}),
                         ("read_file", {"path": "src/booking.py"}),
                     )
-                )
+                ),
+                completion(),
             ],
             policy=RunPolicy(max_tool_calls=1),
         )
         run = self.submit(service)
-        self.assertEqual(self.advance(service, run)["status"], "budget_exhausted")
+        self.assertEqual(self.advance(service, run)["status"], "completed")
         self.assertEqual(self.workspace.calls, 1)
+        self.assertNotIn("tools", self.requests[-1])
 
     def test_receipt_failure_rolls_back_response_usage_and_core_adoption(self):
         from unittest.mock import patch

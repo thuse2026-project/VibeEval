@@ -14,7 +14,12 @@ from app.llm.client import LLMClient
 from app.llm.config import LLMError, LLMSettings, load_settings
 
 from .context import render_context, serialized_size
-from .model import CompletionClient, NativeRequest, parse_model_response
+from .model import (
+    MAX_AGENT_REQUEST_CHARS,
+    CompletionClient,
+    NativeRequest,
+    parse_model_response,
+)
 from .session import render_turns
 from .session_types import (
     ContextCheckpoint,
@@ -78,7 +83,7 @@ class PreparedCompaction(FrozenModel):
     through_step_id: Identifier | None = None
     source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     prompt_version: str = COMPACTION_PROMPT_VERSION
-    payload_json: str = Field(max_length=64000)
+    payload_json: str = Field(max_length=MAX_AGENT_REQUEST_CHARS)
     payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")

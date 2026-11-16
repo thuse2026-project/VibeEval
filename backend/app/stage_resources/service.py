@@ -11,6 +11,7 @@ from app.agent_integration.material_store import MaterialStore
 from app.agent_integration.run_store import ACTIVE, RunStore
 from app.agent_integration.runtime import RuntimeCoordinator
 from app.agent_integration.sources import SourceReader
+from app.agent_integration.window import STAGE_AGENT_WINDOW
 from app.db.models import (
     AgentOperation,
     AgentRun,
@@ -49,6 +50,7 @@ class StageResources:
         }
         self.snapshots = snapshots or SnapshotStore()
         self.settings, self.client, self._runtimes = settings, client, {}
+        self.agent_budget_overrides: dict[str, int] = {}
         if not all(
             callable(getattr(sandbox, name, None))
             for name in (
@@ -162,7 +164,7 @@ class StageResources:
             elif (
                 row.stage_id != context.stage_id
                 or row.attempt_id != context.attempt_id
-                or row.spec_json != spec.model_dump(mode="json")
+                or ResourceSpec.model_validate(row.spec_json) != spec
             ):
                 raise FlowError("RESOURCE_BINDING_CHANGED")
         # Persist the plan before allocating. Retries use the same owned name.
@@ -184,7 +186,9 @@ class StageResources:
             and "use_terminal" not in capabilities
         ):
             mode = "read_only" if mode != "chat_only" else mode
-        policy = spec.agent_policy.model_copy(update={"mode": mode})
+        policy = spec.agent_policy.model_copy(
+            update={**self.agent_budget_overrides, "mode": mode}
+        )
         reader = SourceReader(
             MaterialStore(self.factory, clock=self.clock),
             workspace=PhaseWorkspace(self, phase_id, capabilities),
@@ -196,6 +200,7 @@ class StageResources:
             settings=settings,
             client=self.client,
             policy=policy,
+            window_policy=STAGE_AGENT_WINDOW,
             clock=self.clock,
             execution_backend=self.sandbox,
             access_monitor=reader.store.check_open,
@@ -381,32 +386,106 @@ class StageResources:
             row.content_sha256, row.version = content_sha, row.version + 1
         return row.version
 
-    def tree(self, session_id, phase_id):
-        with self.guard(session_id, phase_id, "read_repository") as (db, _, row, view):
-            contents = self.sandbox.read_files(view)
-            if set(contents) != set(view.allowed_files):
+    @staticmethod
+    def _versions(db, workspace_id, paths):
+        return {
+            row.path: (row.version, row.content_sha256)
+            for row in db.scalars(
+                select(StageFileRevision).where(
+                    StageFileRevision.workspace_id == workspace_id,
+                    StageFileRevision.path.in_(paths),
+                )
+            )
+        }
+
+    def _read_contents(self, session_id, phase_id, paths=None):
+        # The sandbox operation can be slow. Do not hold the phase locks while
+        # waiting, and adopt the result only against the same live binding.
+        for _ in range(2):
+            with self.guard(session_id, phase_id, "read_repository") as (
+                db,
+                state,
+                row,
+                view,
+            ):
+                selected = view.allowed_files if paths is None else paths
+                for path in selected:
+                    validate_file(view, path)
+                workspace, epoch = row.workspace_id, state.phase.permission_epoch
+                before = self._versions(db, workspace, selected)
+            if paths is None:
+                contents = self.sandbox.read_files(view)
+            elif len(selected) > 1 and hasattr(self.sandbox, "read_paths"):
+                contents = self.sandbox.read_paths(view, selected)
+            else:
+                contents = {
+                    path: self.sandbox.read_file(view, path) for path in selected
+                }
+            if set(contents) != set(selected):
                 raise ValueError("manifest mismatch")
-            return {
-                "files": [
-                    {
-                        "path": p,
-                        "is_dir": False,
-                        "readonly": view.read_only or p not in view.writable_files,
-                        "version": self._observe(db, row.workspace_id, p, text),
-                    }
-                    for p, text in sorted(contents.items())
-                ]
+            digests = {
+                path: hashlib.sha256(encode_content(content)).hexdigest()
+                for path, content in contents.items()
             }
+            with self.guard(session_id, phase_id, "read_repository", epoch=epoch) as (
+                db,
+                _,
+                row,
+                current,
+            ):
+                if (
+                    row.workspace_id != workspace
+                    or current.sandbox_id != view.sandbox_id
+                ):
+                    raise FlowError("AUTHORIZATION_REVOKED", 403)
+                observed = self._versions(db, workspace, selected)
+                if any(
+                    observed.get(path) != before.get(path)
+                    and observed.get(path, (None, None))[1] != digests[path]
+                    for path in selected
+                ):
+                    continue
+                return current, {
+                    path: {
+                        "content": contents[path],
+                        "version": self._observe(db, workspace, path, contents[path]),
+                    }
+                    for path in selected
+                }
+        raise FlowError("SOURCE_VERSION_CHANGED", 409)
+
+    def tree(self, session_id, phase_id):
+        view, contents = self._read_contents(session_id, phase_id)
+        return {
+            "files": [
+                {
+                    "path": path,
+                    "is_dir": False,
+                    "readonly": view.read_only or path not in view.writable_files,
+                    "version": contents[path]["version"],
+                }
+                for path in sorted(contents)
+            ]
+        }
+
+    def list_paths(self, session_id, phase_id):
+        with self.guard(session_id, phase_id, "read_repository") as (_, _, _, view):
+            return [
+                {
+                    "path": path,
+                    "is_dir": False,
+                    "readonly": view.read_only or path not in view.writable_files,
+                }
+                for path in sorted(view.allowed_files)
+            ]
 
     def read(self, session_id, phase_id, path):
-        with self.guard(session_id, phase_id, "read_repository") as (db, _, row, view):
-            validate_file(view, path)
-            content = self.sandbox.read_file(view, path)
-            return {
-                "path": path,
-                "content": content,
-                "version": self._observe(db, row.workspace_id, path, content),
-            }
+        _, contents = self._read_contents(session_id, phase_id, (path,))
+        return {"path": path, **contents[path]}
+
+    def read_many(self, session_id, phase_id, paths):
+        _, contents = self._read_contents(session_id, phase_id, paths)
+        return contents
 
     def save(self, session_id, phase_id, path, expected_version, content):
         encode_content(content)
@@ -464,9 +543,21 @@ class PhaseWorkspace:
             lambda: self.resources.tree(self.resources.owner(scope_id), scope_id)
         )
 
+    def list_paths(self, scope_id):
+        return self._invoke(
+            lambda: self.resources.list_paths(self.resources.owner(scope_id), scope_id)
+        )
+
     def read(self, scope_id, path):
         return self._invoke(
             lambda: self.resources.read(self.resources.owner(scope_id), scope_id, path)
+        )
+
+    def read_many(self, scope_id, paths):
+        return self._invoke(
+            lambda: self.resources.read_many(
+                self.resources.owner(scope_id), scope_id, paths
+            )
         )
 
     @staticmethod

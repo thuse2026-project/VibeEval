@@ -148,6 +148,21 @@ class PostgresSessionStore:
         with session_scope(self.factory) as db:
             return self._view(self._row(db, scope_id, conversation_id))
 
+    def rename(self, scope_id, conversation_id, title):
+        from .scopes import assert_open
+
+        if not isinstance(title, str) or not title.strip() or len(title) > 200:
+            raise SessionError("title must contain 1 to 200 characters")
+        with session_scope(self.factory) as db:
+            now = int(self.clock())
+            assert_open(db, scope_id, now, lock=True)
+            row = self._row(db, scope_id, conversation_id, lock=True)
+            title = title.strip()
+            if row.title != title:
+                row.title = title
+                row.updated_at = max(row.updated_at, now)
+            return self._view(row)
+
     def list_conversations(self, scope_id, *, offset=0, limit=20):
         with session_scope(self.factory) as db:
             rows = db.scalars(

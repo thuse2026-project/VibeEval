@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Literal
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import (
@@ -74,7 +75,18 @@ def upstream_error(status: int) -> LLMError:
         404: (502, "模型或 API 地址不可用，请检查配置"),
         429: (429, "模型服务限流，请稍后重试或切换模型"),
     }
-    return LLMError(*messages.get(status, (502, "模型服务请求失败，请稍后重试")))
+    code = (
+        "MODEL_RATE_LIMITED"
+        if status == 429
+        else (
+            "MODEL_ACCESS_DENIED"
+            if status in (401, 403)
+            else "MODEL_QUOTA_EXHAUSTED" if status == 402 else None
+        )
+    )
+    return LLMError(
+        *messages.get(status, (502, "模型服务请求失败，请稍后重试")), code=code
+    )
 
 
 def context_limit(error):
@@ -90,7 +102,13 @@ def context_limit(error):
 def error_receipt(error, payload):
     raw = payload.get("usage") if isinstance(payload, dict) else None
     if isinstance(raw, dict):
-        keys = ("prompt_tokens", "completion_tokens", "total_tokens")
+        keys = (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "prompt_cache_hit_tokens",
+            "prompt_cache_miss_tokens",
+        )
         values = {key: raw.get(key) for key in keys}
         if all(
             value is None or type(value) is int and value >= 0
@@ -108,6 +126,13 @@ class LLMClient:
     async def _request(self, method: str, path: str, body=None) -> dict:
         if not self.settings.api_key:
             raise LLMError(503, "尚未配置 LLM_API_KEY，请在后端本地配置中设置")
+        if (
+            path == "chat/completions"
+            and body is not None
+            and urlsplit(self.settings.base_url).hostname == "api.deepseek.com"
+        ):
+            # The shared adapter retains tool-call history without reasoning_content.
+            body = {**body, "thinking": {"type": "disabled"}}
         try:
             async with httpx.AsyncClient(
                 base_url=self.settings.base_url + "/",
@@ -146,9 +171,11 @@ class LLMClient:
         try:
             payload = response.json()
         except ValueError:
-            raise LLMError(502, "模型服务返回了无效数据") from None
+            raise LLMError(
+                502, "模型服务返回了无效数据", code="MODEL_RESPONSE_INVALID"
+            ) from None
         if not isinstance(payload, dict):
-            raise LLMError(502, "模型服务返回了无效数据")
+            raise LLMError(502, "模型服务返回了无效数据", code="MODEL_RESPONSE_INVALID")
         if "error" in payload:
             error = payload["error"]
             if context_limit(error):

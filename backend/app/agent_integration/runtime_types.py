@@ -11,6 +11,7 @@ class RunInput(FrozenModel):
     request_key: Identifier
     text: str = Field(min_length=1, max_length=12000, pattern=r"\S")
     reference_ids: tuple[Identifier, ...] = Field(default=(), max_length=20)
+    intent: Literal["default", "plan"] = "default"
     mode: Literal["chat_only", "read_only", "confirm_actions", "sandbox_auto"] = (
         "read_only"
     )
@@ -22,6 +23,7 @@ class CompactInput(FrozenModel):
 
 class RunPolicy(FrozenModel):
     version: str = "1"
+    plan_only: bool = False
     mode: Literal["chat_only", "read_only", "confirm_actions", "sandbox_auto"] = (
         "read_only"
     )
@@ -66,4 +68,6 @@ class LeaseLost(RuntimeError):
 
 
 class RunBudgetExceeded(RuntimeError):
-    pass
+    def __init__(self, code="RUN_BUDGET_EXHAUSTED"):
+        super().__init__(code)
+        self.code = code

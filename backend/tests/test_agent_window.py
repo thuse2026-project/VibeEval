@@ -15,7 +15,7 @@ from app.agent import (
     supply_tool_results,
 )
 from app.agent.compaction import CompactionResult
-from app.agent.model import NativeRequest
+from app.agent.model import MAX_AGENT_REQUEST_CHARS, NativeRequest
 from app.agent.session_types import (
     AssistantOutput,
     ModelResponse,
@@ -25,6 +25,7 @@ from app.agent.session_types import (
 )
 from app.agent_integration.materials import SourceSnapshot, encoded, fragment
 from app.agent_integration.window import (
+    STAGE_AGENT_WINDOW,
     ContextCapacityError,
     WindowPolicy,
     adopt_window_compaction,
@@ -49,6 +50,8 @@ def add_result(
     version="1",
     name="read_file",
     error=False,
+    offset=0,
+    max_chars=16000,
 ):
     state = start_step(state, step_id="window-step-" + str(index))
     call = ToolCall(id="window-call-" + str(index), name=name, arguments="{}")
@@ -66,7 +69,8 @@ def add_result(
         "material_id": material_id,
         **fragment(
             SourceSnapshot("workspace_file", "src/main.py", version, text),
-            max_chars=16000,
+            offset=offset,
+            max_chars=max_chars,
         ),
     }
     return supply_tool_results(
@@ -94,6 +98,34 @@ def compact(state, steps):
 
 
 class WindowTests(unittest.TestCase):
+    def test_threshold_advances_partial_checkpoint_after_its_turn_closes(self):
+        state = add_result(self.state, "first", 1)
+        state = add_result(state, "second " * 800, 2, material_id="second")
+        state = compact(state, 1)
+        state = start_step(state)
+        state = accept_response(
+            state,
+            state.active_turn.steps[-1].id,
+            ModelResponse(
+                model="fixture",
+                finish_reason="stop",
+                message=AssistantOutput(content="Plan ready."),
+            ),
+        )
+        state = begin_turn(state, "Run the tests.", request_key="follow-up")
+        soft = WindowPolicy(soft_input_tokens=1)
+        self.assertIsNone(
+            plan_compaction(state, tools=REGISTRY, settings=SETTINGS, policy=soft)
+        )
+        hard = WindowPolicy(soft_input_tokens=1, hard_input_tokens=1000)
+        request = plan_compaction(state, tools=REGISTRY, settings=SETTINGS, policy=hard)
+        self.assertEqual(
+            (request.through_turn_count, request.through_step_count), (1, 0)
+        )
+        material = json.loads(request.payload["messages"][-1]["content"])
+        self.assertEqual(material["protected_current_task"], "Run the tests.")
+        self.assertEqual(material["new_turns"][0]["from_step_count"], 1)
+
     def command_result(self):
         state = start_step(self.state)
         call = ToolCall(id="execution-call", name="run_command", arguments="{}")
@@ -168,6 +200,69 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(manifest["stage"], "prepared")
         self.assertEqual(state.model_dump_json(), raw)
         self.assertNotIn("never-emit-key", encoded(manifest))
+
+    def test_overlapping_file_reads_only_send_previously_unseen_ranges(self):
+        text = ("前😀" * 250) + ("middle " * 200) + ("suffix " * 100)
+        state = add_result(self.state, text, 0, offset=500, max_chars=1400)
+        state = add_result(state, text, 1)
+        state = add_result(state, text, 2, offset=250, max_chars=1900)
+        before = state.model_dump_json()
+        request, report = prepare_window_request(
+            start_step(state), tools=REGISTRY, settings=SETTINGS
+        )
+        first, second, third = [
+            json.loads(item["content"])
+            for item in request.payload["messages"]
+            if item["role"] == "tool"
+        ]
+        self.assertEqual(first["text"], text[500:1900])
+        self.assertEqual(
+            [
+                (part["start_offset"], part["end_offset"], part["text"])
+                for part in second["new_fragments"]
+            ],
+            [(0, 500, text[:500]), (1900, len(text), text[1900:])],
+        )
+        self.assertNotIn("text", second)
+        self.assertEqual(third["new_fragments"], [])
+        self.assertEqual(
+            [item["window_mode"] for item in report["materials"]],
+            ["fragment", "fragments", "locator"],
+        )
+        self.assertEqual(len(report["materials"][1]["visible_fragments"]), 2)
+        self.assertEqual(state.model_dump_json(), before)
+
+    def test_overlap_does_not_reuse_another_version_or_a_hidden_preview_tail(self):
+        text = ("line " * 700) + ("replacement " * 600)
+        state = add_result(self.state, text, 0)
+        state = add_result(state, text, 1, offset=5000, max_chars=1000)
+        policy = WindowPolicy(max_tool_body_chars=4000, preview_chars=600)
+        report = self.inspect(state, policy=policy)
+        self.assertEqual(
+            [item["window_mode"] for item in report["materials"]],
+            ["preview", "fragment"],
+        )
+        state = add_result(state, text, 2, offset=5000, max_chars=1000, version="2")
+        report = self.inspect(state, policy=policy)
+        self.assertEqual(report["materials"][-1]["window_mode"], "fragment")
+
+    def test_overlap_cannot_displace_a_shorter_older_preview(self):
+        text = "large resulting content. " * 500
+        state = add_result(self.state, text, 0, max_chars=1000)
+        state = add_result(state, text, 1)
+        state = add_result(state, "latest other file", 2, material_id="other")
+        policy = WindowPolicy(max_tool_body_chars=4000, preview_chars=600)
+        report = self.inspect(state, policy=policy)
+        self.assertEqual(report["materials"][1]["window_mode"], "preview")
+
+        # Fewer characters can still take more UTF-8 bytes than the ASCII preview.
+        text = "a" * 5600 + "界" * 450
+        state = add_result(self.state, text, 0, max_chars=2800)
+        state = add_result(state, text, 1, offset=2800, max_chars=2800)
+        state = add_result(state, text, 2)
+        state = add_result(state, "latest other file", 3, material_id="other")
+        report = self.inspect(state, policy=policy)
+        self.assertEqual(report["materials"][2]["window_mode"], "preview")
 
     def test_compacted_source_cannot_be_used_as_a_duplicate_body_still_in_window(self):
         state = add_result(self.state, "same file " * 200, 0)
@@ -357,7 +452,7 @@ class WindowTests(unittest.TestCase):
         for options in (
             {"soft_input_tokens": 20000},
             {"preview_chars": 12000},
-            {"hard_request_chars": 64001},
+            {"hard_request_chars": MAX_AGENT_REQUEST_CHARS + 1},
         ):
             with self.assertRaises(ValueError):
                 WindowPolicy(**options)
@@ -378,6 +473,24 @@ class WindowTests(unittest.TestCase):
         self.assertFalse(self.inspect(state)["native_history_valid"])
         with self.assertRaises(SessionBusy):
             prepare_window_request(state, tools=REGISTRY, settings=SETTINGS)
+
+    def test_stage_window_accepts_requests_past_the_old_serialized_limit(self):
+        state = self.state
+        for index in range(5):
+            state = add_result(state, "x" * 14000, index, name="run_command")
+        pending = start_step(state)
+        with self.assertRaises(ContextCapacityError):
+            prepare_window_request(pending, tools=REGISTRY, settings=SETTINGS)
+        request, report = prepare_window_request(
+            pending, tools=REGISTRY, settings=SETTINGS, policy=STAGE_AGENT_WINDOW
+        )
+        self.assertGreater(len(request.payload_json), 64000)
+        self.assertEqual(report["budget"]["effective_hard_input_tokens"], 32000)
+        summary = plan_compaction(
+            state, tools=REGISTRY, settings=SETTINGS, policy=STAGE_AGENT_WINDOW
+        )
+        self.assertIsNotNone(summary)
+        self.assertGreater(len(summary.payload_json), 60000)
 
     def test_output_and_safety_reserves_reduce_available_input_capacity(self):
         policy = WindowPolicy(context_window_tokens=1536)

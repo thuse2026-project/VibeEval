@@ -6,6 +6,8 @@ No upstream CLI/SDK is invoked and no command executes on the host.
 """
 
 import asyncio
+import logging
+import time
 from dataclasses import replace
 
 from pydantic import ValidationError
@@ -25,6 +27,7 @@ from app.agent.session_types import (
     TokenUsage,
     ToolResult,
 )
+from app.exam_flow.types import FlowError
 from app.llm.client import LLMClient
 from app.llm.config import ContextLimitError, LLMError
 
@@ -45,8 +48,35 @@ from .runtime_types import (
 from .store import ConversationClosed
 from .window import ContextCapacityError, WindowPolicy, inspect_window
 
+logger = logging.getLogger(__name__)
 
-def runtime_registry(reader, mode, actions_available=False, file_edits_available=False):
+
+def plan_stalled(turn, report):
+    """Two consecutive exchanges with no new visible evidence end exploration."""
+    recent = turn.steps[-2:]
+    locators = {
+        (item["step_id"], item["tool_call_id"])
+        for item in report["materials"]
+        if item["window_mode"] == "locator" and item["turn_id"] == turn.id
+    }
+    return len(recent) == 2 and all(
+        step.tool_results
+        and all(
+            result.is_error or (step.id, result.tool_call_id) in locators
+            for result in step.tool_results
+        )
+        for step in recent
+    )
+
+
+def runtime_registry(
+    reader,
+    mode,
+    actions_available=False,
+    file_edits_available=False,
+    *,
+    plan_only=False,
+):
     stage = getattr(reader.workspace, "supports_stage_resources", False)
     capabilities = getattr(reader.workspace, "capabilities", None)
     command_type = RunCommand
@@ -56,7 +86,9 @@ def runtime_registry(reader, mode, actions_available=False, file_edits_available
         command_type = StageRunCommand
     if mode == "chat_only":
         return ToolRegistry()
-    reads = ReadToolService(reader).registry
+    reads = ReadToolService(reader, plan_only=plan_only).registry
+    if plan_only:
+        return reads
     registry = reads.with_tools(
         (
             ToolDefinition(
@@ -86,7 +118,7 @@ def runtime_registry(reader, mode, actions_available=False, file_edits_available
                 (
                     ToolDefinition(
                         "run_command",
-                        "Execute argv in an isolated runsc operation sharing the authorized workspace. No implicit shell: use explicit /bin/bash arguments for shell syntax. The turn may wait for approval and for the complete receipt. Nonzero exit is a program outcome. Output is bounded and archived by material IDs; expected_versions can pin observed files.",
+                        "Execute argv in an isolated runsc operation sharing the authorized workspace. For a plan-only request, use read_file or search_content for code inspection and answer without terminal approval. No implicit shell: use explicit /bin/bash arguments for shell syntax. The turn may wait for approval and for the complete receipt. Nonzero exit is a program outcome. Output is bounded and archived by material IDs; expected_versions can pin observed files.",
                         command_type,
                     ),
                 )
@@ -159,7 +191,7 @@ class RuntimeCoordinator:
             execution_backend = candidate
         self.operations = OperationService(reader, self.store, execution_backend)
 
-    def registry(self, mode):
+    def registry(self, mode, *, plan_only=False):
         backend = self.operations.backend
         return runtime_registry(
             self.reader,
@@ -171,15 +203,26 @@ class RuntimeCoordinator:
                 and callable(getattr(backend, "resume_workspace", None))
                 and callable(getattr(backend, "read_file", None))
             ),
+            plan_only=plan_only,
         )
 
     def submit(self, scope, cid, body, *, kind="turn"):
+        plan_only = kind == "turn" and body.intent == "plan"
         mode = body.mode if kind == "turn" else self.policy.mode
+        if plan_only:
+            mode = "chat_only" if self.policy.mode == "chat_only" else "read_only"
         modes = ("chat_only", "read_only", "confirm_actions", "sandbox_auto")
         if modes.index(mode) > modes.index(self.policy.mode):
             raise SessionError("requested mode exceeds server policy")
-        policy = self.policy.model_copy(update={"mode": mode})
-        registry = self.registry(mode)
+        overrides = {"mode": mode, "plan_only": plan_only}
+        if plan_only:
+            overrides.update(
+                max_model_calls=min(self.policy.max_model_calls, 5),
+                max_tool_calls=min(self.policy.max_tool_calls, 10),
+                max_total_tokens=min(self.policy.max_total_tokens, 64_000),
+            )
+        policy = self.policy.model_copy(update=overrides)
+        registry = self.registry(mode, plan_only=plan_only)
         return self.store.submit(
             scope,
             cid,
@@ -188,7 +231,11 @@ class RuntimeCoordinator:
                 "runtime": policy.model_dump(mode="json"),
                 "window": self.window_policy.model_dump(mode="json"),
                 "model": self.settings.model,
-                "max_output_tokens": self.settings.max_output_tokens,
+                "max_output_tokens": (
+                    min(self.settings.max_output_tokens, 1600)
+                    if plan_only
+                    else self.settings.max_output_tokens
+                ),
             },
             tools_sha256=registry.fingerprint,
             kind=kind,
@@ -198,6 +245,7 @@ class RuntimeCoordinator:
         state = self.store.sessions.load(scope, cid)
         current = self.store.active(scope, cid)
         mode, window, settings = "read_only", self.window_policy, self.settings
+        plan_only = False
         if current:
             with self.store.locked(scope, cid, current, open_required=False) as (
                 _,
@@ -205,13 +253,15 @@ class RuntimeCoordinator:
                 run,
             ):
                 mode = run.policy_json["runtime"]["mode"]
+                plan_only = run.policy_json["runtime"].get("plan_only", False)
                 window = WindowPolicy.model_validate(run.policy_json["window"])
                 settings = replace(settings, model=run.policy_json["model"])
         return inspect_window(
             state,
-            tools=self.registry(mode),
+            tools=self.registry(mode, plan_only=plan_only),
             settings=settings,
             policy=window,
+            plan_only=plan_only,
         )
 
     async def _attempt(
@@ -230,12 +280,20 @@ class RuntimeCoordinator:
         try:
             if kind == "model":
                 response = await self._guard_provider(
-                    call_model(request, tools=registry, client=observed), scope
+                    call_model(request, tools=registry, client=observed),
+                    scope,
+                    cid,
+                    run_id,
+                    token,
                 )
             else:
                 response = (
                     await self._guard_provider(
-                        call_compaction(request, client=observed), scope
+                        call_compaction(request, client=observed),
+                        scope,
+                        cid,
+                        run_id,
+                        token,
                     )
                 ).response
         except LLMError as exc:
@@ -244,7 +302,11 @@ class RuntimeCoordinator:
             error = (
                 "CONTEXT_LENGTH_EXCEEDED"
                 if overflow
-                else "MODEL_OUTCOME_UNKNOWN" if uncertain else "PROVIDER_REQUEST_FAILED"
+                else (
+                    "MODEL_OUTCOME_UNKNOWN"
+                    if uncertain
+                    else exc.code or "PROVIDER_REQUEST_FAILED"
+                )
             )
         # Preserve valid filtered responses/usage even when a summary was partial
         # or rejected. Never persist the raw vendor envelope or credentials.
@@ -263,9 +325,18 @@ class RuntimeCoordinator:
                             )
                         }
                     ).model_dump(mode="json")
+                    for key in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens"):
+                        count = counts.get(key)
+                        if type(count) is int and count >= 0:
+                            usage[key] = count
             except ValidationError:
                 pass
-            if response is None:
+            if response is None and not (
+                isinstance(request, PreparedModelRequest)
+                and (
+                    request.answer_only or request.payload.get("tool_choice") == "none"
+                )
+            ):
                 try:
                     response = parse_model_response(
                         observed.raw,
@@ -295,13 +366,16 @@ class RuntimeCoordinator:
             window_policy=window,
         )
 
-    async def _guard_provider(self, awaitable, scope):
+    async def _guard_provider(self, awaitable, scope, cid, run_id, token):
         if self.access_monitor is None:
             return await awaitable
 
         async def monitor():
             while True:
                 await asyncio.sleep(0.25)
+                await asyncio.to_thread(
+                    self.store.check_live, scope, cid, run_id, token
+                )
                 await asyncio.to_thread(self.access_monitor, scope)
 
         request = asyncio.create_task(awaitable)
@@ -355,9 +429,10 @@ class RuntimeCoordinator:
                         self.settings.max_output_tokens, snapshot["max_output_tokens"]
                     ),
                 )
-                registry = self.registry(policy.mode)
-                if view["known_total_tokens"] >= policy.max_total_tokens:
-                    raise RunBudgetExceeded()
+                registry = self.registry(policy.mode, plan_only=policy.plan_only)
+                remaining = policy.max_total_tokens - view["budget_used_tokens"]
+                if remaining <= 0:
+                    raise RunBudgetExceeded("RUN_TOKEN_BUDGET_EXHAUSTED")
                 if registry.fingerprint != tools_hash:
                     return self.store.stop(
                         scope, cid, run_id, "failed", "TOOL_PLAN_CHANGED", token=token
@@ -399,11 +474,38 @@ class RuntimeCoordinator:
                                 )
                             self.store.clear_compaction(scope, cid, run_id, token)
                     if pending is None and active and active.status == "ready":
-                        report = inspect_window(
-                            state, tools=registry, settings=settings, policy=window
+                        last_call = (
+                            view["model_calls"] == policy.max_model_calls - 1
+                            or view["tool_calls"] >= policy.max_tool_calls
                         )
+                        report = inspect_window(
+                            state,
+                            tools=registry,
+                            settings=settings,
+                            policy=window,
+                            answer_only=last_call,
+                            plan_only=policy.plan_only,
+                        )
+                        if not last_call:
+                            last_call = remaining < 2 * self.store.request_cost(
+                                report
+                            ) or (policy.plan_only and plan_stalled(active, report))
+                            if last_call:
+                                report = inspect_window(
+                                    state,
+                                    tools=registry,
+                                    settings=settings,
+                                    policy=window,
+                                    answer_only=True,
+                                    plan_only=policy.plan_only,
+                                )
                         if (
                             report["budget"]["over_soft_limit"]
+                            and (
+                                not policy.plan_only
+                                or report["budget"]["over_hard_limit"]
+                            )
+                            and (not last_call or report["budget"]["over_hard_limit"])
                             and view["compaction_calls"] < policy.max_compactions
                         ):
                             pending = self.store.reserve(
@@ -427,15 +529,17 @@ class RuntimeCoordinator:
                                 tools=registry,
                                 settings=settings,
                                 window_policy=window,
-                                trigger="initial",
+                                trigger="budget_answer" if last_call else "initial",
                             )
                     elif (
                         pending is None and active and active.status == "awaiting_tools"
                     ):
                         if view["tool_calls"] >= policy.max_tool_calls:
-                            raise RunBudgetExceeded()
+                            self.store.skip_pending_tools(scope, cid, run_id, token)
+                            continue
                         step_id = active.steps[-1].id
                         call = pending_tool_calls(state)[0]
+                        tool_started = time.monotonic()
                         args = registry.parse_arguments(call)
                         interaction = self.store.interaction(
                             scope, cid, run_id, step_id, call
@@ -553,7 +657,9 @@ class RuntimeCoordinator:
                                             )
                                 else:
                                     result = ReadToolService(
-                                        self.reader, policy=decision
+                                        self.reader,
+                                        policy=decision,
+                                        registry=registry if policy.plan_only else None,
                                     ).execute(scope, cid, step_id, call.id)
                             except ReadingApprovalRequired as exc:
                                 self.store.wait(
@@ -572,7 +678,15 @@ class RuntimeCoordinator:
                                     },
                                 )
                                 return self.store.get(scope, cid, run_id)
-                        self.store.supply(scope, cid, run_id, token, step_id, result)
+                        self.store.supply(
+                            scope,
+                            cid,
+                            run_id,
+                            token,
+                            step_id,
+                            result,
+                            duration_ms=int((time.monotonic() - tool_started) * 1000),
+                        )
                         continue
                     elif (
                         pending is None
@@ -614,13 +728,13 @@ class RuntimeCoordinator:
                 "CONTEXT_CAPACITY_EXCEEDED",
                 token=token,
             )
-        except RunBudgetExceeded:
+        except RunBudgetExceeded as error:
             return self.store.stop(
                 scope,
                 cid,
                 run_id,
                 "budget_exhausted",
-                "RUN_BUDGET_EXHAUSTED",
+                error.code,
                 token=token,
             )
         except ConversationClosed:
@@ -640,4 +754,13 @@ class RuntimeCoordinator:
         except SessionError:
             return self.store.stop(
                 scope, cid, run_id, "failed", "SESSION_STATE_CHANGED", token=token
+            )
+        except FlowError:
+            raise
+        except Exception as error:
+            logger.error(
+                "Agent run %s failed in the runtime: %s", run_id, type(error).__name__
+            )
+            return self.store.stop(
+                scope, cid, run_id, "unknown", "AGENT_RUNTIME_ERROR", token=token
             )

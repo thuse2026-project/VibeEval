@@ -39,6 +39,7 @@ from app.agent_integration.reading_types import (
     ReadDecision,
     ReadingApprovalRequired,
     ReadingError,
+    SearchContent,
     Utf16Selection,
 )
 from app.agent_integration.sources import SourceReader, matches, safe_relative
@@ -64,6 +65,36 @@ from app.workspace.service import WorkspaceReader
 
 
 class MaterialProjectionTests(unittest.TestCase):
+    def test_searching_one_file_does_not_load_the_tree_or_other_files(self):
+        workspace = WorkspaceFixture()
+        reader = SourceReader(None, workspace=workspace)
+        result = reader.search(
+            "scope", SearchContent(query="needle", pattern="src/main.py")
+        )
+        self.assertEqual(workspace.calls, 1)
+        self.assertEqual(result.metadata["observed_versions"], {"src/main.py": 1})
+        (hit,) = json.loads(result.text)["items"]
+        self.assertEqual((hit["path"], hit["line"]), ("src/main.py", 2))
+
+    def test_wide_search_limits_files_and_can_continue_after_no_hits(self):
+        workspace = Mock()
+        workspace.read_many.side_effect = lambda _, paths: {
+            path: {"version": 1, "content": "unrelated"} for path in paths
+        }
+        files = [f"src/file-{index:02}.py" for index in range(20)]
+        reader = SourceReader(None, workspace=workspace, manifest=files)
+        query = SearchContent(query="needle", pattern="src/*.py")
+        first = json.loads(reader.search("scope", query).text)
+        self.assertEqual(first["items"], [])
+        self.assertEqual(workspace.read_many.call_args.args, ("scope", files[:16]))
+        next_page = query.model_copy(update={"path_offset": first["next_path_offset"]})
+        second = json.loads(reader.search("scope", next_page).text)
+        self.assertIsNone(second["next_path_offset"])
+        self.assertEqual(
+            workspace.read_many.call_args.args, ("scope", files[16:])
+        )
+        workspace.read.assert_not_called()
+
     def test_utf16_crlf_and_inclusive_lines_keep_precise_offsets(self):
         text = "a😀b\r\n第二行\n"
         selection = Utf16Selection(

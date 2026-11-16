@@ -47,7 +47,10 @@ def build_app(questions, resources, *, factory=None, accounts=None):
     factory = factory or get_session_factory()
     flow = ExamFlowService(PostgresFlowStore(factory), questions, resources)
     return create_app(
-        accounts=accounts, entry_store=PostgresEntryStore(factory), exam_flow=flow
+        accounts=accounts,
+        entry_store=PostgresEntryStore(factory),
+        exam_flow=flow,
+        stage_agent_worker=getattr(resources, "supports_stage_resources", False),
     )
 
 

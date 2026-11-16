@@ -10,6 +10,8 @@ from .reading_types import (
     GlobFiles,
     ListDirectory,
     Page,
+    PlanReadFile,
+    PlanSearchContent,
     ReadConversation,
     ReadDecision,
     ReadFile,
@@ -52,24 +54,24 @@ WORKSPACE_DEFINITIONS = (
     ),
     (
         "glob_files",
-        "Find published workspace paths using a glob. Results include versions but do not constitute reading their bodies. No host paths.",
+        "Find published workspace paths using a glob. Use read_file to obtain file contents and a current version. No host paths.",
         GlobFiles,
     ),
     (
         "search_content",
-        "Search literal text in published workspace files, returning bounded line excerpts, observed versions, and pagination. Search hits are not full-file reads; use read_file to inspect surrounding code.",
+        "Search literal text in published workspace files. When investigating a named file, use its exact path as pattern, even if the symbol is uncertain. For a directory, use a narrow pattern such as src/*.py. Results cover at most 16 matching files. Use next_offset for more hits within the same file page. Use next_path_offset as path_offset with offset=0 for more files. Use returned line numbers to read only missing context.",
         SearchContent,
     ),
     (
         "read_file",
-        "Read a bounded fragment of an authorized sandbox file. Optionally pin expected_version; changes return SOURCE_VERSION_CHANGED. Lines are 1-based inclusive; UTF16 editor selections have an exclusive end. Returned offsets count Unicode codepoints; use material_id for stable follow-up reads.",
+        "Read an authorized workspace file by its relative path. When the user names a file, read it directly. Reuse earlier excerpts and read only lines needed for the requested answer. For a plan, stop exploring once you can give the plan. Optionally pin expected_version; changes return SOURCE_VERSION_CHANGED. Lines are 1-based inclusive, UTF16 selections have an exclusive end, and returned offsets count Unicode codepoints.",
         ReadFile,
     ),
 )
 
 
 class ReadToolService:
-    def __init__(self, reader, *, policy=None):
+    def __init__(self, reader, *, policy=None, plan_only=False, registry=None):
         self.reader = reader
         self.store = reader.store
         self.policy = policy
@@ -84,7 +86,26 @@ class ReadToolService:
                     ReadSource,
                 )
             )
-        self.registry = ToolRegistry([ToolDefinition(*item) for item in definitions])
+        if plan_only:
+            plan_schemas = {
+                "read_file": PlanReadFile,
+                "search_content": PlanSearchContent,
+                "list_directory": ListDirectory,
+                "glob_files": GlobFiles,
+                "read_reference": ReadReference,
+                "read_material": ReadMaterial,
+                "read_source": ReadSource,
+            }
+            definitions = [
+                (name, description, plan_schemas[name])
+                for name, description, _ in definitions
+                if name in plan_schemas
+            ]
+        self.registry = (
+            registry
+            if registry is not None
+            else ToolRegistry([ToolDefinition(*item) for item in definitions])
+        )
 
     def execute(self, scope_id, conversation_id, step_id, tool_call_id):
         """Dispatch only an actual pending call from persisted core state.

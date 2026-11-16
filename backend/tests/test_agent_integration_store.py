@@ -212,6 +212,28 @@ class AgentIntegrationStoreTests(unittest.TestCase):
                 [],
             )
 
+    def test_http_rename_updates_one_owned_conversation_without_changing_history(self):
+        url = f"{self.prefix}/{self.initial.id}"
+        with self.client() as client:
+            second = client.post(self.prefix, json={"title": "第二条对话"}).json()
+            self.assertEqual(client.patch(url, json={"title": " "}).status_code, 422)
+            self.assertEqual(client.patch(url, json={}).status_code, 422)
+            response = client.patch(url, json={"title": "  排查分页  "})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["title"], "排查分页")
+        with self.client(owned=False) as outsider:
+            self.assertEqual(
+                outsider.patch(url, json={"title": "他人改名"}).status_code, 404
+            )
+        with self.client() as restored:
+            titles = {
+                item["conversation_id"]: item["title"]
+                for item in restored.get(self.prefix).json()["items"]
+            }
+            self.assertEqual(titles[self.initial.id], "排查分页")
+            self.assertEqual(titles[second["conversation_id"]], "第二条对话")
+        self.assertEqual(self.store.load(self.scope, self.initial.id), self.initial)
+
     def test_http_auth_disabled_flag_and_input_cannot_replace_server_state(self):
         with self.client(owned=False) as outsider:
             self.assertEqual(outsider.get(self.prefix).status_code, 404)
@@ -256,6 +278,12 @@ class AgentIntegrationStoreTests(unittest.TestCase):
             self.store.create(create_conversation(self.scope))
         with self.client() as client:
             self.assertEqual(client.post(self.prefix, json={}).status_code, 409)
+            self.assertEqual(
+                client.patch(
+                    f"{self.prefix}/{self.initial.id}", json={"title": "已结束"}
+                ).status_code,
+                409,
+            )
             self.assertEqual(
                 client.get(f"{self.prefix}/{self.initial.id}/history").status_code, 200
             )

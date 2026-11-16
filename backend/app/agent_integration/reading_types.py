@@ -54,6 +54,7 @@ class SearchContent(Page):
     query: str = Field(min_length=1, max_length=200)
     pattern: str = Field(default="**/*", min_length=1, max_length=500)
     case_sensitive: bool = False
+    path_offset: int = Field(default=0, strict=True, ge=0)
 
 
 class ReadText(FrozenModel):
@@ -69,6 +70,14 @@ class ReadFile(ReadText):
 
 class ReadMaterial(ReadText):
     material_id: Identifier
+
+
+class PlanReadFile(ReadFile):
+    max_chars: int = Field(default=4500, strict=True, ge=1, le=4500)
+
+
+class PlanSearchContent(SearchContent):
+    limit: int = Field(default=8, strict=True, ge=1, le=16)
 
 
 class ReadConversation(ReadText):

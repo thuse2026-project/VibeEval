@@ -4,6 +4,7 @@ Every mutation locks exam -> conversation -> run. Provider I/O never holds these
 locks. Prepared attempts can be resumed; dispatched attempts are never replayed.
 """
 
+import json
 import time
 import uuid
 from contextlib import contextmanager
@@ -15,12 +16,13 @@ from app.agent import (
     begin_turn,
     fail_step,
     interrupt_turn,
+    pending_tool_calls,
     start_step,
     supply_tool_results,
 )
 from app.agent.compaction import CompactionResult
 from app.agent.session import release_context_rejected_step
-from app.agent.session_types import SessionConflict, SessionError
+from app.agent.session_types import SessionConflict, SessionError, ToolResult
 from app.db.models import AgentAttempt, AgentInteraction, AgentRun
 from app.db.session import session_scope
 from app.llm.config import LLMError
@@ -32,6 +34,7 @@ from .store import ConversationClosed, ConversationNotFound
 from .window import (
     adopt_window_compaction,
     compaction_manifest,
+    inspect_window,
     plan_compaction,
     prepare_window_request,
 )
@@ -102,10 +105,28 @@ class RunStore:
         ]
         complete = all(type(n) is int for n in counts)
         known = sum(n for n in counts if type(n) is int)
+        estimated = sum(
+            (a.manifest_json or {}).get("budget", {}).get("estimated_input_tokens", 0)
+            + (a.manifest_json or {}).get("budget", {}).get("reserved_output_tokens", 0)
+            for a, count in zip(attempts, counts, strict=True)
+            if type(count) is not int
+        )
+
+        def aggregate(field):
+            values = [(a.usage_json or {}).get(field) for a in attempts]
+            return (
+                sum(values) if values and all(type(n) is int for n in values) else None
+            )
+
         return {
             "known_total_tokens": known,
+            "budget_used_tokens": known + estimated,
             "usage_complete": complete,
             "total_tokens": known if complete else None,
+            "prompt_tokens": aggregate("prompt_tokens"),
+            "completion_tokens": aggregate("completion_tokens"),
+            "prompt_cache_hit_tokens": aggregate("prompt_cache_hit_tokens"),
+            "prompt_cache_miss_tokens": aggregate("prompt_cache_miss_tokens"),
         }
 
     def view(self, db, run):
@@ -131,6 +152,18 @@ class RunStore:
     def get(self, scope, cid, run_id):
         with self.locked(scope, cid, run_id, open_required=False) as (db, _, run):
             return self.view(db, run)
+
+    def check_live(self, scope, cid, run_id, token):
+        with self.factory() as db:
+            run = db.get(AgentRun, run_id)
+            if run is None or (run.exam_session_id, run.conversation_id) != (
+                scope,
+                cid,
+            ):
+                raise LeaseLost("run unavailable")
+            self._lease(run, token)
+            if int(self.clock()) >= run.deadline_at:
+                raise ConversationClosed()
 
     def list(self, scope, cid, *, offset=0, limit=20):
         with session_scope(self.factory) as db:
@@ -199,6 +232,8 @@ class RunStore:
 
     def submit(self, scope, cid, body, *, policy, tools_sha256, kind="turn"):
         intent = body.model_dump(mode="json")
+        if intent.get("intent") == "default":
+            intent.pop("intent")
         validate_json_text(intent)
         intent_hash = digest(encoded({"kind": kind, "intent": intent}))
         with session_scope(self.factory) as db:
@@ -386,9 +421,11 @@ class RunStore:
             if existing:
                 return existing.attempt_id, existing.kind, existing.request_json
             policy = RunPolicy.model_validate(run.policy_json["runtime"])
+            remaining = (
+                policy.max_total_tokens - self.usage(db, run)["budget_used_tokens"]
+            )
             if (
-                self.usage(db, run)["known_total_tokens"] >= policy.max_total_tokens
-                or kind == "model"
+                kind == "model"
                 and run.model_calls >= policy.max_model_calls
                 or kind == "compaction"
                 and run.compaction_calls >= policy.max_compactions
@@ -397,12 +434,50 @@ class RunStore:
             state = self.sessions._state(conv)
             if kind == "model":
                 updated = start_step(state)
-                request, manifest = prepare_window_request(
-                    updated, tools=tools, settings=settings, policy=window_policy
+                previous = db.scalar(
+                    select(AgentAttempt)
+                    .where(
+                        AgentAttempt.run_id == run_id,
+                        AgentAttempt.kind == "model",
+                    )
+                    .order_by(AgentAttempt.sequence.desc())
+                    .limit(1)
                 )
+                request, manifest = prepare_window_request(
+                    updated,
+                    tools=tools,
+                    settings=settings,
+                    policy=window_policy,
+                    answer_only=trigger == "budget_answer",
+                    plan_only=policy.plan_only,
+                    repair_tool_arguments=previous is not None
+                    and previous.status == "rejected"
+                    and previous.error_code == "MODEL_TOOL_ARGUMENTS_INVALID",
+                )
+                if self.request_cost(manifest) > remaining:
+                    raise RunBudgetExceeded("RUN_TOKEN_BUDGET_EXHAUSTED")
                 self.save_state(db, conv, updated)
                 run.model_calls += 1
             else:
+                if trigger == "threshold" and db.scalar(
+                    select(AgentAttempt.attempt_id)
+                    .where(
+                        AgentAttempt.run_id == run_id,
+                        AgentAttempt.trigger == "threshold",
+                        AgentAttempt.status.in_(("rejected", "failed", "unknown")),
+                    )
+                    .limit(1)
+                ):
+                    report = inspect_window(
+                        state,
+                        tools=tools,
+                        settings=settings,
+                        policy=window_policy,
+                        answer_only=run.model_calls == policy.max_model_calls - 1,
+                        plan_only=policy.plan_only,
+                    )
+                    if not report["budget"]["over_hard_limit"]:
+                        return None
                 planning = (
                     window_policy.model_copy(update={"keep_recent_turns": 0})
                     if trigger in ("manual", "overflow", "agent")
@@ -418,6 +493,10 @@ class RunStore:
                 if request is None:
                     return None
                 manifest = compaction_manifest(request)
+                if self.request_cost(manifest) > remaining:
+                    if trigger == "threshold":
+                        return None
+                    raise RunBudgetExceeded("RUN_TOKEN_BUDGET_EXHAUSTED")
                 run.compaction_calls += 1
             sequence = (
                 db.scalar(
@@ -455,6 +534,11 @@ class RunStore:
             )
             db.flush()
             return row.attempt_id, kind, row.request_json
+
+    @staticmethod
+    def request_cost(manifest):
+        budget = manifest["budget"]
+        return budget["estimated_input_tokens"] + budget["reserved_output_tokens"]
 
     def prepared(self, scope, cid, run_id, token):
         with self.locked(scope, cid, run_id) as (db, _, run):
@@ -540,11 +624,52 @@ class RunStore:
                     )
                 self.event(db, conv, attempt.kind + ".late", run, attempt_id=attempt_id)
                 return self.view(db, run)
+
+            def end_after_failure(status, code):
+                if (
+                    attempt.kind == "compaction"
+                    and attempt.trigger == "threshold"
+                    and state.active_turn is not None
+                    and state.active_turn.status == "ready"
+                ):
+                    report = inspect_window(
+                        state,
+                        tools=tools,
+                        settings=settings,
+                        policy=window_policy,
+                        answer_only=run.model_calls
+                        == run.policy_json["runtime"]["max_model_calls"] - 1,
+                        plan_only=run.policy_json["runtime"].get("plan_only", False),
+                    )
+                    if not report["budget"]["over_hard_limit"]:
+                        return
+                self._end(db, conv, run, status, code)
+
             if context_limit and attempt.kind == "model" and run.overflow_retries == 0:
                 self.save_state(
                     db, conv, release_context_rejected_step(state, attempt.step_id)
                 )
                 run.overflow_retries, run.compact_requested = 1, "overflow"
+                attempt.status = "rejected"
+            elif (
+                attempt.kind == "model"
+                and error_code == "MODEL_TOOL_ARGUMENTS_INVALID"
+                and run.model_calls < run.policy_json["runtime"]["max_model_calls"]
+                and json.loads(attempt.request_json["payload_json"]).get("tool_choice")
+                == "auto"
+                and not db.scalar(
+                    select(AgentAttempt.attempt_id)
+                    .where(
+                        AgentAttempt.run_id == run_id,
+                        AgentAttempt.sequence < attempt.sequence,
+                        AgentAttempt.error_code == "MODEL_TOOL_ARGUMENTS_INVALID",
+                    )
+                    .limit(1)
+                )
+            ):
+                self.save_state(
+                    db, conv, release_context_rejected_step(state, attempt.step_id)
+                )
                 attempt.status = "rejected"
             elif error_code or response is None:
                 attempt.status = "unknown" if uncertain else "failed"
@@ -558,10 +683,7 @@ class RunStore:
                             error_code=error_code or "MODEL_RESPONSE_INVALID",
                         ),
                     )
-                self._end(
-                    db,
-                    conv,
-                    run,
+                end_after_failure(
                     (
                         "unknown"
                         if uncertain
@@ -609,7 +731,7 @@ class RunStore:
                         "rejected",
                         "COMPACTION_NOT_ADOPTED",
                     )
-                    self._end(db, conv, run, "failed", attempt.error_code)
+                    end_after_failure("failed", attempt.error_code)
                 else:
                     attempt.status = "adopted"
                     run.compact_requested = None
@@ -645,7 +767,7 @@ class RunStore:
                 self._end(db, conv, run, status, code)
             return self.view(db, run)
 
-    def supply(self, scope, cid, run_id, token, step_id, result):
+    def supply(self, scope, cid, run_id, token, step_id, result, *, duration_ms=None):
         with self.locked(scope, cid, run_id) as (db, conv, run):
             self._lease(run, token)
             if int(self.clock()) >= run.deadline_at:
@@ -657,6 +779,41 @@ class RunStore:
             if updated != state:
                 run.tool_calls += 1
                 self.save_state(db, conv, updated)
+                if duration_ms is not None:
+                    self.event(
+                        db,
+                        conv,
+                        "tool.finished",
+                        run,
+                        tool_call_id=result.tool_call_id,
+                        duration_ms=duration_ms,
+                        is_error=result.is_error,
+                    )
+
+    def skip_pending_tools(self, scope, cid, run_id, token):
+        with self.locked(scope, cid, run_id) as (db, conv, run):
+            self._lease(run, token)
+            if int(self.clock()) >= run.deadline_at:
+                raise ConversationClosed()
+            state = self.sessions._state(conv)
+            step = state.active_turn.steps[-1]
+            skipped = pending_tool_calls(state)
+            updated = supply_tool_results(
+                state,
+                step.id,
+                [
+                    ToolResult(
+                        tool_call_id=call.id,
+                        is_error=True,
+                        content=encoded(
+                            {"status": "error", "code": "TOOL_BUDGET_EXHAUSTED"}
+                        ),
+                    )
+                    for call in skipped
+                ],
+            )
+            self.save_state(db, conv, updated)
+            self.event(db, conv, "run.tools_skipped", run, count=len(skipped))
 
     def request_compaction(self, scope, cid, run_id, *, trigger="manual"):
         with self.locked(scope, cid, run_id) as (db, conv, run):
