@@ -76,9 +76,29 @@ class FileChangeTests(unittest.TestCase):
                 ),
             )
 
+    def test_lf_patch_preserves_crlf_source_and_inserted_lines(self):
+        before = "head\r\na = 1\r\nb = 2\r\ntail"
+        patch = self.patch(
+            {"old_text": "a = 1\nb = 2\n", "new_text": "a = 3\nb = 4\nextra\n"}
+        )
+        self.assertEqual(
+            proposed_text(before, patch), "head\r\na = 3\r\nb = 4\r\nextra\r\ntail"
+        )
+
+    def test_newline_compatibility_still_rejects_ambiguous_or_mixed_context(self):
+        for before, old, code in (
+            ("a\r\nb\r\na\r\nb\r\n", "a\nb\n", "PATCH_CONTEXT_AMBIGUOUS"),
+            ("a\r\nb\n", "a\nb\n", "PATCH_CONTEXT_NOT_FOUND"),
+        ):
+            with self.subTest(before=before), self.assertRaises(ReadingError) as raised:
+                proposed_text(before, self.patch({"old_text": old, "new_text": "x\n"}))
+            self.assertEqual(raised.exception.code, code)
+
     def test_patch_does_not_normalize_whitespace_and_empty_context_is_invalid(self):
         with self.assertRaises(ReadingError):
-            proposed_text("a\r\nb", self.patch({"old_text": "a\nb", "new_text": "x"}))
+            proposed_text(
+                "\ta\r\nb", self.patch({"old_text": " a\nb", "new_text": "x"})
+            )
         with self.assertRaises(ValidationError):
             self.patch({"old_text": "", "new_text": "insert"})
 

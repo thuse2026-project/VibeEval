@@ -135,7 +135,7 @@ def runtime_registry(
                     ),
                     ToolDefinition(
                         "apply_patch",
-                        "Propose ordered exact text replacements in one writable file, pinned by expected_version. Each old_text must occur exactly once at its stage; ambiguous or absent context fails the entire proposal without writing. Matching preserves line endings; no fuzzy match. The server may require approval before applying.",
+                        "Propose ordered exact text replacements in one writable file, pinned by expected_version. Each old_text must occur exactly once at its stage; ambiguous or absent context fails the entire proposal without writing. For a uniformly CRLF file, LF patch strings are converted to CRLF, preserving the source convention. No whitespace or fuzzy matching. The server may require approval before applying.",
                         StageApplyPatch if stage else ApplyPatch,
                     ),
                 )

@@ -56,13 +56,22 @@ def proposed_text(before, args):
         after = args.content
     else:
         after = before
+        # Model JSON commonly uses LF even when a published file uses CRLF.
+        # Match exact text in the file's uniform newline convention, retaining
+        # all other bytes and the existing uniqueness check. Mixed files keep
+        # the original strict behavior rather than choosing a convention.
+        crlf = "\r\n" in before and "\n" not in before.replace("\r\n", "")
         for edit in args.edits:
-            index = after.find(edit.old_text)
+            old, new = edit.old_text, edit.new_text
+            if crlf:
+                old = old.replace("\r\n", "\n").replace("\n", "\r\n")
+                new = new.replace("\r\n", "\n").replace("\n", "\r\n")
+            index = after.find(old)
             if index < 0:
                 raise ReadingError("PATCH_CONTEXT_NOT_FOUND")
-            if after.find(edit.old_text, index + 1) >= 0:
+            if after.find(old, index + 1) >= 0:
                 raise ReadingError("PATCH_CONTEXT_AMBIGUOUS")
-            after = after[:index] + edit.new_text + after[index + len(edit.old_text) :]
+            after = after[:index] + new + after[index + len(old) :]
     try:
         encode_content(after)
     except ValueError:
