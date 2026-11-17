@@ -182,6 +182,32 @@
 .candidate-workspace .agent-message.user { margin-left: 10px; background: #eff6ff; }
 .candidate-workspace .agent-message b, .candidate-workspace .agent-interaction b { color: #334155; font-size: 12px; }
 .candidate-workspace .agent-message p { margin: 5px 0 0; color: #1e293b; font-size: 13px; white-space: pre-wrap; }
+.candidate-workspace .agent-markdown { margin-top: 5px; color: #1e293b; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.candidate-workspace .agent-markdown > :first-child { margin-top: 0; }
+.candidate-workspace .agent-markdown > :last-child { margin-bottom: 0; }
+.candidate-workspace .agent-markdown p { margin: 8px 0; white-space: normal; }
+.candidate-workspace .agent-markdown h1,
+.candidate-workspace .agent-markdown h2,
+.candidate-workspace .agent-markdown h3,
+.candidate-workspace .agent-markdown h4,
+.candidate-workspace .agent-markdown h5,
+.candidate-workspace .agent-markdown h6 { margin: 14px 0 6px; line-height: 1.4; }
+.candidate-workspace .agent-markdown h1 { font-size: 19px; }
+.candidate-workspace .agent-markdown h2 { font-size: 17px; }
+.candidate-workspace .agent-markdown h3,
+.candidate-workspace .agent-markdown h4,
+.candidate-workspace .agent-markdown h5,
+.candidate-workspace .agent-markdown h6 { font-size: 15px; }
+.candidate-workspace .agent-markdown ul,
+.candidate-workspace .agent-markdown ol { margin: 8px 0; padding-left: 22px; }
+.candidate-workspace .agent-markdown li { padding-left: 2px; }
+.candidate-workspace .agent-markdown li + li { margin-top: 3px; }
+.candidate-workspace .agent-markdown code,
+.candidate-workspace .agent-markdown pre { font-family: "Cascadia Code", Consolas, monospace; }
+.candidate-workspace .agent-markdown :not(pre) > code { padding: 1px 4px; border: 1px solid #e2e8f0; border-radius: 3px; background: #f1f5f9; font-size: .92em; }
+.candidate-workspace .agent-markdown pre { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; margin: 10px 0; padding: 10px; border: 1px solid #334155; border-radius: 5px; background: #0f172a; color: #e2e8f0; line-height: 1.5; }
+.candidate-workspace .agent-markdown pre code { white-space: pre; font-size: 11px; }
+.candidate-workspace .agent-markdown blockquote { margin: 8px 0; padding-left: 10px; border-left: 3px solid #94a3b8; color: #475569; }
 .candidate-workspace .agent-run-state { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #475569; font-size: 11px; overflow-wrap: anywhere; }
 .candidate-workspace .agent-run-state button { flex: none; padding: 4px 9px; }
 .candidate-workspace .agent-activity { margin: 8px 0; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }

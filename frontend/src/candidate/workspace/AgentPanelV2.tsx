@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import DOMPurify from 'dompurify'
+import { Marked } from 'marked'
 import {
   createAgentApi,
   streamAgentEvents,
@@ -27,6 +29,23 @@ type Props = {
   onWorkspaceChange: (change: AgentFileChange) => void
 }
 type Message = { role: 'user' | 'assistant'; text: string }
+
+const markdown = new Marked({
+  gfm: true,
+  renderer: {
+    html: token => token.text.replace(/[&<>"']/g, character => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[character]!),
+  },
+})
+
+function renderMarkdown(source: string) {
+  return { __html: DOMPurify.sanitize(markdown.parse(source) as string) }
+}
 
 const activeStatuses = new Set(['queued', 'running', 'waiting_approval', 'waiting_user_input', 'waiting_operation'])
 const statusLabel: Record<string, string> = {
@@ -383,7 +402,10 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
       <div className="agent-messages" aria-live="polite">
         {messages.length === 0 && <p className="agent-empty">可以让 Agent 阅读已保存的文件并给出计划。{canExecute && '切到执行模式后，修改文件和运行命令会请求批准。'}</p>}
         {messages.map((message, index) => <article className={`agent-message ${message.role}`} key={`${index}-${message.role}`}>
-          <b>{message.role === 'user' ? '你' : 'Agent'}</b><p>{message.text}</p>
+          <b>{message.role === 'user' ? '你' : 'Agent'}</b>
+          {message.role === 'assistant'
+            ? <div className="agent-markdown" dangerouslySetInnerHTML={renderMarkdown(message.text)} />
+            : <p>{message.text}</p>}
         </article>)}
         {(reads.length > 0 || operations.length > 0) && <details className="agent-activity" aria-label="Agent 操作记录">
           <summary>工具活动（{reads.length + operations.length}）</summary>
