@@ -187,7 +187,7 @@ def project_model_input(
     context_transform=None,
     answer_only: bool = False,
     plan_only: bool = False,
-    repair_tool_arguments: bool = False,
+    repair_tool_arguments: bool | dict = False,
 ) -> dict:
     """Project inspectable input before transport size/pair validation.
 
@@ -265,11 +265,20 @@ def project_model_input(
             }
         )
     if repair_tool_arguments:
+        diagnostic = (
+            " Validation diagnostics (field values are omitted): "
+            + json.dumps(repair_tool_arguments, ensure_ascii=True, allow_nan=False)
+            + "."
+            if isinstance(repair_tool_arguments, dict)
+            else ""
+        )
         messages.append(
             {
                 "role": "system",
                 "content": "Your preceding tool request had invalid arguments and was not "
-                "executed. If more evidence is essential, use a declared tool and valid "
+                "executed."
+                + diagnostic
+                + " If more evidence is essential, use a declared tool and valid "
                 "JSON arguments matching its schema. Otherwise answer from the evidence already collected.",
             }
         )
@@ -321,7 +330,7 @@ def prepare_model_request(
     context_transform=None,
     answer_only: bool = False,
     plan_only: bool = False,
-    repair_tool_arguments: bool = False,
+    repair_tool_arguments: bool | dict = False,
 ) -> PreparedModelRequest:
     """Prepare one already-started step; this function never calls the model."""
     turn = state.active_turn
@@ -402,7 +411,14 @@ def parse_model_response(
             ).as_call()
             try:
                 tools.parse_arguments(call)
-            except (LLMError, ValueError, KeyError, TypeError):
+            except LLMError as exc:
+                raise LLMError(
+                    502,
+                    "模型工具参数无效",
+                    code="MODEL_TOOL_ARGUMENTS_INVALID",
+                    diagnostic=exc.diagnostic,
+                ) from None
+            except (ValueError, KeyError, TypeError):
                 raise LLMError(
                     502, "模型工具参数无效", code="MODEL_TOOL_ARGUMENTS_INVALID"
                 ) from None

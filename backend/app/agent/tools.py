@@ -56,8 +56,18 @@ class ToolDefinition:
             raise LLMError(502, "模型返回了未声明的工具调用")
         try:
             return self.input_model.model_validate_json(call.arguments, strict=True)
-        except ValidationError:
-            raise LLMError(502, "模型返回的工具参数不符合声明的 schema") from None
+        except ValidationError as exc:
+            issues = []
+            for error in exc.errors(
+                include_url=False, include_context=False, include_input=False
+            )[:8]:
+                path = ".".join(str(part) for part in error.get("loc", ())) or "$"
+                issues.append({"path": path[:256], "type": error["type"][:128]})
+            raise LLMError(
+                502,
+                "模型返回的工具参数不符合声明的 schema",
+                diagnostic={"tool": self.name, "issues": issues},
+            ) from None
 
 
 class ToolRegistry:
@@ -90,4 +100,11 @@ class ToolRegistry:
         for tool in self._tools:
             if tool.name == call.name:
                 return tool.parse_arguments(call)
-        raise LLMError(502, "模型返回了未声明的工具调用")
+        raise LLMError(
+            502,
+            "模型返回了未声明的工具调用",
+            diagnostic={
+                "tool": call.name,
+                "issues": [{"path": "$", "type": "undeclared_tool"}],
+            },
+        )

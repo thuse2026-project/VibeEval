@@ -338,7 +338,7 @@ class ContextCheckpoint(FrozenModel):
     source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     summary: str = Field(min_length=1, max_length=16000)
     model: str = Field(min_length=1, max_length=200)
-    prompt_version: Literal["1", "2"] = "1"
+    prompt_version: Literal["1", "2", "3"] = "1"
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     response_id: str | None = None
     usage: TokenUsage | None = None

@@ -640,7 +640,14 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
         )
 
     def test_malformed_tool_arguments_can_be_corrected_once(self):
-        invalid = completion(calls=(("read_file", {}),))
+        invalid = completion(
+            calls=(
+                (
+                    "read_file",
+                    {"path": "src/main.py", "rogue": "runtime-fixture-secret"},
+                ),
+            )
+        )
         final = completion()
         final["usage"].update(prompt_cache_hit_tokens=6, prompt_cache_miss_tokens=2)
         service = self.coordinator([invalid, READ, final])
@@ -653,13 +660,49 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
                 if m["role"] == "system"
             )
         )
+        repair_prompt = next(
+            m["content"]
+            for m in self.requests[1]["messages"]
+            if m["role"] == "system" and "invalid arguments" in m["content"]
+        )
+        self.assertIn('"tool": "read_file"', repair_prompt)
+        self.assertIn('"path": "rogue"', repair_prompt)
+        self.assertIn('"type": "extra_forbidden"', repair_prompt)
+        self.assertNotIn("runtime-fixture-secret", repair_prompt)
         with self.factory() as db:
+            rejected = db.scalar(
+                select(AgentAttempt).where(
+                    AgentAttempt.run_id == done["run_id"], AgentAttempt.sequence == 1
+                )
+            )
+            self.assertNotIn(
+                "runtime-fixture-secret", json.dumps(rejected.response_json)
+            )
             last = db.scalar(
                 select(AgentAttempt).where(
                     AgentAttempt.run_id == done["run_id"], AgentAttempt.sequence == 3
                 )
             )
             self.assertEqual(last.usage_json["prompt_cache_hit_tokens"], 6)
+
+    def test_malformed_tool_arguments_stop_after_one_repair(self):
+        invalid = completion(calls=(("read_file", {}),))
+        service = self.coordinator([invalid, invalid])
+        done = self.advance(service, self.submit(service))
+        self.assertEqual(
+            (done["status"], done["error_code"], done["model_calls"]),
+            ("failed", "MODEL_TOOL_ARGUMENTS_INVALID", 2),
+        )
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(
+            sum(
+                "invalid arguments" in message["content"]
+                for request in self.requests
+                for message in request["messages"]
+                if message["role"] == "system"
+            ),
+            1,
+        )
 
     def test_last_model_call_answers_with_existing_read_results(self):
         service = self.coordinator(

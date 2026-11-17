@@ -20,7 +20,9 @@ from app.agent import (
     supply_tool_results,
 )
 from app.agent.compaction import (
+    COMPACTION_PROMPT,
     LEGACY_COMPACTION_PROMPT,
+    V2_COMPACTION_PROMPT,
     CompactionResult,
     PreparedCompaction,
     state_digest,
@@ -284,3 +286,28 @@ class ActiveCompactionTests(unittest.TestCase):
         old["compactions"][0].pop("through_step_id")
         self.assertEqual(restore_snapshot(json.dumps(old), scope_id="scope"), compacted)
         self.assertEqual(legacy.source_state_sha256, state_digest(closed))
+
+    def test_handoff_prompt_preserves_coding_facts_and_v2_requests_remain_readable(
+        self,
+    ):
+        closed = interrupt_turn(self.state, self.state.active_turn.id)
+        request = prepare_compaction(closed, through_turn=1, settings=SETTINGS)
+        self.assertIn("current goal and constraints", COMPACTION_PROMPT)
+        self.assertIn("path, source version/material ID", COMPACTION_PROMPT)
+        self.assertIn("actual receipts or failure state", COMPACTION_PROMPT)
+        self.assertIn("unresolved work and the next concrete step", COMPACTION_PROMPT)
+
+        data = request.model_dump(mode="json")
+        payload = json.loads(data["payload_json"])
+        payload["messages"][0]["content"] = V2_COMPACTION_PROMPT
+        encoded = json.dumps(
+            payload, sort_keys=True, ensure_ascii=False, allow_nan=False
+        )
+        import hashlib
+
+        data.update(
+            prompt_version="2",
+            payload_json=encoded,
+            payload_sha256=hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(PreparedCompaction.model_validate(data).prompt_version, "2")

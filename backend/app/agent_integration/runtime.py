@@ -275,7 +275,13 @@ class RuntimeCoordinator:
         )
         self.store.dispatch(scope, cid, run_id, token, attempt_id)
         observed = ObservedClient(self.client or LLMClient(settings))
-        response, error, uncertain, overflow = None, None, False, False
+        response, error, diagnostic, uncertain, overflow = (
+            None,
+            None,
+            None,
+            False,
+            False,
+        )
         failure_usage = None
         try:
             if kind == "model":
@@ -298,6 +304,7 @@ class RuntimeCoordinator:
                 ).response
         except LLMError as exc:
             failure_usage = exc.usage
+            diagnostic = exc.diagnostic
             overflow, uncertain = isinstance(exc, ContextLimitError), exc.uncertain
             error = (
                 "CONTEXT_LENGTH_EXCEEDED"
@@ -359,6 +366,7 @@ class RuntimeCoordinator:
             response=response,
             usage=usage,
             error_code=error,
+            error_diagnostic=diagnostic,
             uncertain=uncertain,
             context_limit=overflow,
             tools=registry,

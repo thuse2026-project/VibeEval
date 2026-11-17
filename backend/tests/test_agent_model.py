@@ -292,6 +292,48 @@ class AgentModelTests(unittest.IsolatedAsyncioTestCase):
                 )
             self.assertNotIn("private-secret", str(caught.exception))
 
+        with self.assertRaises(LLMError) as caught:
+            parse_model_response(
+                completion(
+                    calls=[
+                        {
+                            **NATIVE_CALL,
+                            "function": {
+                                "name": "read_file",
+                                "arguments": '{"path":"a.py","extra":"private-secret"}',
+                            },
+                        }
+                    ]
+                ),
+                tools=self.registry,
+                model="m",
+            )
+        self.assertEqual(caught.exception.code, "MODEL_TOOL_ARGUMENTS_INVALID")
+        self.assertEqual(
+            caught.exception.diagnostic,
+            {
+                "tool": "read_file",
+                "issues": [{"path": "extra", "type": "extra_forbidden"}],
+            },
+        )
+        self.assertNotIn("private-secret", json.dumps(caught.exception.diagnostic))
+
+    def test_argument_repair_prompt_contains_only_safe_schema_diagnostics(self):
+        prepared = self.prepare(
+            repair_tool_arguments={
+                "tool": "read_file",
+                "issues": [{"path": "path", "type": "missing"}],
+            }
+        )
+        repair = next(
+            message["content"]
+            for message in prepared.payload["messages"]
+            if message["role"] == "system" and "invalid arguments" in message["content"]
+        )
+        self.assertIn('"tool": "read_file"', repair)
+        self.assertIn('"path": "path"', repair)
+        self.assertIn('"type": "missing"', repair)
+
     def test_malformed_provider_data_is_sanitized(self):
         for payload in (
             {},

@@ -443,6 +443,16 @@ class RunStore:
                     .order_by(AgentAttempt.sequence.desc())
                     .limit(1)
                 )
+                repair = (
+                    previous is not None
+                    and previous.status == "rejected"
+                    and previous.error_code == "MODEL_TOOL_ARGUMENTS_INVALID"
+                )
+                repair_diagnostic = (
+                    (previous.response_json or {}).get("tool_argument_error")
+                    if repair
+                    else False
+                )
                 request, manifest = prepare_window_request(
                     updated,
                     tools=tools,
@@ -450,9 +460,7 @@ class RunStore:
                     policy=window_policy,
                     answer_only=trigger == "budget_answer",
                     plan_only=policy.plan_only,
-                    repair_tool_arguments=previous is not None
-                    and previous.status == "rejected"
-                    and previous.error_code == "MODEL_TOOL_ARGUMENTS_INVALID",
+                    repair_tool_arguments=repair_diagnostic or repair,
                 )
                 if self.request_cost(manifest) > remaining:
                     raise RunBudgetExceeded("RUN_TOKEN_BUDGET_EXHAUSTED")
@@ -579,6 +587,7 @@ class RunStore:
         response,
         usage,
         error_code,
+        error_diagnostic=None,
         uncertain=False,
         context_limit=False,
         tools,
@@ -594,7 +603,14 @@ class RunStore:
             if attempt.finished_at is not None:
                 return self.view(db, run)
             attempt.response_json = (
-                response.model_dump(mode="json") if response else None
+                response.model_dump(mode="json")
+                if response
+                else (
+                    {"tool_argument_error": error_diagnostic}
+                    if error_diagnostic is not None
+                    and error_code == "MODEL_TOOL_ARGUMENTS_INVALID"
+                    else None
+                )
             )
             attempt.usage_json, attempt.finished_at = usage, int(self.clock())
             attempt.error_code = error_code

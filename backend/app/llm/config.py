@@ -13,13 +13,21 @@ ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 class LLMError(Exception):
     def __init__(
-        self, status: int, message: str, *, uncertain=False, usage=None, code=None
+        self,
+        status: int,
+        message: str,
+        *,
+        uncertain=False,
+        usage=None,
+        code=None,
+        diagnostic=None,
     ):
         super().__init__(message)
         self.status = status
         self.uncertain = uncertain
         self.usage = usage
         self.code = code
+        self.diagnostic = diagnostic
 
 
 class ContextLimitError(LLMError):
