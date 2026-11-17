@@ -31,7 +31,7 @@ class RunPolicy(FrozenModel):
     action_decision: Literal["allow", "ask", "deny"] = "ask"
     max_operations: int = Field(default=16, strict=True, ge=1, le=32)
     max_command_seconds: int = Field(default=120, strict=True, ge=1, le=120)
-    max_model_calls: int = Field(default=8, strict=True, ge=1, le=32)
+    max_model_calls: int = Field(default=8, strict=True, ge=1, le=64)
     max_compactions: int = Field(default=2, strict=True, ge=1, le=8)
     max_tool_calls: int = Field(default=32, strict=True, ge=1, le=128)
     max_total_tokens: int = Field(default=64000, strict=True, ge=1)
