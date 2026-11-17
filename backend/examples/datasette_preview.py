@@ -13,8 +13,10 @@ from examples.datasette_exam import create_app
 def create_preview():
     app = create_app()
     app.state.stage_resources.agent_budget_overrides = {
-        "max_model_calls": 16,
-        "max_total_tokens": 256_000,
+        "max_model_calls": 32,
+        "max_compactions": 8,
+        "max_tool_calls": 96,
+        "max_total_tokens": 1_000_000,
     }
     flow = app.state.exam_flow
     definition = app.state.datasette_definition

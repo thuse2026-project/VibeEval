@@ -217,9 +217,9 @@ class RuntimeCoordinator:
         overrides = {"mode": mode, "plan_only": plan_only}
         if plan_only:
             overrides.update(
-                max_model_calls=min(self.policy.max_model_calls, 5),
-                max_tool_calls=min(self.policy.max_tool_calls, 10),
-                max_total_tokens=min(self.policy.max_total_tokens, 64_000),
+                max_model_calls=min(self.policy.max_model_calls, 12),
+                max_tool_calls=min(self.policy.max_tool_calls, 24),
+                max_total_tokens=min(self.policy.max_total_tokens, 192_000),
             )
         policy = self.policy.model_copy(update=overrides)
         registry = self.registry(mode, plan_only=plan_only)

@@ -213,6 +213,27 @@ def project_model_input(
     if state.config.system_prompt:
         messages.append({"role": "system", "content": state.config.system_prompt})
     specifications = registry.specifications()
+    action_tools = {item["function"]["name"] for item in specifications} & {
+        "run_command",
+        "write_file",
+        "apply_patch",
+    }
+    if action_tools and not answer_only and not plan_only:
+        messages.append(
+            {
+                "role": "system",
+                "content": "The action tools declared in this request are available for this turn; "
+                "an earlier read-only turn does not remove them. When the user requests an "
+                "implementation with approval before changes, submit the concrete proposed "
+                "edit through write_file or apply_patch. The server pauses it for approval "
+                "before writing. Do not substitute a prose plan or ask for preliminary chat "
+                "confirmation. Use run_command for requested tests and report its actual "
+                "receipt. A rejected action is denied: do not retry it without an explicit "
+                "new user request. Reuse the evidence already read and inspect only missing "
+                "code needed to prepare the edit. These instructions grant no permissions "
+                "beyond the declared tools and server policy.",
+            }
+        )
     if plan_only:
         messages.append(
             {
@@ -221,6 +242,10 @@ def project_model_input(
                 "evidence needed to answer. Read files explicitly named by the user directly; "
                 "when a filename is unknown, use a narrow glob. Batch independent reads in "
                 "one tool exchange. Use exact-file search to locate symbols in long files, "
+                "especially source files already named by the user. A repository search "
+                "page covers only a bounded subset of files: an empty page with "
+                "next_path_offset is not evidence that a symbol is absent. Narrow to the "
+                "named file before exploring other modules. "
                 "then read a short range at the likely change site. Read that range "
                 'using read_file selection={"kind":"lines","start_line":N,'
                 '"end_line":M}; offset counts characters. Do this '
@@ -228,7 +253,8 @@ def project_model_input(
                 "search returns no matches, check a different literal or read the "
                 "named file directly. Reuse evidence already collected. "
                 "For a coding plan, reply once you know the requested behavior, relevant "
-                "test assertions, and first change location. Identify any missing evidence "
+                "test assertions, and first change location, including the actual function "
+                "body at that location rather than search hits alone. Identify any missing evidence "
                 "instead of postponing the answer or claiming you have run tests.",
             }
         )
