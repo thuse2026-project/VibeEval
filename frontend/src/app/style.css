@@ -110,6 +110,11 @@ select:focus-visible { outline: 3px solid #276a7930; outline-offset: 2px; }
 .test-results { list-style:none; padding:0; }
 .test-results li { display:flex; justify-content:space-between; gap:12px; border-bottom:1px solid #edf0f2; padding:10px 0; }
 .evaluation-panel pre { white-space:pre; }
+.r2-rubric-item { min-width:0; padding:16px; border:1px solid #dbe4ed; border-radius:8px; }
+.r2-rubric-anchors { padding-left:20px; color:#526273; font-size:13px; line-height:1.7; }
+.r2-novel-confirm { display:flex; align-items:flex-start; gap:10px; margin:16px 0; }
+.r2-novel-confirm input { width:auto; margin-top:5px; }
+.r2-score-policy { margin:16px 0; padding:16px; background:#f4f7fb; border-radius:8px; overflow-wrap:anywhere; }
 .detail-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 28px; }
 .detail-toolbar .secondary { margin: 0; }
 .detail-error { max-width: 640px; }

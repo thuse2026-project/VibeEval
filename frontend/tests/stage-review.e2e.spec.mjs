@@ -1,5 +1,48 @@
 import { test, expect } from '@playwright/test'
 
+test('test observations preserve rubric drafts and never award automatic points', async ({ page }) => {
+  const id = 'submission_' + 'c'.repeat(32)
+  let observation = null
+  let review = null
+  const criteria = [{ key: 'tests', name: '新增测试', max: 15, category: 'tests', full: '有效新增验证', partial: '部分覆盖', zero: '复制不计分' }, { key: 'quality', name: '实现质量', max: 15, category: 'quality', full: '实现清楚', partial: '局部不足', zero: '缺少依据' }]
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/admin/me')) return route.fulfill({ json: { username: 'teacher', name: '考官', expires_at: Math.floor(Date.now()/1000)+10800, server_time: Math.floor(Date.now()/1000) } })
+    if (path.endsWith('/candidate-tests')) {
+      observation = { status: 'completed', notice: '考生程序辅助证据，不按通过数量给分。', observed_at: 1794990500, versions: { original: { status: 'completed', output: '' }, submitted: { status: 'completed', output: '' } }, rows: [{ id: 'test_candidate.Check.test_new_boundary', original: { status: 'failed', message: 'expected 2, actual 1' }, submitted: { status: 'failed', message: 'expected 2, actual 1' }, possible_public_copy: false }] }
+      return route.fulfill({ json: observation })
+    }
+    if (path.endsWith('/review')) {
+      const body = route.request().postDataJSON()
+      expect(body.scores).toEqual({ tests: 5, quality: 10 })
+      expect(body.evidence.tests).toBe('tests/test_candidate.py：正确发现尚未修好的边界')
+      expect(body.novel_tests_confirmed).toBe(true)
+      review = { ...body, revision: 1, reviewer: 'teacher', reviewed_at: 1794990500 }
+      return route.fulfill({ json: review })
+    }
+    return route.fulfill({ json: { submission_id: id, title: '细则验收', candidate_name: '验收', candidate_id: 'fixture', exam_title: '验收', files: [{ path: 'tests/test_candidate.py', content: '# test source' }], changes: [], summary: null, criteria: [], manual_criteria: criteria, review_evidence_required: true, policies: ['复制公开测试不计新增分'], objective: { status: 'completed', score: 70, cap: null, groups: [], output: '' }, review, total_score: review ? 85 : null, candidate_tests: observation, candidate_tests_last_attempt: observation } })
+  })
+  await page.goto('/admin/r2/submissions/' + id)
+  await expect(page.getByText('满分：有效新增验证')).toBeVisible()
+  await page.getByLabel('新增测试（满分 15）', { exact: true }).fill('5')
+  await page.getByLabel('实现质量（满分 15）', { exact: true }).fill('10')
+  await page.getByLabel('本项依据：新增测试', { exact: true }).fill('tests/test_candidate.py：正确发现尚未修好的边界')
+  await page.getByLabel('本项依据：实现质量', { exact: true }).fill('业务代码及注释说明改动范围')
+  await page.getByLabel('评分依据', { exact: true }).fill('功能和测试质量分别评价')
+  await expect(page.getByRole('button', { name: '保存考官评分' })).toBeDisabled()
+  await page.getByRole('checkbox').check()
+  await page.getByRole('button', { name: '运行新增测试对照' }).click()
+  await expect(page.getByRole('cell', { name: '断言失败', exact: true })).toHaveCount(2)
+  await expect(page.getByLabel('新增测试（满分 15）', { exact: true })).toHaveValue('5')
+  await expect(page.getByLabel('本项依据：新增测试', { exact: true })).toHaveValue('tests/test_candidate.py：正确发现尚未修好的边界')
+  await expect(page.getByText('未评 / 30', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '保存考官评分' }).click()
+  await expect(page.getByText('85 / 100', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByLabel('新增测试（满分 15）', { exact: true })).toHaveValue('5')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
 test('login preserves the multi-stage review entry', async ({ page }) => {
   let authenticated = false
   const identity = { username: 'teacher', name: '考官', expires_at: Math.floor(Date.now() / 1000) + 10800, server_time: Math.floor(Date.now() / 1000) }

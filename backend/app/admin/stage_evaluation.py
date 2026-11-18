@@ -1,5 +1,6 @@
 """Examiner-only results for immutable multi-stage code submissions."""
 
+import hashlib
 import json
 import math
 import os
@@ -17,7 +18,9 @@ from app.admin.evaluation import changes
 from app.admin.router import current_session
 from app.core.security import require_browser_header
 from app.db.models import ExamFlowAttempt, ExamSession, Invitation, StageWorkspace
+from app.grading.candidate_tests import compare_tests
 from app.grading.datasette import evaluate, load_rule
+from app.grading.rubrics import POLICIES
 
 router = APIRouter(prefix="/api/v1/admin/r2", dependencies=[Depends(current_session)])
 GRADE_GATE = threading.Lock()
@@ -184,11 +187,73 @@ def records(root, exported, metadata, rule):
                 for k, v in review["scores"].items()
             ):
                 raise ValueError
+            if rule.get("review_evidence_required") and (
+                set(review.get("evidence", {})) != set(maxima)
+                or any(
+                    not isinstance(v, str) or not v.strip()
+                    for v in review["evidence"].values()
+                )
+                or (
+                    any(
+                        review["scores"][c["key"]] > 0
+                        for c in rule["manual"]
+                        if c.get("category") == "tests"
+                    )
+                    and review.get("novel_tests_confirmed") is not True
+                )
+            ):
+                raise ValueError
     except (ValueError, TypeError, KeyError, AttributeError):
         raise HTTPException(
             503, "评分记录与固定答卷或规则不一致，请维护者核查；本次不发布分数"
         ) from None
     return objective, review
+
+
+def observation_record(path, exported, rule):
+    value = read_record(path)
+    if value is not None:
+        source = next(
+            (
+                f["content"]
+                for f in exported["files"]
+                if f["path"] == "tests/test_candidate.py"
+            ),
+            "",
+        )
+        if (
+            value.get("snapshot_sha256") != exported["content"]["artifact"]["sha256"]
+            or value.get("rule_sha256") != rule["fingerprint"]
+            or value.get("test_sha256") != hashlib.sha256(source.encode()).hexdigest()
+        ):
+            raise HTTPException(
+                503, "新增测试证据与固定答卷或规则不一致，请核查后重跑。"
+            )
+    return value
+
+
+def prior_scores(root, exported):
+    """Old rules remain read-only; never reinterpret their manual totals."""
+    result = []
+    for folder in sorted(
+        root.parent.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
+    )[:20]:
+        if folder == root or not folder.is_dir():
+            continue
+        objective = read_record(folder / "objective.json")
+        review = read_record(folder / "review.json")
+        if any(
+            value
+            and value.get("snapshot_sha256")
+            != exported["content"]["artifact"]["sha256"]
+            for value in (objective, review)
+        ):
+            continue
+        if objective or review:
+            result.append(
+                {"rule_sha256": folder.name, "objective": objective, "review": review}
+            )
+    return result
 
 
 @router.get("/submissions")
@@ -265,6 +330,15 @@ def detail(request: Request, submission_id: str):
         "total_score": total_score(objective, review),
         "rule_version": rule["rule_version"],
         "last_attempt": read_record(root / "last-attempt.json"),
+        "review_evidence_required": rule.get("review_evidence_required", False),
+        "policies": POLICIES,
+        "candidate_tests": observation_record(
+            root / "candidate-tests.json", exported, rule
+        ),
+        "candidate_tests_last_attempt": observation_record(
+            root / "candidate-tests-last-attempt.json", exported, rule
+        ),
+        "previous_scores": prior_scores(root, exported),
     }
 
 
@@ -308,6 +382,8 @@ class Review(BaseModel):
     expected_revision: int = Field(ge=0)
     scores: dict[str, float]
     note: str = Field(min_length=1, max_length=4000)
+    evidence: dict[str, str] = Field(default_factory=dict)
+    novel_tests_confirmed: bool = False
 
 
 @router.post(
@@ -332,6 +408,21 @@ def save_review(
         )
     ):
         raise HTTPException(422, "请填写每项人工分数及评价依据，分数不得超出对应上限")
+    if rule.get("review_evidence_required") and (
+        set(body.evidence) != set(maxima)
+        or any(not text.strip() or len(text) > 2000 for text in body.evidence.values())
+        or (
+            any(
+                body.scores[c["key"]] > 0
+                for c in rule["manual"]
+                if c.get("category") == "tests"
+            )
+            and not body.novel_tests_confirmed
+        )
+    ):
+        raise HTTPException(
+            422, "请逐项填写代码/测试依据；测试项非零时须确认存在非复制的新增验证。"
+        )
     root = location(resources, metadata, rule)
     with REVIEW_GATE:
         _, prior = records(root, exported, metadata, rule)
@@ -342,6 +433,8 @@ def save_review(
             "revision": revision + 1,
             "scores": body.scores,
             "note": body.note.strip(),
+            "evidence": {k: v.strip() for k, v in body.evidence.items()},
+            "novel_tests_confirmed": body.novel_tests_confirmed,
             "reviewer": examiner.username,
             "reviewed_at": int(time.time()),
             "snapshot_sha256": exported["content"]["artifact"]["sha256"],
@@ -352,3 +445,38 @@ def save_review(
         except OSError:
             raise HTTPException(503, "人工评分未能保存，请重新读取核对") from None
         return value
+
+
+@router.post(
+    "/submissions/{submission_id}/candidate-tests",
+    dependencies=[Depends(require_browser_header)],
+)
+def inspect_candidate_tests(request: Request, submission_id: str):
+    metadata, exported, resources = context(request, submission_id)
+    rule = rule_for(metadata)
+    root = location(resources, metadata, rule)
+    if not GRADE_GATE.acquire(blocking=False):
+        raise HTTPException(409, "已有评测或测试对照运行中，请稍后读取结果")
+    try:
+        report = compare_tests(
+            exported["files"],
+            rule,
+            metadata["image"],
+            os.environ.get("SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"),
+        )
+        report.update(
+            submission_id=submission_id,
+            snapshot_sha256=exported["content"]["artifact"]["sha256"],
+            rule_sha256=rule["fingerprint"],
+            observed_at=int(time.time()),
+        )
+        atomic_record(root / "candidate-tests-last-attempt.json", report)
+        if report["status"] == "completed":
+            atomic_record(root / "candidate-tests.json", report)
+        return report
+    except (OSError, ValueError, KeyError):
+        raise HTTPException(
+            503, "新增测试对照未能完成或保存，不计零分；既有评分保持不变。"
+        ) from None
+    finally:
+        GRADE_GATE.release()

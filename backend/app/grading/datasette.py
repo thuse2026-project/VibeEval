@@ -316,7 +316,7 @@ def trusted_tests(channel, rule):
     }
 
 
-def evaluate(files, rule, image, docker_url):
+def evaluate(files, rule, image, docker_url, *, runner=None, worker=WORKER):
     import docker
 
     obj = initializer = volume = stream = None
@@ -398,7 +398,7 @@ def evaluate(files, rule, image, docker_url):
                 obj.start()
                 execution = client.api.exec_create(
                     obj.id,
-                    ["python", "-I", "-u", "-c", WORKER],
+                    ["python", "-I", "-u", "-c", worker],
                     stdin=True,
                     stdout=True,
                     stderr=False,
@@ -413,7 +413,11 @@ def evaluate(files, rule, image, docker_url):
                     "python": [3, 12],
                 }:
                     raise RuntimeError("grading worker/environment is not ready")
-                return trusted_tests(channel, rule)
+                return (
+                    runner(channel)
+                    if runner is not None
+                    else trusted_tests(channel, rule)
+                )
             finally:
                 if stream is not None:
                     with suppress(Exception):

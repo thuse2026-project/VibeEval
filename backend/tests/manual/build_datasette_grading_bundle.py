@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+from app.grading.rubrics import manual_rubric
+
 TASKS = {
     "column-statistics": {
         "public_class": "ColumnStatistics",
@@ -44,10 +46,6 @@ TASKS = {
                 20,
             ),
         ],
-        "manual": [
-            {"key": "tests", "name": "新增测试的有效性与针对性", "max": 15},
-            {"key": "quality", "name": "实现质量与验证说明", "max": 15},
-        ],
     },
     "facet-pagination": {
         "public_class": "FacetPagination",
@@ -80,10 +78,6 @@ TASKS = {
                 "test_unfiltered_pagination_remains_unchanged",
                 5,
             ),
-        ],
-        "manual": [
-            {"key": "tests", "name": "新增回归测试的有效性与针对性", "max": 20},
-            {"key": "quality", "name": "根因解释、验证说明与修复质量", "max": 10},
         ],
     },
 }
@@ -128,13 +122,14 @@ def build(contexts, private_tests, output, images):
                     }
                 )
         rules[spec["task_version"]] = {
-            "rule_version": task + "-70-30-v1",
+            "rule_version": task + "-70-30-v2",
             "images": [images[task]],
             "baseline": baseline,
             "writable": spec["writable"],
             "criteria": criteria,
             "modules": modules,
-            "manual": description["manual"],
+            "manual": manual_rubric(task),
+            "review_evidence_required": True,
             "failure_cap": 50 if task == "facet-pagination" else None,
         }
     (output / "manifest.json").write_text(
