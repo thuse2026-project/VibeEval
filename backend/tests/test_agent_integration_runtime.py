@@ -6,6 +6,7 @@ import os
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from unittest.mock import patch
 
 import httpx
@@ -618,6 +619,17 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
         )
         self.assertNotIn("tools", self.requests[-1])
 
+    def test_thinking_plan_keeps_configured_reasoning_output_allowance(self):
+        service = self.coordinator([])
+        service.settings = replace(
+            service.settings, thinking=True, max_output_tokens=8192
+        )
+        run = self.submit(service, intent="plan", mode="read_only")
+        with self.factory() as db:
+            row = db.get(AgentRun, run["run_id"])
+            self.assertEqual(row.policy_json["max_output_tokens"], 8192)
+            self.assertTrue(row.policy_json["runtime"]["plan_only"])
+
     def test_unstructured_provider_tool_call_is_not_a_final_answer(self):
         service = self.coordinator(
             [READ, completion("我接下来会查看文件。\n<｜｜DSML｜｜ calls>")],
@@ -639,7 +651,23 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
             ("unknown", "AGENT_RUNTIME_ERROR"),
         )
 
-    def test_malformed_tool_arguments_can_be_corrected_once(self):
+    def test_argument_repair_can_recover_a_later_independent_error(self):
+        invalid = completion(calls=(("read_file", {}),))
+        service = self.coordinator([invalid, READ, invalid, READ, completion()])
+        done = self.advance(service, self.submit(service))
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(done["model_calls"], 5)
+
+    def test_repeated_invalid_arguments_stop_without_dispatching_tools(self):
+        invalid = completion(calls=(("read_file", {}),))
+        service = self.coordinator([invalid, invalid, invalid])
+        done = self.advance(service, self.submit(service))
+        self.assertEqual(done["status"], "failed")
+        self.assertEqual(done["error_code"], "MODEL_TOOL_ARGUMENTS_INVALID")
+        self.assertEqual(done["model_calls"], 3)
+        self.assertEqual(self.workspace.calls, 0)
+
+    def test_malformed_tool_arguments_receive_field_feedback(self):
         invalid = completion(calls=(("read_file", {}),))
         final = completion()
         final["usage"].update(prompt_cache_hit_tokens=6, prompt_cache_miss_tokens=2)
@@ -654,6 +682,22 @@ class AgentIntegrationRuntimeTests(unittest.TestCase):
             )
         )
         with self.factory() as db:
+            rejected = db.scalar(
+                select(AgentAttempt).where(
+                    AgentAttempt.run_id == done["run_id"], AgentAttempt.sequence == 1
+                )
+            )
+            feedback = rejected.manifest_json["argument_feedback"]
+            self.assertEqual(
+                json.loads(feedback),
+                {
+                    "tool": "read_file",
+                    "errors": [{"field": "path", "error": "missing"}],
+                },
+            )
+            self.assertTrue(
+                any(feedback in m["content"] for m in self.requests[1]["messages"])
+            )
             last = db.scalar(
                 select(AgentAttempt).where(
                     AgentAttempt.run_id == done["run_id"], AgentAttempt.sequence == 3

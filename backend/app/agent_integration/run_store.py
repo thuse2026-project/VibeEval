@@ -450,9 +450,13 @@ class RunStore:
                     policy=window_policy,
                     answer_only=trigger == "budget_answer",
                     plan_only=policy.plan_only,
-                    repair_tool_arguments=previous is not None
-                    and previous.status == "rejected"
-                    and previous.error_code == "MODEL_TOOL_ARGUMENTS_INVALID",
+                    repair_tool_arguments=(
+                        previous.manifest_json.get("argument_feedback") or True
+                        if previous is not None
+                        and previous.status == "rejected"
+                        and previous.error_code == "MODEL_TOOL_ARGUMENTS_INVALID"
+                        else False
+                    ),
                 )
                 if self.request_cost(manifest) > remaining:
                     raise RunBudgetExceeded("RUN_TOKEN_BUDGET_EXHAUSTED")
@@ -579,6 +583,7 @@ class RunStore:
         response,
         usage,
         error_code,
+        argument_feedback=None,
         uncertain=False,
         context_limit=False,
         tools,
@@ -598,6 +603,11 @@ class RunStore:
             )
             attempt.usage_json, attempt.finished_at = usage, int(self.clock())
             attempt.error_code = error_code
+            if argument_feedback:
+                attempt.manifest_json = {
+                    **attempt.manifest_json,
+                    "argument_feedback": argument_feedback,
+                }
             state = self.sessions._state(conv)
             try:
                 self._lease(run, token)
@@ -645,6 +655,21 @@ class RunStore:
                         return
                 self._end(db, conv, run, status, code)
 
+            prior_model_errors = (
+                list(
+                    db.scalars(
+                        select(AgentAttempt.error_code)
+                        .where(
+                            AgentAttempt.run_id == run_id,
+                            AgentAttempt.kind == "model",
+                            AgentAttempt.sequence < attempt.sequence,
+                        )
+                        .order_by(AgentAttempt.sequence.desc())
+                    )
+                )
+                if error_code == "MODEL_TOOL_ARGUMENTS_INVALID"
+                else []
+            )
             if context_limit and attempt.kind == "model" and run.overflow_retries == 0:
                 self.save_state(
                     db, conv, release_context_rejected_step(state, attempt.step_id)
@@ -657,15 +682,8 @@ class RunStore:
                 and run.model_calls < run.policy_json["runtime"]["max_model_calls"]
                 and json.loads(attempt.request_json["payload_json"]).get("tool_choice")
                 == "auto"
-                and not db.scalar(
-                    select(AgentAttempt.attempt_id)
-                    .where(
-                        AgentAttempt.run_id == run_id,
-                        AgentAttempt.sequence < attempt.sequence,
-                        AgentAttempt.error_code == "MODEL_TOOL_ARGUMENTS_INVALID",
-                    )
-                    .limit(1)
-                )
+                and prior_model_errors.count("MODEL_TOOL_ARGUMENTS_INVALID") < 4
+                and prior_model_errors[:2] != ["MODEL_TOOL_ARGUMENTS_INVALID"] * 2
             ):
                 self.save_state(
                     db, conv, release_context_rejected_step(state, attempt.step_id)

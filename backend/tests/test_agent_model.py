@@ -1,5 +1,6 @@
 import json
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 import httpx
@@ -259,6 +260,37 @@ class AgentModelTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("provider_debug", state.model_dump_json())
 
+    async def test_deepseek_thinking_continuation_is_replayed_but_not_public(self):
+        from app.agent import render_history
+
+        self.settings = replace(self.settings, thinking=True, max_output_tokens=8192)
+        seen = []
+
+        def transport(request):
+            seen.append(json.loads(request.content))
+            response = (
+                completion(calls=[NATIVE_CALL]) if len(seen) == 1 else completion()
+            )
+            response["choices"][0]["message"][
+                "reasoning_content"
+            ] = "opaque-continuation"
+            return httpx.Response(200, json=response)
+
+        client = LLMClient(self.settings, transport=httpx.MockTransport(transport))
+        first = await call_model(self.prepare(), tools=self.registry, client=client)
+        state = accept_response(self.state, "s1", first)
+        state = supply_tool_results(
+            state, "s1", [ToolResult(tool_call_id="call-1", content="file contents")]
+        )
+        state = start_step(state, step_id="s2")
+        await call_model(self.prepare(state), tools=self.registry, client=client)
+        self.assertEqual(seen[1]["thinking"], {"type": "enabled"})
+        self.assertEqual(seen[1]["reasoning_effort"], "low")
+        self.assertEqual(
+            seen[1]["messages"][2]["reasoning_content"], "opaque-continuation"
+        )
+        self.assertNotIn("opaque-continuation", json.dumps(render_history(state)))
+
     async def test_plain_text_command_is_not_a_tool_call(self):
         def transport(request):
             return httpx.Response(
@@ -291,6 +323,67 @@ class AgentModelTests(unittest.IsolatedAsyncioTestCase):
                     model="m",
                 )
             self.assertNotIn("private-secret", str(caught.exception))
+
+    def test_argument_repair_receives_schema_field_without_rejected_values(self):
+        invalid = {
+            **NATIVE_CALL,
+            "function": {
+                "name": "read_file",
+                "arguments": '{"path":"a.py","limit":"private-secret"}',
+            },
+        }
+        with self.assertRaises(LLMError) as caught:
+            parse_model_response(
+                completion(calls=[invalid]), tools=self.registry, model="m"
+            )
+        feedback = caught.exception.argument_feedback
+        self.assertEqual(
+            json.loads(feedback),
+            {"tool": "read_file", "errors": [{"field": "limit", "error": "int_type"}]},
+        )
+        request = self.prepare(repair_tool_arguments=feedback)
+        messages = "\n".join(m.get("content", "") for m in request.payload["messages"])
+        self.assertIn(feedback, messages)
+        self.assertNotIn("private-secret", messages)
+
+        with self.assertRaises(LLMError) as extra:
+            self.registry.parse_arguments(
+                ToolCall(
+                    id="extra",
+                    name="read_file",
+                    arguments='{"path":"a.py","unexpected":"private-secret"}',
+                )
+            )
+        feedback = json.loads(extra.exception.argument_feedback)
+        self.assertEqual(feedback["allowed_fields"], ["limit", "path"])
+        self.assertNotIn("private-secret", extra.exception.argument_feedback)
+
+    def test_execution_checkpoint_refocuses_reads_without_affecting_plan_mode(self):
+        self.registry = self.registry.with_tools(
+            [
+                ToolDefinition(
+                    "run_command", "Request an approved command", ReadArguments
+                )
+            ]
+        )
+        state = self.state
+        for index in range(8):
+            call = {**NATIVE_CALL, "id": f"read-{index}"}
+            response = parse_model_response(
+                completion(calls=[call]), tools=self.registry, model="m"
+            )
+            step_id = state.active_turn.steps[-1].id
+            state = accept_response(state, step_id, response)
+            state = supply_tool_results(
+                state,
+                step_id,
+                [ToolResult(tool_call_id=call["id"], content="source excerpt")],
+            )
+            state = start_step(state, step_id=f"next-{index}")
+        prompt = json.dumps(self.prepare(state).payload["messages"])
+        self.assertIn("8 consecutive read exchanges", prompt)
+        plan = json.dumps(self.prepare(state, plan_only=True).payload["messages"])
+        self.assertNotIn("Progress checkpoint", plan)
 
     def test_malformed_provider_data_is_sanitized(self):
         for payload in (

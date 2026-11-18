@@ -30,7 +30,12 @@ def safe_path(path):
 
 
 class StageRunCommand(RunCommand):
-    cwd: str = Field(default=".", min_length=1, max_length=500)
+    cwd: str = Field(
+        default=".",
+        min_length=1,
+        max_length=500,
+        description="Directory relative to /workspace. Use '.' for the project root; absolute paths such as /workspace are invalid.",
+    )
 
     @model_validator(mode="after")
     def published_versions(self):

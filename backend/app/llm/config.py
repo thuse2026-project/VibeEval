@@ -36,6 +36,7 @@ class LLMSettings:
     model: str = ""
     timeout_seconds: float = 45
     max_output_tokens: int = 1024
+    thinking: bool = False
 
 
 def load_settings() -> LLMSettings:

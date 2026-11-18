@@ -27,7 +27,7 @@ from .session_types import (
 )
 from .tools import ToolRegistry
 
-MAX_AGENT_REQUEST_CHARS = 128_000
+MAX_AGENT_REQUEST_CHARS = 512_000
 
 
 class FunctionCall(FrozenModel):
@@ -52,6 +52,7 @@ class NativeMessage(FrozenModel):
     tool_calls: tuple[NativeCall, ...] | None = None
     tool_call_id: str | None = None
     reasoning_details: list[dict[str, Any]] | None = None
+    reasoning_content: str | None = Field(default=None, max_length=64000)
 
     @model_validator(mode="after")
     def valid_role(self):
@@ -62,6 +63,7 @@ class NativeMessage(FrozenModel):
                 or self.content is None
                 or calls
                 or self.reasoning_details
+                or self.reasoning_content is not None
             ):
                 raise ValueError("invalid tool result message")
         elif self.role == "assistant":
@@ -72,6 +74,7 @@ class NativeMessage(FrozenModel):
             or calls
             or self.tool_call_id
             or self.reasoning_details
+            or self.reasoning_content is not None
         ):
             raise ValueError("invalid input message")
         for call in calls:
@@ -79,11 +82,17 @@ class NativeMessage(FrozenModel):
         return self
 
 
+class Thinking(FrozenModel):
+    type: Literal["enabled", "disabled"]
+
+
 class NativeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str = Field(min_length=1, max_length=200)
     messages: tuple[NativeMessage, ...] = Field(min_length=1, max_length=256)
-    max_tokens: int = Field(strict=True, ge=1, le=4096)
+    max_tokens: int = Field(strict=True, ge=1, le=16384)
+    thinking: Thinking | None = None
+    reasoning_effort: Literal["low", "high", "max"] | None = None
     stream: Literal[False] = False
     temperature: float | None = Field(default=None, ge=0, le=2, allow_inf_nan=False)
     tools: list[dict[str, Any]] | None = None
@@ -187,7 +196,7 @@ def project_model_input(
     context_transform=None,
     answer_only: bool = False,
     plan_only: bool = False,
-    repair_tool_arguments: bool = False,
+    repair_tool_arguments: bool | str = False,
 ) -> dict:
     """Project inspectable input before transport size/pair validation.
 
@@ -236,7 +245,11 @@ def project_model_input(
                 "through the same approval tools when a test exposes another defect. "
                 "A rejected action is denied: do not retry it without an explicit "
                 "new user request. Reuse the evidence already read and inspect only missing "
-                "code needed to prepare the edit. These instructions grant no permissions "
+                "code needed to prepare the edit. Once the local interface and a failing "
+                "test are understood, make the smallest working change and test it. "
+                "Use symbol searches and narrow excerpts for consumers; do not read "
+                "entire bundled scripts or unrelated modules to seek exhaustive certainty. "
+                "These instructions grant no permissions "
                 "beyond the declared tools and server policy.",
             }
         )
@@ -264,13 +277,52 @@ def project_model_input(
                 "instead of postponing the answer or claiming you have run tests.",
             }
         )
+    elif action_tools and state.active_turn:
+        read_streak = 0
+        for step in reversed(state.active_turn.steps):
+            if step.response is None:
+                continue
+            calls = step.response.message.tool_calls
+            if not calls or any(
+                call.name
+                not in {
+                    "read_file",
+                    "search_content",
+                    "list_directory",
+                    "glob_files",
+                    "read_material",
+                    "read_reference",
+                }
+                for call in calls
+            ):
+                break
+            read_streak += 1
+        if read_streak >= 8:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"Progress checkpoint: {read_streak} consecutive read exchanges without an action. "
+                    "Return to the latest user request instead of expanding exploration. "
+                    "If they requested implementation, propose the smallest supported edit through the approval tool now, "
+                    "then test it and iterate from actual failures. If they requested only a test, request that command. "
+                    "If they requested explanation or review only, answer without editing. "
+                    "Ask a concrete question only for a real missing decision. This checkpoint grants no permission.",
+                }
+            )
     if repair_tool_arguments:
         messages.append(
             {
                 "role": "system",
                 "content": "Your preceding tool request had invalid arguments and was not "
                 "executed. If more evidence is essential, use a declared tool and valid "
-                "JSON arguments matching its schema. Otherwise answer from the evidence already collected.",
+                "JSON arguments matching its schema. Otherwise answer from the evidence already collected."
+                + (
+                    " Validation feedback (schema fields only): "
+                    + repair_tool_arguments
+                    + " For extra_forbidden, remove every key not present in allowed_fields."
+                    if isinstance(repair_tool_arguments, str)
+                    else ""
+                ),
             }
         )
     if answer_only and specifications:
@@ -294,7 +346,7 @@ def project_model_input(
         context = answer_context(context)
     for item in context:
         metadata = item.pop("provider_metadata", {})
-        if set(metadata) - {"reasoning_details"}:
+        if set(metadata) - {"reasoning_details", "reasoning_content"}:
             raise SessionError("unsupported provider continuation fields")
         item.update(metadata)
         messages.append(item)
@@ -304,6 +356,8 @@ def project_model_input(
         "max_tokens": limit,
         "stream": False,
     }
+    if config.thinking:
+        payload.update(thinking={"type": "enabled"}, reasoning_effort="low")
     if temperature is not None:
         payload["temperature"] = temperature
     if specifications and not answer_only:
@@ -321,7 +375,7 @@ def prepare_model_request(
     context_transform=None,
     answer_only: bool = False,
     plan_only: bool = False,
-    repair_tool_arguments: bool = False,
+    repair_tool_arguments: bool | str = False,
 ) -> PreparedModelRequest:
     """Prepare one already-started step; this function never calls the model."""
     turn = state.active_turn
@@ -402,21 +456,31 @@ def parse_model_response(
             ).as_call()
             try:
                 tools.parse_arguments(call)
-            except (LLMError, ValueError, KeyError, TypeError):
-                raise LLMError(
+            except (LLMError, ValueError, KeyError, TypeError) as invalid:
+                error = LLMError(
                     502, "模型工具参数无效", code="MODEL_TOOL_ARGUMENTS_INVALID"
-                ) from None
+                )
+                error.argument_feedback = getattr(invalid, "argument_feedback", "")
+                raise error from None
             calls.append(call)
-        metadata = None
+        continuation = {}
         if message.get("reasoning_details") is not None:
             details = message["reasoning_details"]
             if not isinstance(details, list) or not all(
                 isinstance(item, dict) for item in details
             ):
                 raise ValueError
-            metadata = json.dumps(
-                {"reasoning_details": details}, ensure_ascii=False, allow_nan=False
-            )
+            continuation["reasoning_details"] = details
+        if message.get("reasoning_content") is not None:
+            reasoning = message["reasoning_content"]
+            if not isinstance(reasoning, str) or len(reasoning) > 64000:
+                raise ValueError
+            continuation["reasoning_content"] = reasoning
+        metadata = (
+            json.dumps(continuation, ensure_ascii=False, allow_nan=False)
+            if continuation
+            else None
+        )
         usage = payload.get("usage")
         if usage is not None:
             usage = TokenUsage(

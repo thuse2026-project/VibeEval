@@ -1,10 +1,13 @@
 """Serve the existing R2 API and built preview on a single private origin."""
 
+from dataclasses import replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.agent_integration.window import WindowPolicy
 from app.exams.postgres import PostgresEntryStore
 from app.llm.config import load_settings
 from examples.datasette_exam import create_app
@@ -18,6 +21,24 @@ def create_preview():
         "max_tool_calls": 128,
         "max_total_tokens": 1_500_000,
     }
+    settings = load_settings()
+    if (
+        urlsplit(settings.base_url).hostname == "api.deepseek.com"
+        and settings.model == "deepseek-flash"
+    ):
+        app.state.stage_resources.settings = replace(
+            settings, thinking=True, max_output_tokens=8192
+        )
+        # Keep this preview bounded well below the provider's 1M-token window.
+        app.state.stage_resources.agent_window_policy = WindowPolicy(
+            context_window_tokens=131_072,
+            safety_reserve_tokens=4096,
+            soft_input_tokens=80_000,
+            hard_input_tokens=110_000,
+            soft_request_chars=256_000,
+            hard_request_chars=440_000,
+            compaction_input_chars=440_000,
+        )
     flow = app.state.exam_flow
     definition = app.state.datasette_definition
 
@@ -52,6 +73,8 @@ def create_preview():
         app.add_api_route(path, entry, methods=["GET"], include_in_schema=False)
     app.add_api_route("/workspace", workspace, methods=["GET"], include_in_schema=False)
     app.add_api_route("/r2-workspace", index, methods=["GET"], include_in_schema=False)
+    for path in ("/admin", "/admin/login", "/admin/r2", "/admin/r2/{path:path}"):
+        app.add_api_route(path, index, methods=["GET"], include_in_schema=False)
     app.add_api_route(
         "/r2-preview/model", model_status, methods=["GET"], include_in_schema=False
     )

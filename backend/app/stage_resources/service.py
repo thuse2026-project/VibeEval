@@ -51,6 +51,7 @@ class StageResources:
         self.snapshots = snapshots or SnapshotStore()
         self.settings, self.client, self._runtimes = settings, client, {}
         self.agent_budget_overrides: dict[str, int] = {}
+        self.agent_window_policy = STAGE_AGENT_WINDOW
         if not all(
             callable(getattr(sandbox, name, None))
             for name in (
@@ -200,7 +201,7 @@ class StageResources:
             settings=settings,
             client=self.client,
             policy=policy,
-            window_policy=STAGE_AGENT_WINDOW,
+            window_policy=self.agent_window_policy,
             clock=self.clock,
             execution_backend=self.sandbox,
             access_monitor=reader.store.check_open,

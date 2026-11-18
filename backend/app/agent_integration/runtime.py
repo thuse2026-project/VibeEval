@@ -118,7 +118,7 @@ def runtime_registry(
                 (
                     ToolDefinition(
                         "run_command",
-                        "Execute argv in an isolated runsc operation sharing the authorized workspace. For a plan-only request, use read_file or search_content for code inspection and answer without terminal approval. No implicit shell: use explicit /bin/bash arguments for shell syntax. The turn may wait for approval and for the complete receipt. Nonzero exit is a program outcome. Output is bounded and archived by material IDs; expected_versions can pin observed files.",
+                        "Execute argv in an isolated runsc operation sharing the authorized workspace. For a plan-only request, use read_file or search_content for code inspection and answer without terminal approval. No implicit shell: use explicit /bin/bash arguments for shell syntax. Run tests directly as argv; the receipt already includes exit_code, so do not append echo or other commands that mask the test exit status. The turn may wait for approval and for the complete receipt. Nonzero exit is a program outcome. Output is bounded and archived by material IDs; expected_versions can pin observed files.",
                         command_type,
                     ),
                 )
@@ -233,7 +233,7 @@ class RuntimeCoordinator:
                 "model": self.settings.model,
                 "max_output_tokens": (
                     min(self.settings.max_output_tokens, 1600)
-                    if plan_only
+                    if plan_only and not self.settings.thinking
                     else self.settings.max_output_tokens
                 ),
             },
@@ -277,6 +277,7 @@ class RuntimeCoordinator:
         observed = ObservedClient(self.client or LLMClient(settings))
         response, error, uncertain, overflow = None, None, False, False
         failure_usage = None
+        argument_feedback = None
         try:
             if kind == "model":
                 response = await self._guard_provider(
@@ -298,6 +299,7 @@ class RuntimeCoordinator:
                 ).response
         except LLMError as exc:
             failure_usage = exc.usage
+            argument_feedback = getattr(exc, "argument_feedback", None)
             overflow, uncertain = isinstance(exc, ContextLimitError), exc.uncertain
             error = (
                 "CONTEXT_LENGTH_EXCEEDED"
@@ -359,6 +361,7 @@ class RuntimeCoordinator:
             response=response,
             usage=usage,
             error_code=error,
+            argument_feedback=argument_feedback,
             uncertain=uncertain,
             context_limit=overflow,
             tools=registry,

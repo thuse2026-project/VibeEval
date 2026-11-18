@@ -131,8 +131,7 @@ class LLMClient:
             and body is not None
             and urlsplit(self.settings.base_url).hostname == "api.deepseek.com"
         ):
-            # The shared adapter retains tool-call history without reasoning_content.
-            body = {**body, "thinking": {"type": "disabled"}}
+            body = {"thinking": {"type": "disabled"}, **body}
         try:
             async with httpx.AsyncClient(
                 base_url=self.settings.base_url + "/",
@@ -209,6 +208,8 @@ class LLMClient:
             "max_tokens",
             "temperature",
             "stream",
+            "thinking",
+            "reasoning_effort",
         }
         if set(payload) - allowed or payload.get("stream", False) is not False:
             raise LLMError(422, "模型请求参数无效或不支持流式调用")
