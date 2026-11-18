@@ -4,6 +4,7 @@ import Login from '../admin/login/Login';
 import Entry from '../candidate/entry/Entry';
 import Overview from '../admin/submissions/Overview';
 import Detail from '../admin/submissions/Detail';
+import StageReview from '../admin/submissions/StageReview';
 import { api, ApiError, type Examiner } from '../shared/api';
 import './style.css';
 
@@ -33,6 +34,8 @@ function App() {
   const search = location.includes('?') ? location.slice(location.indexOf('?')) : '';
   const detailMatch = pathname.match(/^\/admin\/submissions\/([^/]+)$/);
   const detailId = detailMatch?.[1] ?? null;
+  const stagedAdmin = pathname === '/admin/r2' || pathname.startsWith('/admin/r2/submissions/');
+  const stagedId = pathname.match(/^\/admin\/r2\/submissions\/([^/]+)$/)?.[1] ?? null;
   const source = new URLSearchParams(search).get('source') === 'demo' ? 'demo' : 'live';
   const expireSession = useCallback(() => {
     authRequest.current++;
@@ -58,10 +61,10 @@ function App() {
   useEffect(() => { void checkSession(); }, [checkSession]);
   useEffect(() => {
     document.title = user ? (detailId ? '答卷详情 · VibeEval' : '管理首页 · VibeEval') : '考官登录 · VibeEval';
-    if (loading || connectionError || detailId) return;
+    if (loading || connectionError || detailId || stagedAdmin) return;
     if (user && pathname === '/admin/login') navigate(`/admin${search}`, true);
     else if (!user && pathname !== '/admin/login') navigate(`/admin/login${search}`, true);
-  }, [user, loading, connectionError, detailId, pathname, search, navigate]);
+  }, [user, loading, connectionError, detailId, stagedAdmin, pathname, search, navigate]);
 
   useEffect(() => {
     if (!user) return;
@@ -96,11 +99,13 @@ function App() {
   }
 
   return <div className="shell">
-    <header className="topbar"><a className="brand" href="/admin">VibeEval<span className="brand-separator">/</span><span className="brand-context">考核管理</span></a></header>
+    <header className="topbar"><a className="brand" href="/admin">VibeEval<span className="brand-separator">/</span><span className="brand-context">考核管理</span></a><a className="r2-review-entry" href="/admin/r2">多阶段评阅</a></header>
     <main className={user ? 'dashboard-main' : undefined}>
       {loading ? <div className="status-panel" role="status">正在确认登录状态…</div>
         : connectionError ? <div className="status-panel"><h1>暂时无法连接服务</h1><p role="alert">{connectionError}</p><button className="primary" onClick={() => void checkSession()}>重新连接</button></div>
-        : user ? detailId
+        : user ? stagedAdmin
+          ? <StageReview submissionId={stagedId} search={search} onNavigate={navigate} onExpired={expireSession} />
+          : detailId
           ? <Detail key={`${source}:${detailId}`} submissionId={detailId} source={source} search={search}
             onNavigate={navigate} onExpired={expireSession} onLogout={() => void logout()}
             loggingOut={loggingOut} logoutError={logoutError} />

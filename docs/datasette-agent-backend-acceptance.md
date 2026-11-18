@@ -2,6 +2,8 @@
 
 用「补齐列统计」和「筛选与分页」跑完两次从读题到手动交卷的流程。验收 Agent 能否在同一个考生工作区里读文件、切换模式、申请审批、执行测试、修改代码并把真实结果反馈出来。评分、评分数据的去向和正式考试规则留到下一轮。
 
+评分后续实现见 [两题评分与评阅](datasette-grading.md)：各题 70 分客观评测＋30 分考官评价。本文件仍只验收 Agent 正常使用，不用客观得分代替流程验收。
+
 ## 准备
 
 1. 使用实际模型和 Linux 上的考生沙箱，固定平台提交、模型配置和两题镜像。优先复用已有的 Datasette 私有联测部署和起始镜像。另起部署时，从联测环境取得两个起始镜像和配套的工作区清单，沿用 `VIBEEVAL_DATASETTE_CONTEXTS`、`VIBEEVAL_DATASETTE_COLUMN_IMAGE` 和 `VIBEEVAL_DATASETTE_FACET_IMAGE`，用 `examples.datasette_preview:create_preview` 启动预览。每次完整复跑用新凭证及全新的两个起始工作区，避免时间到后自动交卷。

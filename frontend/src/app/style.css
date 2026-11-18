@@ -8,6 +8,20 @@ button:disabled { cursor: wait; opacity: .65; }
 button:focus-visible, a:focus-visible { outline: 3px solid #438b99; outline-offset: 4px; }
 .shell { min-height: 100dvh; display: flex; flex-direction: column; }
 .topbar { height: 80px; padding: 0 48px; display: flex; align-items: center; border-bottom: 1px solid #dfe5e9; background: #fff; }
+.r2-review-entry { margin-left: auto; font-size: 13px; color: #416a88; }
+.r2-review { max-width: 1200px; margin: 0 auto; min-width: 0; }
+.r2-review > .records-title { padding: 0; flex-wrap: wrap; }
+.r2-review h1 { margin: 8px 0; }
+.r2-review-table { overflow-x: auto; background: #fff; border: 1px solid #dfe5e9; border-radius: 8px; }
+.r2-review table { width: 100%; border-collapse: collapse; }
+.r2-review td, .r2-review th { padding: 16px; text-align: left; border-bottom: 1px solid #edf0f2; }
+.r2-review td small { display: block; margin-top: 6px; color: #687780; }
+.r2-review-actions, .r2-review-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin: 20px 0; }
+.r2-review-fields > label { flex: 1; min-width: 220px; }
+.r2-review label { display: block; margin-bottom: 14px; }
+.r2-review select, .r2-review input, .r2-review textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 10px; border: 1px solid #cbd5df; border-radius: 5px; font: inherit; }
+.r2-review pre { max-height: 420px; max-width: 100%; overflow: auto; padding: 16px; white-space: pre; background: #f7f9fb; border: 1px solid #e4e9ee; border-radius: 5px; font-size: 12px; }
+.r2-review-summary { white-space: pre-wrap; overflow-wrap: anywhere; }
 .brand { text-decoration: none; color: #153c46; font-size: 23px; font-weight: 750; letter-spacing: -.6px; }
 .brand-separator { margin: 0 18px; color: #bac7cc; font-weight: 400; }
 .brand-context { font-size: 14px; color: #5b6a73; font-weight: 400; letter-spacing: 0; }

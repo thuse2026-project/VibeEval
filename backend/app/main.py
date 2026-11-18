@@ -12,6 +12,7 @@ from .admin.accounts import load_accounts
 from .admin.evaluation import router as evaluation_router
 from .admin.overview import router as overview_router
 from .admin.router import AuthState, current_session, router
+from .admin.stage_evaluation import router as stage_evaluation_router
 from .admin.submissions import router as submission_router
 from .agent_integration.router import router as agent_router
 from .agent_integration.worker import StageAgentWorker
@@ -112,6 +113,7 @@ def create_app(
     app.include_router(overview_router)
     app.include_router(submission_router)
     app.include_router(evaluation_router)
+    app.include_router(stage_evaluation_router)
     app.include_router(llm_router)
     app.include_router(entry_router)
     app.include_router(candidate_submission_router)
