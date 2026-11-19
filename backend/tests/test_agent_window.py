@@ -356,6 +356,31 @@ class WindowTests(unittest.TestCase):
             )
         )
 
+    def test_argument_repair_diagnostics_are_included_in_window_budget(self):
+        pending = start_step(self.state)
+        plain = self.inspect(pending)
+        diagnostic = {
+            "tool": "read_file",
+            "issues": [{"path": "path", "type": "missing"}],
+        }
+        prepared, report = prepare_window_request(
+            pending,
+            tools=REGISTRY,
+            settings=SETTINGS,
+            repair_tool_arguments=diagnostic,
+        )
+        self.assertGreater(
+            report["budget"]["serialized_characters"],
+            plain["budget"]["serialized_characters"],
+        )
+        repair = next(
+            message["content"]
+            for message in prepared.payload["messages"]
+            if message["role"] == "system" and "invalid arguments" in message["content"]
+        )
+        self.assertIn('"tool": "read_file"', repair)
+        self.assertIn('"type": "missing"', repair)
+
     def test_threshold_plan_selects_safe_active_prefix_without_calling_or_adopting(
         self,
     ):

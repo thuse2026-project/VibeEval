@@ -571,7 +571,7 @@ def inspect_window(
     temperature=None,
     answer_only=False,
     plan_only=False,
-    repair_tool_arguments=False,
+    repair_tool_arguments: bool | dict = False,
 ):
     policy = policy or WindowPolicy()
     evidence = []
@@ -791,7 +791,7 @@ def prepare_window_request(
     temperature=None,
     answer_only=False,
     plan_only=False,
-    repair_tool_arguments=False,
+    repair_tool_arguments: bool | dict = False,
 ):
     """Final hard gate; a coordinator should plan soft maintenance while ready."""
     policy = policy or WindowPolicy()

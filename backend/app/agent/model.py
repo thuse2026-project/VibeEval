@@ -310,6 +310,10 @@ def project_model_input(
                 }
             )
     if repair_tool_arguments:
+        if isinstance(repair_tool_arguments, dict):
+            repair_tool_arguments = json.dumps(
+                repair_tool_arguments, ensure_ascii=True, allow_nan=False
+            )
         messages.append(
             {
                 "role": "system",
