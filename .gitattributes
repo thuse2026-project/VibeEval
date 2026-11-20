@@ -1,0 +1,4 @@
+# Keep exercise text stable for source and distribution hashes.
+problems/tinydb-pilot-v1/** text eol=lf
+problems/tinydb-pilot-v1/*.zip binary
+maintainer/tinydb-pilot/** text eol=lf
