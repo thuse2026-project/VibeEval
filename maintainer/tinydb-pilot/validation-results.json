@@ -1,0 +1,92 @@
+{
+  "python": "3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]",
+  "source": "C:\\Workspace\\AI Coding 平台\\tmp\\tinydb-validation\\tinydb-edff96aeb2616402e9489d46e90a592c05565621",
+  "variants": {
+    "baseline": {
+      "cache_memory": {
+        "passed": true
+      },
+      "cache_json": {
+        "passed": true
+      },
+      "reopen_id": {
+        "passed": true
+      },
+      "normal_persistence_and_table_isolation": {
+        "passed": true
+      },
+      "missing_field_query": {
+        "passed": true
+      }
+    },
+    "cache_mutant": {
+      "cache_memory": {
+        "passed": false,
+        "error": "AssertionError: expected 0 pending documents, got 1"
+      },
+      "cache_json": {
+        "passed": false,
+        "error": "AssertionError: expected 0 pending documents, got 1"
+      },
+      "reopen_id": {
+        "passed": true
+      },
+      "normal_persistence_and_table_isolation": {
+        "passed": true
+      },
+      "missing_field_query": {
+        "passed": true
+      }
+    },
+    "id_mutant": {
+      "cache_memory": {
+        "passed": true
+      },
+      "cache_json": {
+        "passed": true
+      },
+      "reopen_id": {
+        "passed": false,
+        "error": "ValueError: Document with ID 10 already exists"
+      },
+      "normal_persistence_and_table_isolation": {
+        "passed": true
+      },
+      "missing_field_query": {
+        "passed": true
+      }
+    },
+    "combined_mutant": {
+      "cache_memory": {
+        "passed": false,
+        "error": "AssertionError: expected 0 pending documents, got 1"
+      },
+      "cache_json": {
+        "passed": false,
+        "error": "AssertionError: expected 0 pending documents, got 1"
+      },
+      "reopen_id": {
+        "passed": false,
+        "error": "ValueError: Document with ID 10 already exists"
+      },
+      "normal_persistence_and_table_isolation": {
+        "passed": true
+      },
+      "missing_field_query": {
+        "passed": true
+      }
+    }
+  },
+  "source_sha256": {
+    "__init__.py": "7ac0bcffc741541c42692dc2f9a3c5d3b19528af4ae63d353e6b13a1b2c6f25e",
+    "database.py": "497883be9162f2aaf6e385f6d96f4ea2429fd49350ac4ea78d62dfb808d5de92",
+    "middlewares.py": "3c40f422da7171e97601add30a2949b6807ca05615afed3785b705bda87f6a8f",
+    "mypy_plugin.py": "605b6445b394eb693f3888350e54d7ade8321e36e4bf4a0ea99be7043cc95dff",
+    "operations.py": "822556af527ae2bdc88a152c8f24544847cfc18f7b50b15b7893b4e4d2e19c4c",
+    "queries.py": "846d94c7406ef66baf9e45a7401f015b49a39253fb2000f81be818fdeb7f6c23",
+    "storages.py": "2b0e9ef20afe320e0832010b42e4778336c3d9b0151505eefdd704787dac28cb",
+    "table.py": "276e235f6eba4affcf6f82ac782f903ef27c523c0cebe5a4f71f1e267f7fa0d9",
+    "utils.py": "f36c561496bcc5d331ca031ad24ca5c75e3dd728570203f7501d2cb2fe9a2a76",
+    "version.py": "4c68ea4c95c379f77f94436715807ac4f028afe695f4d88dda3c4dbcef86d450"
+  }
+}
