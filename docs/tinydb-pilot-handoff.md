@@ -2,6 +2,10 @@
 
 更新：2026-11-20。已授权将首版题目及答案、评分材料提交至 GitHub，供团队试答和接入。题包已生成并通过源码和构造行为验证；尚未完成人工试答、评分校准或平台端到端联调。
 
+## GitHub 交付状态
+
+题包及换行/摘要修正已推送至 `codex/tinydb-first-two-tasks-v1`；合并请求：[PR #10](https://github.com/thuse2026-project/VibeEval/pull/10)。当前待评审，未合并 main。先前 Git 直连失败已通过本机现有代理恢复；连接器创建 PR 权限不足，改用本机 Git 已登录身份创建成功。
+
 ## 仓库入口
 
 - [考生开始说明](../problems/tinydb-pilot-v1/开始试答.md)
