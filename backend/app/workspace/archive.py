@@ -6,14 +6,14 @@ import tarfile
 from .files import MAX_FILE_BYTES, validate_path
 
 
-def read_file_archive(stream, path):
+def read_file_archive(stream, path, *, validator=validate_path):
     """Consume and close a Docker get_archive stream; accept one regular file.
 
     The caller must authenticate, hold the session guard and verify the original
     container binding before requesting /workspace/<path> from Docker.
     """
     try:
-        validate_path(path)
+        validator(path)
         data = bytearray()
         for chunk in stream:
             if len(data) + len(chunk) > MAX_FILE_BYTES + 64 * 1024:

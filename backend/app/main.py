@@ -1,4 +1,7 @@
+import asyncio
+import os
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -9,9 +12,25 @@ from .admin.accounts import load_accounts
 from .admin.evaluation import router as evaluation_router
 from .admin.overview import router as overview_router
 from .admin.router import AuthState, current_session, router
+from .admin.stage_evaluation import router as stage_evaluation_router
 from .admin.submissions import router as submission_router
+from .agent_integration.router import router as agent_router
+from .agent_integration.worker import StageAgentWorker
+from .exam_flow.router import bridge as exam_flow_bridge
+from .exam_flow.router import router as exam_flow_router
+from .exam_flow.types import FlowError
 from .exams.router import router as entry_router
 from .exams.store import configured_store
+from .llm.router import router as llm_router
+from .stage_resources.router import (
+    agent_router as stage_agent_router,
+)
+from .stage_resources.router import (
+    router as stage_files_router,
+)
+from .stage_resources.router import (
+    terminal_router as stage_terminal_router,
+)
 from .submissions.coordinator import SubmissionSandbox
 from .submissions.router import router as candidate_submission_router
 from .submissions.storage import SnapshotStore
@@ -24,8 +43,29 @@ def create_app(
     *,
     submission_sandbox: SubmissionSandbox | None = None,
     snapshot_store: SnapshotStore | None = None,
+    agent_enabled: bool | None = None,
+    agent_store=None,
+    agent_reading=None,
+    agent_runtime=None,
+    agent_event_policy=None,
+    exam_flow=None,
+    stage_resources=None,
+    stage_agent_worker=False,
 ) -> FastAPI:
-    app = FastAPI(title="VibeEval API", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app):
+        if app.state.stage_agent_worker is None:
+            yield
+            return
+        stop = asyncio.Event()
+        task = asyncio.create_task(app.state.stage_agent_worker.serve(stop))
+        try:
+            yield
+        finally:
+            stop.set()
+            await task
+
+    app = FastAPI(title="VibeEval API", version="0.1.0", lifespan=lifespan)
     app.state.auth = AuthState(load_accounts() if accounts is None else accounts)
     app.state.entry = (
         entry_store if entry_store is not None else configured_store(entry_db)
@@ -33,6 +73,30 @@ def create_app(
     app.state.entry_failures = defaultdict(list)
     app.state.submission_sandbox = submission_sandbox
     app.state.snapshot_store = snapshot_store
+    app.state.agent_enabled = (
+        (os.environ.get("VIBEEVAL_AGENT_ENABLED") == "1")
+        if agent_enabled is None
+        else agent_enabled
+    )
+    app.state.agent_store = agent_store
+    app.state.agent_reading = agent_reading
+    app.state.agent_runtime = agent_runtime
+    app.state.agent_event_policy = agent_event_policy
+    app.state.exam_flow = exam_flow
+    app.state.stage_resources = stage_resources
+    if (
+        stage_resources is None
+        and exam_flow is not None
+        and getattr(exam_flow.resources, "supports_stage_resources", False)
+    ):
+        app.state.stage_resources = exam_flow.resources
+    app.state.stage_agent_worker = (
+        StageAgentWorker(
+            app.state.stage_resources, clock=app.state.stage_resources.clock
+        )
+        if stage_agent_worker and app.state.stage_resources is not None
+        else None
+    )
     if entry_db is None:
         from .admin.submissions import get_submission_reader
         from .submissions.service import SubmissionService
@@ -49,8 +113,24 @@ def create_app(
     app.include_router(overview_router)
     app.include_router(submission_router)
     app.include_router(evaluation_router)
+    app.include_router(stage_evaluation_router)
+    app.include_router(llm_router)
     app.include_router(entry_router)
     app.include_router(candidate_submission_router)
+    app.include_router(agent_router)
+    app.include_router(exam_flow_bridge)
+    app.include_router(exam_flow_router)
+    app.include_router(stage_files_router)
+    app.include_router(stage_terminal_router)
+    app.include_router(stage_agent_router())
+
+    @app.exception_handler(FlowError)
+    async def examination_flow_error(request: Request, error: FlowError):
+        return JSONResponse(
+            {"detail": {"code": error.code}},
+            status_code=error.status,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.exception_handler(SQLAlchemyError)
     async def database_unavailable(request: Request, error: SQLAlchemyError):
@@ -63,7 +143,9 @@ def create_app(
     @app.middleware("http")
     async def private_responses(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith(("/api/v1/admin", "/api/v1/sessions")):
+        if request.url.path.startswith(
+            ("/api/v1/admin", "/api/v1/sessions", "/api/v2")
+        ):
             response.headers["Cache-Control"] = "no-store"
         return response
 

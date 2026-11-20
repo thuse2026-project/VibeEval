@@ -19,6 +19,7 @@ function entryRequest(path: string, body?: unknown) {
 }
 
 export default function Entry() {
+  const workspace = new URLSearchParams(window.location.search).get('mode') === 'r2' ? '/r2-workspace' : '/workspace';
   const [session, setSession] = useState<EntrySession | null>(null);
   const [token, setToken] = useState('');
   const [loading, setLoading] = useState(true);
@@ -67,7 +68,7 @@ export default function Entry() {
         </dl>
         <p className="login-note">请保留当前浏览器的本站数据。刷新或重新打开本页可恢复原会话，无需再次输入凭证。</p>
         <p className="login-note">状态来自共享会话；刷新此页不会重新计时。</p>
-        <p><a href="/workspace">进入工作台 / 恢复答卷</a></p>
+        <p><a href={workspace}>进入工作台 / 恢复答卷</a></p>
         <button className="secondary" onClick={() => void restore()}>检查并恢复会话</button>
       </section> : <section className="login-panel" aria-labelledby="entry-title">
         <div className="section-label">考核接入</div>

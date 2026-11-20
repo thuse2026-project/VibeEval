@@ -1,0 +1,59 @@
+.r2-page .topbar { gap: 16px; }
+.r2-page main { display: block; max-width: 760px; margin: auto; padding: 24px 16px; }
+.r2-flow-card { padding: clamp(16px, 4vw, 32px); background: #fff; border: 1px solid #dfe5e9; border-radius: 10px; }
+.r2-page h1 { margin: 0 0 12px; font-size: 22px; }
+.r2-progress { display: grid; list-style: none; padding: 0; gap: 8px; }
+.r2-progress li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; }
+.r2-progress li[aria-current="step"] { border-color: #93c5fd; }
+.r2-progress li small { grid-column: 1 / -1; overflow-wrap: anywhere; color: #475569; }
+.r2-progress li span { color: #475569; }
+.r2-page .primary { width: auto; margin-top: 6px; }
+.r2-page button { cursor: pointer; padding: 7px 12px; }
+.r2-page button:disabled { cursor: default; }
+.r2-page [role="alert"] { color: #a42929; }
+.r2-page pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.r2-workspace .ide-main { grid-template-columns: var(--file-width) 8px minmax(0, 1fr); }
+.r2-workspace .ide-main.has-ai { grid-template-columns: var(--file-width) 8px minmax(0, 1fr) 8px var(--agent-width); }
+.r2-workspace .pane-divider { background: #cbd5e1; cursor: col-resize; touch-action: none; user-select: none; }
+.r2-workspace .pane-divider:hover,
+.r2-workspace .pane-divider:focus-visible { background: #3b82f6; outline: 0; }
+.r2-workspace .sidebar { overscroll-behavior: contain; }
+.r2-workspace .directory-tree input { display: block; width: 100%; margin-bottom: 10px; padding: 7px 8px; }
+.r2-workspace .directory-tree summary { cursor: pointer; padding: 6px 4px; font-size: 12px; }
+.r2-workspace .file-branch { padding-left: 10px; }
+.r2-workspace .directory-tree .file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r2-workspace .directory-tree .lock { flex: none; }
+.r2-problem pre { font: inherit; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.r2-editable-files { margin-bottom: 14px; }
+.r2-editable-files h2, .r2-verification h2 { margin: 0 0 6px; font-size: 14px; }
+.r2-verification h2:not(:first-child) { margin-top: 20px; }
+.r2-verification p { margin: 0 0 8px; }
+.r2-verification details { margin-block: 6px 10px; }
+.r2-verification summary { cursor: pointer; }
+.r2-verification pre { max-height: 175px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f1f5f9; padding: 8px; font-size: 11px; }
+.r2-workspace .r2-editable-files button, .r2-workspace .r2-verification button { display: block; max-width: 100%; padding: 4px 8px; margin-bottom: 6px; overflow-wrap: anywhere; text-align: left; }
+.r2-workspace .ide-terminal .terminal-pane { height: clamp(110px, 27dvh, 260px); }
+.r2-workspace .ide-statusbar { height: auto; min-height: 30px; align-items: center; }
+.r2-workspace .ide-statusbar > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r2-workspace .ide-statusbar > span:last-child, .r2-file-actions { flex: none; }
+.r2-file-actions { display: flex; align-items: center; gap: 8px; }
+.r2-workspace .r2-file-actions button { font-size: 11px; padding: 3px 6px; }
+.candidate-workspace:not(.r2-workspace) .ide-main.has-ai { grid-template-columns: clamp(160px, 20vw, 260px) minmax(0, 1fr) clamp(220px, 28vw, 380px); }
+.r2-summary { margin-bottom: 14px; }
+.r2-summary textarea { margin: 4px 0 8px; }
+@media (max-width: 700px) {
+  .r2-workspace .ide { min-width: 0; }
+  .r2-workspace .ide-topbar { flex-wrap: wrap; }
+  .r2-workspace .ide-main { grid-template-columns: min(130px, 34%) minmax(0, 1fr); }
+  .r2-workspace .ide-main.has-ai { grid-template-columns: min(130px, 34%) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 48%); }
+  .r2-workspace .pane-divider { display: none; }
+  .r2-workspace .agent-panel { grid-column: 1 / -1; }
+  .r2-workspace .agent-panel-head { padding-block: 2px; }
+  .r2-workspace .agent-conversation-bar { padding-block: 3px; }
+  .r2-workspace .agent-composer { padding-block: 4px; }
+  .r2-workspace .ide-statusbar > span:last-child { display: none; }
+}
+@media (max-width: 700px) and (max-height: 640px) {
+  .r2-workspace .agent-panel { overflow-y: auto; overscroll-behavior: contain; }
+  .r2-workspace .agent-messages { min-height: 4rem; }
+}

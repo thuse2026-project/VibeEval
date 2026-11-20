@@ -38,6 +38,11 @@ class SandboxOperationFailed(RuntimeError):
 
 
 class SandboxRuntime:
+    supports_file_edits = True
+
+    def resume_workspace(self, view):
+        return self._call("resume_workspace", view)
+
     def __init__(
         self,
         *,
@@ -54,10 +59,13 @@ class SandboxRuntime:
         self.operation_timeout = operation_timeout
 
     def _call(self, method, view, *args):
+        return self._spawn_call(_operate, method, view, args)
+
+    def _spawn_call(self, operation, method, view, args):
         ctx = multiprocessing.get_context("spawn")
         reader, writer = ctx.Pipe(duplex=False)
         worker = ctx.Process(
-            target=_operate, args=(writer, self.settings, method, view, args)
+            target=operation, args=(writer, self.settings, method, view, args)
         )
         worker.start()
         writer.close()
@@ -110,6 +118,18 @@ class SandboxRuntime:
 
     def delete_sandbox(self, view):
         return self._call("delete_sandbox", view)
+
+    def prepare_execution(self, view, config):
+        return self._call("prepare_execution", view, config)
+
+    def start_execution(self, view, config, handle):
+        return self._call("start_execution", view, config, handle)
+
+    def inspect_execution(self, view, config, handle=None):
+        return self._call("inspect_execution", view, config, handle)
+
+    def cancel_execution(self, view, config, handle=None):
+        return self._call("cancel_execution", view, config, handle)
 
 
 def create_submission_sandbox():

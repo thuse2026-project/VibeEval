@@ -103,6 +103,121 @@ test('rapid typing and delayed file reads preserve file identity and undo', asyn
   await expect(page.locator('.monaco-editor')).toContainText('external terminal update');
 });
 
+test('closing tabs preserves drafts and automatically saves closed files', async ({ page }) => {
+  const state = await workspace(page);
+  const tabs = page.getByRole('navigation', { name: '已打开文件' });
+  const active = tabs.locator('[aria-pressed="true"]');
+  const close = path => tabs.getByRole('button', { name: `关闭 ${path}`, exact: true }).click();
+  const open = path => page.getByText(path, { exact: true }).first().click();
+  await open('README.md');
+  await open('tests/test_candidate.py');
+  await expect(active).toContainText('tests/test_candidate.py');
+  await close('README.md');
+  await expect(active).toContainText('tests/test_candidate.py');
+  await page.locator('.monaco-editor .view-lines').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('\n# closed draft');
+  await close('tests/test_candidate.py');
+  await expect(active).toContainText('src/booking.py');
+  await open('tests/test_candidate.py');
+  await expect(page.locator('.monaco-editor')).toContainText('closed draft');
+  await close('src/booking.py');
+  await close('tests/test_candidate.py');
+  await expect(tabs.getByRole('button')).toHaveCount(0);
+  await expect(page.getByText('从文件列表打开文件')).toBeVisible();
+  await expect(page.locator('.monaco-editor')).toBeHidden();
+  await expect.poll(() => state.writes.map(value => value.path)).toEqual(['tests/test_candidate.py']);
+  await open('tests/test_candidate.py');
+  await expect(page.locator('.monaco-editor')).toContainText('closed draft');
+});
+
+test('R2 cached tabs stay responsive during file reads and version checks', async ({ page }) => {
+  const readme = 'README.md';
+  const source = 'task.py';
+  const other = 'other.py';
+  const now = Math.floor(Date.now() / 1000);
+  const state = {
+    attempt_id: 'tabs', status: 'active', state_version: 1, server_now: now,
+    current_stage: { id: 'tabs-stage', key: 'practice', status: 'active', title: '切换文件回归' },
+    current_phase: { id: 'tabs-phase', status: 'active', deadline_at: now + 3600 },
+    capabilities: ['read_repository', 'write_repository'], stages: [{ id: 'tabs-stage' }],
+  };
+  const gates = new Map();
+  const writes = [];
+  await page.route('**/api/v1/sessions/**', route => route.fulfill({
+    json: route.request().method() === 'POST' ? state : { session_id: 'tabs' },
+  }));
+  await page.route('**/r2-preview/model', route => route.fulfill({ json: { configured: false } }));
+  await page.route('**/api/v2/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/file')) {
+      const path = url.searchParams.get('path');
+      if (route.request().method() === 'PUT') {
+        writes.push(route.request().postDataJSON());
+        return route.fulfill({ status: 409, json: { detail: { code: 'FILE_VERSION_CONFLICT' } } });
+      }
+      const gate = gates.get(path);
+      const content = gate ? await gate : {
+        content: path === readme ? '# Task instructions' : '# editable task', version: 1,
+      };
+      return route.fulfill({ json: { path, ...content } });
+    }
+    const json = url.pathname.endsWith('/files') ? { files: [readme, source, other].map(path => ({
+      path, is_dir: false, readonly: path === readme, version: 1,
+    })) } : url.pathname.endsWith('/questions') ? { items: [] }
+      : url.pathname.endsWith('/summary') ? { revision: 0 } : state;
+    await route.fulfill({ json });
+  });
+  await page.goto('/r2-workspace');
+  const editor = page.locator('.monaco-editor');
+  const active = page.locator('.editor-tabs [aria-pressed="true"]');
+  const tab = path => page.locator('.editor-tabs .etab').filter({ hasText: path });
+  const fetching = path => page.waitForRequest(req => req.method() === 'GET' && new URL(req.url()).searchParams.get('path') === path);
+  await expect(active).toContainText(readme);
+  let finishFirstRead;
+  gates.set(source, new Promise(resolve => { finishFirstRead = resolve; }));
+  await page.getByText(source, { exact: true }).first().click();
+  await expect(page.locator('.editor-file-status')).toContainText('正在读取 task.py');
+  finishFirstRead({ content: '# editable task', version: 1 });
+  await expect(active).toContainText(source);
+
+  let finishOther;
+  gates.set(other, new Promise(resolve => { finishOther = resolve; }));
+  const otherRequest = fetching(other);
+  await page.getByText(other, { exact: true }).click();
+  await otherRequest;
+  await expect(page.locator('.editor-file-status')).toContainText('正在读取 other.py');
+  await tab(readme).click();
+  await expect(active).toContainText(readme);
+  const otherResponse = page.waitForResponse(res => new URL(res.url()).searchParams.get('path') === other);
+  finishOther({ content: '# stale selection', version: 1 });
+  await otherResponse;
+  await expect(tab(other)).toHaveCount(0);
+
+  let finishRefresh;
+  gates.set(source, new Promise(resolve => { finishRefresh = resolve; }));
+  const refreshRequest = fetching(source);
+  await tab(source).click();
+  await refreshRequest;
+  await expect(editor).toContainText('editable task');
+  await editor.locator('.view-lines').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('\n# draft during refresh');
+  await expect(editor).toContainText('draft during refresh');
+  const response = page.waitForResponse(res => new URL(res.url()).searchParams.get('path') === source);
+  finishRefresh({ content: '# newer server content', version: 2 });
+  await response;
+  await expect(active).toContainText('●');
+  await page.getByRole('button', { name: `关闭 ${source}`, exact: true }).click();
+  await expect(active).toContainText(readme);
+  await expect(page.locator('.workspace-alert')).toContainText('FILE_VERSION_CONFLICT');
+  expect(writes).toHaveLength(1);
+  expect(writes[0].expected_version).toBe(1);
+  expect(writes[0].content.split(/\r?\n/)).toEqual(['# editable task', '# draft during refresh']);
+  await page.getByText(source, { exact: true }).first().click();
+  await expect(editor).toContainText('draft during refresh');
+});
+
 test('terminal scrolling stays inside the viewport with the topbar visible', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const state = await workspace(page);

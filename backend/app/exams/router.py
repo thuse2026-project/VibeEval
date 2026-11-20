@@ -91,9 +91,22 @@ def verify(body: VerifyInput, request: Request):
 
 
 def require_candidate_session(session_id: str, request: Request) -> dict:
+    if request.url.path.startswith("/api/v2/phases/"):
+        from app.exam_flow.router import identity
+        from app.exam_flow.types import FlowError
+
+        resources = getattr(request.app.state, "stage_resources", None)
+        if resources is None:
+            raise FlowError("STAGE_RESOURCES_NOT_CONFIGURED", 503)
+        return resources.agent_access(identity(request), session_id)
     session = recover(request)
     if session is None or session["session_id"] != session_id:
         raise HTTPException(404, "会话不存在或无权访问，请使用原浏览器恢复")
+    flow = getattr(request.app.state, "exam_flow", None)
+    if flow is not None and flow.manages(session_id):
+        raise HTTPException(
+            409, {"code": "EXAM_MODE_MISMATCH", "message": "请使用多阶段考试接口"}
+        )
     return session
 
 

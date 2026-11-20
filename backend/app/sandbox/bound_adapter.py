@@ -7,6 +7,33 @@ from .submission_bridge import DockerSubmissionBridge
 
 
 class BoundSandboxAdapter(DockerSubmissionBridge):
+    supports_file_edits = True
+
+    def resume_workspace(self, view):
+        from .execution import resume_workspace
+
+        return resume_workspace(self, view)
+
+    def prepare_execution(self, view, config):
+        from .execution import prepare_execution
+
+        return prepare_execution(self, view, config)
+
+    def start_execution(self, view, config, handle):
+        from .execution import start_execution
+
+        return start_execution(self, view, config, handle)
+
+    def inspect_execution(self, view, config, handle=None):
+        from .execution import inspect_execution
+
+        return inspect_execution(self, view, config, handle)
+
+    def cancel_execution(self, view, config, handle=None):
+        from .execution import cancel_execution
+
+        return cancel_execution(self, view, config, handle)
+
     def save_file(self, view, path, expected_digest, content):
         from .safe_save import save_file
 

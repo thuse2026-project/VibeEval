@@ -3,12 +3,15 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-export function TerminalPane({ sessionId, inputEnabled }: { sessionId: string | null; inputEnabled: boolean }) {
+export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/sessions/', visible = true, onCollapse }: {
+  sessionId: string | null; inputEnabled: boolean; apiPrefix?: string; visible?: boolean; onCollapse?: () => void
+}) {
   const container = useRef<HTMLDivElement>(null)
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState('终端未连接')
   const allowInput=useRef(inputEnabled)
   allowInput.current=inputEnabled
+  const focusTerminal = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!container.current) return
@@ -44,10 +47,11 @@ export function TerminalPane({ sessionId, inputEnabled }: { sessionId: string | 
     })
     const observer = new ResizeObserver(resize)
     observer.observe(container.current)
+    focusTerminal.current = () => { resize(); term.focus() }
     resize()
     if (sessionId) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      socket = new WebSocket(protocol + '//' + window.location.host + '/api/v1/sessions/' + encodeURIComponent(sessionId) + '/terminal')
+      socket = new WebSocket(protocol + '//' + window.location.host + apiPrefix + encodeURIComponent(sessionId) + '/terminal')
       socket.onopen = () => {
         if (disposed) return
         setStatus('终端已连接 · /workspace')
@@ -69,17 +73,29 @@ export function TerminalPane({ sessionId, inputEnabled }: { sessionId: string | 
     }
     return () => {
       disposed = true
+      focusTerminal.current = null
       socket?.close()
       input.dispose()
       observer.disconnect()
       term.dispose()
     }
-  }, [sessionId, attempt])
+  }, [sessionId, attempt, apiPrefix])
+
+  useEffect(() => {
+    if (!visible || !sessionId) return
+    const frame = requestAnimationFrame(() => {
+      focusTerminal.current?.()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [visible, sessionId])
 
   return <div className="terminal-pane">
     <div className="terminal-head">
       <span role="status">{sessionId ? status : '终端已禁用：当前不能写入'}</span>
-      <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>
+      <div className="terminal-actions">
+        <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>
+        {onCollapse && <button onClick={onCollapse} title="折叠终端">折叠</button>}
+      </div>
     </div>
     <div ref={container} className="terminal-body" />
   </div>

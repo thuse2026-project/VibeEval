@@ -34,6 +34,7 @@ class DockerSubmissionBridge:
         return obj
 
     def freeze_and_export(self, view):
+        from .execution import stop_bound_executions
         from .safe_save import remove_writer
 
         if view.status not in {"submitting", "submission_failed"}:
@@ -44,6 +45,7 @@ class DockerSubmissionBridge:
             obj.reload()
         if obj.status != "paused":
             raise ValueError("sandbox is not paused")
+        stop_bound_executions(self, view)
         remove_writer(self.client, view)
         stream, _ = obj.get_archive("/workspace")
         data = bytearray()
@@ -59,10 +61,12 @@ class DockerSubmissionBridge:
         return FrozenWorkspace(view.session_id, view.sandbox_id, decode_workspace(data))
 
     def delete_sandbox(self, view):
+        from .execution import stop_bound_executions
         from .safe_save import remove_writer
 
         if view.status != "submitted":
             raise ValueError("committed submission required")
+        stop_bound_executions(self, view, remove=True)
         try:
             obj = self._container(view)
         except NotFound:

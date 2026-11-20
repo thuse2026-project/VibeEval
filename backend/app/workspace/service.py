@@ -68,6 +68,9 @@ class WorkspaceReader:
         conflict = None
         with self.lifecycle.lock_session(session_id) as locked:
             view = locked.require_writable()
+            guard = getattr(locked, "require_agent_idle", None)
+            if callable(guard):
+                guard()
             observe = self.revision_writer(locked)
             current = self.sandbox.read_file(view, path)
             digest = sha256(encode_content(current)).hexdigest()
