@@ -45,7 +45,8 @@ def create_preview():
     class PreviewEntry(PostgresEntryStore):
         def admit(self, token, browser):
             admitted = super().admit(token, browser)
-            flow.attach(admitted["session_id"], definition)
+            if not admitted["exam_info"]["id"].startswith("room_"):
+                flow.attach(admitted["session_id"], definition)
             return admitted
 
     app.state.entry = PreviewEntry(app.state.entry.factory)

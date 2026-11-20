@@ -58,6 +58,28 @@ class Invitation(Base):
     session: Mapped[ExamSession | None] = relationship(back_populates="invitation")
 
 
+class ExaminerRoom(Base):
+    __tablename__ = "examiner_rooms"
+    __table_args__ = (UniqueConstraint("creator", "request_key"),)
+
+    room_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    invitation_hash: Mapped[str] = mapped_column(
+        ForeignKey("invitations.token_hash"), unique=True
+    )
+    creator: Mapped[str] = mapped_column(String(64))
+    request_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    definition: Mapped[dict] = mapped_column(JSONB)
+
+
+class ExaminerRoomReview(Base):
+    __tablename__ = "examiner_room_reviews"
+
+    submission_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    room_id: Mapped[str] = mapped_column(ForeignKey("examiner_rooms.room_id"))
+    decision: Mapped[dict] = mapped_column(JSONB)
+
+
 class ExamSession(Base):
     __tablename__ = "exam_sessions"
     __table_args__ = (

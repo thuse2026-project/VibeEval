@@ -367,9 +367,12 @@ def grade(request: Request, submission_id: str):
             rule_version=rule["rule_version"],
             rule_sha256=rule["fingerprint"],
         )
-        atomic_record(root / "last-attempt.json", report)
-        if report["status"] == "completed":
-            atomic_record(root / "objective.json", report)
+        from app.admin.rooms import grade_write
+
+        with grade_write(resources, metadata.get("exam_id", ""), submission_id):
+            atomic_record(root / "last-attempt.json", report)
+            if report["status"] == "completed":
+                atomic_record(root / "objective.json", report)
         return report
     except OSError:
         raise HTTPException(503, "评测记录未能保存，本次不发布分数") from None
@@ -424,7 +427,9 @@ def save_review(
             422, "请逐项填写代码/测试依据；测试项非零时须确认存在非复制的新增验证。"
         )
     root = location(resources, metadata, rule)
-    with REVIEW_GATE:
+    from app.admin.rooms import grade_write
+
+    with REVIEW_GATE, grade_write(resources, metadata.get("exam_id", ""), submission_id):
         _, prior = records(root, exported, metadata, rule)
         revision = prior["revision"] if prior else 0
         if revision != body.expected_revision:
