@@ -33,7 +33,12 @@ from app.llm.config import ContextLimitError, LLMError
 
 from .file_changes import ApplyPatch, StageApplyPatch, StageWriteFile, WriteFile
 from .materials import encoded, validate_json_text
-from .operation_types import OperationWaiting, ReadExecution, RunCommand
+from .operation_types import (
+    OperationWaiting,
+    ReadExecution,
+    ReceiptPersistenceError,
+    RunCommand,
+)
 from .operations import OperationService
 from .read_tools import ReadToolService
 from .reading_types import ReadDecision, ReadingApprovalRequired, ReadingError
@@ -758,7 +763,7 @@ class RuntimeCoordinator:
             return self.store.stop(
                 scope, cid, run_id, "failed", "SESSION_STATE_CHANGED", token=token
             )
-        except FlowError:
+        except (FlowError, ReceiptPersistenceError):
             raise
         except Exception as error:
             logger.error(

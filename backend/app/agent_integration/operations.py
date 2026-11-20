@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import asdict
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.agent.session_types import SessionConflict, ToolResult
 from app.db.lifecycle import (
@@ -23,6 +24,7 @@ from app.db.models import (
     WorkspaceFileRevision,
 )
 from app.db.session import session_scope
+from app.exam_flow.types import FlowError
 from app.sandbox.runtime import SandboxOperationFailed
 from app.workspace.files import ALLOWED_FILES
 from app.workspace.service import RevisionStoreUnavailable
@@ -37,7 +39,11 @@ from .file_changes import (
 )
 from .material_store import call_digest
 from .materials import SourceSnapshot, digest, encoded, fragment
-from .operation_types import ExecutionSnapshot, OperationWaiting
+from .operation_types import (
+    ExecutionSnapshot,
+    OperationWaiting,
+    ReceiptPersistenceError,
+)
 from .reading_types import ReadingError
 from .runtime_types import RunBudgetExceeded
 from .store import ConversationNotFound
@@ -757,7 +763,16 @@ class OperationService:
                 pass  # No restart. Query this exact accepted-or-unknown start.
         try:
             snapshot = self.backend.inspect_execution(view, config, handle)
-            result = self.record(scope, cid, operation_id, snapshot)
+            try:
+                result = self.record(scope, cid, operation_id, snapshot)
+            except (FlowError, SandboxOperationFailed):
+                raise
+            except (SQLAlchemyError, RuntimeError) as error:
+                # Dispatch intent was committed before execution. On rollback,
+                # the next worker must inspect that operation again.
+                raise ReceiptPersistenceError(
+                    "Operation receipt was not committed"
+                ) from error
         except BACKEND_ERRORS:
             self.record(
                 scope,
