@@ -130,6 +130,57 @@ class StageResourceTests(unittest.TestCase):
         self.submit("submit2")
         return self.start("start3")
 
+    def test_examiner_reads_sealed_text_answers_without_code_snapshot(self):
+        from app.admin.accounts import hash_password
+        from examples.datasette_exam import export_stage_submission
+
+        active = self.begin()
+        phase_id = active["current_phase"]["id"]
+        self.flow.save_notes(self.sid, phase_id, 0, "exploration note")
+        answering = self.flow.finish_phase(
+            self.sid, phase_id, self.current()["state_version"], "finish"
+        )
+        self.flow.save_answer(
+            self.sid, answering["current_phase"]["id"], "item", 0, "saved answer"
+        )
+        self.submit("submit1")
+        exported = export_stage_submission(
+            self.flow, self.sid, active["current_stage"]["id"]
+        )
+        self.assertIsNone(exported["content"]["artifact"])
+        self.assertEqual(exported["content"]["notes"]["value"], "exploration note")
+        self.assertEqual(
+            exported["content"]["phases"][1]["answers"]["item"]["value"], "saved answer"
+        )
+        app = create_app(
+            {
+                "teacher": {
+                    "name": "Teacher",
+                    "password_hash": hash_password("fixture-password"),
+                }
+            },
+            entry_store=SimpleNamespace(factory=self.factory),
+            exam_flow=self.flow,
+        )
+        base = "/api/v1/admin/r2/submissions"
+        endpoint = f"{base}/{exported['receipt']['id']}/answer-sheet"
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as client:
+            self.assertEqual(client.get(endpoint).status_code, 401)
+            login = client.post(
+                "/api/v1/admin/login",
+                json={"username": "teacher", "password": "fixture-password"},
+            )
+            self.assertEqual(login.status_code, 200)
+            listing = client.get(base, params={"kind": "text", "exam_id": "external"})
+            self.assertIn(
+                exported["receipt"]["id"],
+                [item["submission_id"] for item in listing.json()["items"]],
+            )
+            response = client.get(endpoint)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["content"], exported["content"])
+            self.assertEqual(response.json()["receipt"], exported["receipt"])
+
     def test_live_terminal_and_file_api_revoked_on_submit(self):
         active = self.coding()
         phase = active["current_phase"]["id"]
@@ -313,6 +364,135 @@ class StageResourceTests(unittest.TestCase):
             ]["sha256"],
             artifact["sha256"],
         )
+
+    def test_interview_and_export_share_frozen_evidence_after_retry(self):
+        # Extend only this fresh fixture's third stage before its first start.
+        from copy import deepcopy
+
+        from app.db.models import ExamFlowAttempt
+        from app.exam_flow.types import EvidenceCutoff, PhaseDefinition, PhaseState
+        from app.stage_resources.evidence import page
+
+        phase = PhaseDefinition(
+            key="interview",
+            title="独立问答",
+            duration_seconds=600,
+            question_ref="questions",
+            capabilities={"read_repository", "read_frozen_code", "edit_answers"},
+        )
+        with self.factory.begin() as db:
+            row = db.get(ExamFlowAttempt, self.sid)
+            data = deepcopy(row.state_json)
+            for definition in (
+                data["definition"]["stages"][2],
+                data["stages"][2]["definition"],
+            ):
+                definition["phases"].append(phase.model_dump(mode="json"))
+            data["stages"][2]["phases"].append(
+                PhaseState(id="phase_interview", definition=phase).model_dump(
+                    mode="json"
+                )
+            )
+            row.state_json = data
+        active = self.coding()
+        coding, stage = active["current_phase"]["id"], active["current_stage"]["id"]
+        self.gateway.mark_evidence_collection(self.sid, coding, complete=True)
+        edited = dict(
+            id="edit1",
+            actor="candidate",
+            kind="edit",
+            at=self.now,
+            data={"path": "solution.py", "version": 2},
+        )
+        self.gateway.save(self.sid, coding, "solution.py", 1, "changed\n")
+        started = dict(
+            id="run1-start",
+            actor="candidate",
+            kind="test_run",
+            at=self.now,
+            data={
+                "run_id": "run1",
+                "command": "python -m unittest",
+                "status": "started",
+                "exit_code": None,
+                "code_version": "v2",
+            },
+        )
+        self.assertEqual(self.gateway.append_evidence(self.sid, coding, edited), 1)
+        self.assertEqual(self.gateway.append_evidence(self.sid, coding, started), 2)
+        self.assertEqual(self.gateway.append_evidence(self.sid, coding, started), 2)
+        finished = dict(
+            started,
+            id="run1-end",
+            data={**started["data"], "status": "completed", "exit_code": 0},
+        )
+        with self.assertRaisesRegex(FlowError, "EVIDENCE_ID_CONFLICT"):
+            self.gateway.append_evidence(
+                self.sid, coding, {**finished, "id": started["id"]}
+            )
+        self.sandbox.fail_export = True
+        failed = self.flow.finish_phase(
+            self.sid, coding, self.current()["state_version"], "finish-coding"
+        )
+        self.assertEqual(failed["error_code"], "RESOURCE_CLOSE_FAILED")
+        self.assertEqual(failed["current_phase"]["status"], "closing")
+        with self.assertRaisesRegex(FlowError, "PHASE_CLOSED"):
+            self.gateway.append_evidence(self.sid, coding, finished)
+        self.sandbox.fail_export = False
+        self.now = failed["retry_at"]
+        self.flow = self.new_service()
+        active = self.current()
+        interview = active["current_phase"]["id"]
+        self.assertEqual(active["current_phase"]["deadline_at"], self.now + 600)
+        frozen = self.gateway.frozen_code(self.sid, interview)
+        with self.assertRaisesRegex(FlowError, "PHASE_CLOSED"):
+            self.gateway.evidence_page(self.sid, coding, None, 50)
+        with self.assertRaisesRegex(FlowError, "EVIDENCE_CURSOR_INVALID"):
+            self.gateway.evidence_page(self.sid, interview, "another:1", 1)
+        browser = "c" * 43
+        entry = SimpleNamespace(
+            factory=self.factory,
+            current=lambda token: (
+                {"session_id": self.sid} if token == browser else None
+            ),
+        )
+        app = create_app({}, entry_store=entry, exam_flow=self.flow)
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as client:
+            endpoint = f"/api/v2/phases/{interview}/evidence"
+            self.assertEqual(client.get(endpoint).status_code, 401)
+            client.cookies.set("vibeeval_exam_flow", browser, path="/api/v2")
+            self.assertEqual(
+                client.get(f"/api/v2/phases/{interview}/frozen-code").json(), frozen
+            )
+            first_response = client.get(endpoint, params={"limit": 1})
+            self.assertEqual(first_response.status_code, 200, first_response.text)
+            view = first_response.json()
+            second = client.get(
+                endpoint, params={"limit": 1, "cursor": view["next_cursor"]}
+            ).json()
+        self.assertEqual(
+            (view["items"], second["items"], second["next_cursor"]),
+            ([edited], [started], None),
+        )
+        self.assertEqual(second["sha256"], frozen["sha256"])
+        self.assertEqual(second["completeness"], "complete")
+        self.sandbox.volumes[frozen["workspace_id"]][
+            "solution.py"
+        ] = "different after freeze"
+        self.assertEqual(
+            self.gateway.read(self.sid, interview, "solution.py")["content"],
+            "changed\n",
+        )
+        self.submit("submit3")
+        artifact = self.flow.export_submission(self.sid, stage)["content"]["artifact"]
+        self.assertEqual(artifact["sha256"], frozen["sha256"])
+        with self.factory() as db:
+            items, following = page(
+                db, EvidenceCutoff.model_validate(artifact["evidence"])
+            )
+        self.assertEqual((items, following), ([edited, started], None))
+        with self.assertRaisesRegex(FlowError, "PHASE_CLOSED"):
+            self.gateway.evidence_page(self.sid, interview, None, 50)
 
     def test_native_agent_can_edit_registered_non_sample_file(self):
         active = self.coding()

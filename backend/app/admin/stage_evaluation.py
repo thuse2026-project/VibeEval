@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,7 +28,7 @@ GRADE_GATE = threading.Lock()
 REVIEW_GATE = threading.Lock()
 
 
-def context(request, submission_id):
+def context(request, submission_id, *, answer_sheet_only=False):
     if not re.fullmatch(r"submission_[a-f0-9]{32}", submission_id):
         raise HTTPException(404, "未找到多阶段答卷")
     flow = request.app.state.exam_flow
@@ -63,6 +64,8 @@ def context(request, submission_id):
                 "submission_id": submission_id,
                 "session_id": attempt.session_id,
                 "stage_id": stage["id"],
+                "definition": attempt.state_json["definition"]["key"],
+                "kind": stage["receipt"]["kind"],
                 "title": stage["definition"]["title"],
                 "candidate_id": invitation.candidate_id,
                 "candidate_name": invitation.candidate_name,
@@ -71,11 +74,18 @@ def context(request, submission_id):
                 "task_version": workspace.spec_json["task_version"],
                 "image": workspace.sandbox_image_ref,
             }
-        from examples.datasette_exam import export_code_submission
+        if answer_sheet_only:
+            exported = flow.export_submission(
+                metadata["session_id"], metadata["stage_id"]
+            )
+        else:
+            if metadata["kind"] != "code":
+                raise HTTPException(409, "文字答卷请从答卷读取接口查看")
+            from examples.datasette_exam import export_code_submission
 
-        exported = export_code_submission(
-            flow, metadata["session_id"], metadata["stage_id"]
-        )
+            exported = export_code_submission(
+                flow, metadata["session_id"], metadata["stage_id"]
+            )
         return metadata, exported, resources
     except HTTPException:
         raise
@@ -258,7 +268,10 @@ def prior_scores(root, exported):
 
 @router.get("/submissions")
 def submissions(
-    request: Request, page: int = Query(default=1, ge=1), exam_id: str = ""
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    exam_id: str = "",
+    kind: Literal["all", "text", "code"] = "code",
 ):
     resources = request.app.state.stage_resources
     if resources is None:
@@ -280,10 +293,11 @@ def submissions(
             for attempt, invitation in rows:
                 for stage in attempt.state_json["stages"]:
                     receipt = stage.get("receipt")
-                    if receipt and receipt["kind"] == "code":
+                    if receipt and (kind == "all" or receipt["kind"] == kind):
                         items.append(
                             {
                                 "submission_id": receipt["id"],
+                                "kind": receipt["kind"],
                                 "submitted_at": receipt["submitted_at"],
                                 "close_reason": receipt["close_reason"],
                                 "title": stage["definition"]["title"],
@@ -305,6 +319,12 @@ def submissions(
             }
     except Exception:
         raise HTTPException(503, "多阶段答卷列表暂不可读") from None
+
+
+@router.get("/submissions/{submission_id}/answer-sheet")
+def answer_sheet(request: Request, submission_id: str):
+    metadata, exported, _ = context(request, submission_id, answer_sheet_only=True)
+    return {"metadata": metadata, **exported}
 
 
 @router.get("/submissions/{submission_id}")
@@ -397,6 +417,8 @@ def save_review(
     examiner=Depends(current_session),
 ):
     metadata, exported, resources = context(request, submission_id)
+    if metadata.get("definition") == "r2-four-stage":
+        raise HTTPException(409, "四题考试须按独立问答及过程分项评分")
     rule = rule_for(metadata)
     maxima = {item["key"]: item["max"] for item in rule["manual"]}
     if (

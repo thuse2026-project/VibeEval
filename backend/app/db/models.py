@@ -173,6 +173,20 @@ class StageWorkspace(Base):
     current_phase_id: Mapped[str | None] = mapped_column(String(128))
     permission_epoch: Mapped[int] = mapped_column(BigInteger)
     artifact_json: Mapped[dict | None] = mapped_column(JSONB)
+    evidence_status: Mapped[str | None] = mapped_column(String(16))
+
+
+class StageEvidence(Base):
+    __tablename__ = "stage_evidence"
+    __table_args__ = (UniqueConstraint("phase_id", "event_id"),)
+    phase_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_scopes.scope_id", ondelete="CASCADE"), primary_key=True
+    )
+    sequence: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
+    event_id: Mapped[str] = mapped_column(String(128))
+    payload: Mapped[dict] = mapped_column(JSONB)
 
 
 class StageFileRevision(Base):

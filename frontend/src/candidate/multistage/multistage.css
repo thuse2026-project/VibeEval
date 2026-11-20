@@ -57,3 +57,13 @@
   .r2-workspace .agent-panel { overflow-y: auto; overscroll-behavior: contain; }
   .r2-workspace .agent-messages { min-height: 4rem; }
 }
+
+.r2-text-stage { max-width: 100rem; margin: auto; padding: 1rem 2rem; }
+.r2-text-stage header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.r2-text-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+.r2-text-columns aside, .r2-text-columns > fieldset { min-width: 0; max-height: 75vh; overflow: auto; padding: 1rem; }
+.r2-text-stage label, .r2-text-stage textarea { display: block; width: 100%; }
+.r2-text-stage textarea { min-height: 5rem; box-sizing: border-box; }
+.r2-text-stage select { max-width: 100%; }
+.r2-text-stage pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .r2-text-columns { grid-template-columns: minmax(0, 1fr); } }

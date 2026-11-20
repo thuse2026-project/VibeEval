@@ -503,7 +503,11 @@ class ExamFlowService:
                 "phases": [p.model_dump(mode="json") for p in stage.phases],
                 "notes": stage.notes.model_dump(mode="json"),
                 "summary": stage.summary.model_dump(mode="json"),
-                "artifact": None if result is None else result.model_dump(mode="json"),
+                "artifact": (
+                    None
+                    if result is None
+                    else result.model_dump(mode="json", exclude_none=True)
+                ),
             }
             stage.submission = content
             stage.receipt = Receipt(
@@ -634,6 +638,19 @@ class ExamFlowService:
                 "started_at": state.phase.started_at,
                 "deadline_at": state.phase.deadline_at,
             },
+            "next_action": (
+                None
+                if not active
+                else (
+                    "finish_phase"
+                    if state.stage.phase_index + 1 < len(state.stage.phases)
+                    else (
+                        "submit_stage"
+                        if state.stage_index + 1 < len(state.stages)
+                        else "submit_exam"
+                    )
+                )
+            ),
             "capabilities": (
                 sorted(state.phase.definition.capabilities) if active else []
             ),

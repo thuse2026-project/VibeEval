@@ -49,7 +49,7 @@ finally: os.close(directory)
 """
 
 HEALTH_SCRIPT = r"""
-import json,os,stat,sys
+import hashlib,json,os,stat,sys
 from pathlib import Path
 config=json.loads(sys.argv[1]); root=Path('/workspace')
 assert os.getuid()==1000
@@ -62,6 +62,8 @@ for path in root.rglob('*'):
   name=str(path.relative_to(root)); actual.add(name)
   assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=1048576
   assert os.access(path,os.R_OK)
+  if name in config['file_sha256']:
+   assert hashlib.sha256(path.read_bytes()).hexdigest()==config['file_sha256'][name]
   if not config['readonly']: assert os.access(path,os.W_OK)==(name in config['writable'])
 assert actual==set(config['files'])
 assert root.stat().st_uid==0 and not root.stat().st_mode & 0o022
@@ -173,6 +175,7 @@ class StageSandboxAdapter(BoundSandboxAdapter):
             "files": view.allowed_files,
             "writable": view.writable_files,
             "readonly": view.read_only,
+            "file_sha256": view.file_sha256,
         }
         result = obj.exec_run(
             ["python", "-I", "-c", HEALTH_SCRIPT, json.dumps(config)], user="1000:1000"

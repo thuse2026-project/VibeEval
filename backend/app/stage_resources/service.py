@@ -21,12 +21,13 @@ from app.db.models import (
     StageFileRevision,
     StageWorkspace,
 )
-from app.exam_flow.types import Artifact, FlowError, FlowState
+from app.exam_flow.types import Artifact, EvidenceCutoff, FlowError, FlowState
 from app.llm.config import load_settings
 from app.submissions.storage import SnapshotStore
 from app.workspace.files import encode_content
 from app.workspace.service import SaveConflict
 
+from . import evidence
 from .types import STAGE_REFERENCE_ADAPTER, ResourceSpec, WorkspaceView, validate_file
 
 
@@ -128,6 +129,7 @@ class StageResources:
             allowed_files=spec.files,
             writable_files=spec.writable,
             read_only=row.read_only,
+            file_sha256=spec.file_sha256,
         )
 
     def prepare(self, context, definition, operation_id):
@@ -222,7 +224,12 @@ class StageResources:
             spec = ResourceSpec.model_validate(row.spec_json)
             if "use_agent" in definition.capabilities:
                 self._runtime(context.phase_id, definition.capabilities, spec)
-            if row.sandbox_id is None:
+            if "read_frozen_code" in definition.capabilities:
+                if row.artifact_json is None or row.sandbox_id is not None:
+                    raise FlowError("WORKSPACE_NOT_FROZEN", 503)
+                EvidenceCutoff.model_validate(row.artifact_json["evidence"])
+                self._read_snapshot(row)
+            elif row.sandbox_id is None:
                 view = self._view(row, state, status="provisioning")
                 identity = self.sandbox.ensure_bound(view)
                 self.sandbox.check_ready(replace(view, sandbox_id=identity))
@@ -290,6 +297,110 @@ class StageResources:
         for cid, rid in active:
             runs.stop(context.phase_id, cid, rid, "interrupted", "PHASE_CLOSED")
         self._runtimes.pop(context.phase_id, None)
+        with self._locked(context.session_id) as (db, state, row):
+            self._operation(state, context, operation_id, "close")
+            next_index = state.stage.phase_index + 1
+            phases = state.stage.definition.phases
+            if (
+                next_index < len(phases)
+                and "read_frozen_code" in phases[next_index].capabilities
+            ):
+                if row.artifact_json is None:
+                    self._capture_snapshot(row, state)
+                    cutoff = EvidenceCutoff(
+                        coding_phase_id=context.phase_id,
+                        sequence=evidence.head(db, context.phase_id),
+                        completeness=(
+                            "complete"
+                            if row.evidence_status == "complete"
+                            else "partial"
+                        ),
+                        reason=(
+                            None
+                            if row.evidence_status == "complete"
+                            else (
+                                "CAPTURE_GAP"
+                                if row.evidence_status == "partial"
+                                else "COLLECTION_NOT_CONNECTED"
+                            )
+                        ),
+                    )
+                    row.artifact_json = {
+                        **row.artifact_json,
+                        "evidence": cutoff.model_dump(mode="json"),
+                    }
+                self._read_snapshot(row)
+
+    def _capture_snapshot(self, row, state):
+        files = self.sandbox.export_volume(self._view(row, state, status="submitting"))
+        stored = self.snapshots.write(files)
+        row.artifact_json = {
+            "sha256": stored.content_sha256,
+            "size_bytes": stored.size_bytes,
+            "file_count": stored.file_count,
+        }
+
+    def _read_snapshot(self, row):
+        stored = row.artifact_json
+        return self.snapshots.read(
+            stored["sha256"],
+            size_bytes=stored["size_bytes"],
+            file_count=stored["file_count"],
+        )
+
+    def append_evidence(self, session_id, phase_id, item):
+        """Server-only. Pass candidate-visible facts from the actual recorder."""
+        item = evidence.EvidenceItem.model_validate(item)
+        with self.guard(session_id, phase_id, "write_repository") as (db, _, _, _):
+            return evidence.append(db, phase_id, item)
+
+    def mark_evidence_collection(self, session_id, phase_id, *, complete: bool):
+        """Called by a trusted recorder. Once a gap is reported it stays visible."""
+        with self.guard(session_id, phase_id, "write_repository") as (_, _, row, _):
+            if row.evidence_status != "partial":
+                row.evidence_status = "complete" if complete else "partial"
+
+    def frozen_code(self, session_id, phase_id):
+        with self.guard(session_id, phase_id, "read_frozen_code") as (_, state, row, _):
+            coding = state.stage.phases[state.stage.phase_index - 1]
+            return {
+                "workspace_id": row.workspace_id,
+                "sha256": row.artifact_json["sha256"],
+                "coding_phase_id": coding.id,
+                "closed_at": coding.closed_at,
+                "evidence": EvidenceCutoff.model_validate(
+                    row.artifact_json["evidence"]
+                ).model_dump(mode="json"),
+            }
+
+    def evidence_page(self, session_id, phase_id, cursor, limit):
+        with self.guard(session_id, phase_id, "read_frozen_code") as (db, _, row, _):
+            stored = row.artifact_json
+            cutoff = EvidenceCutoff.model_validate(stored["evidence"])
+            after = 0
+            if cursor is not None:
+                scope, separator, position = cursor.partition(":")
+                if (
+                    scope != cutoff.coding_phase_id
+                    or not separator
+                    or not position.isascii()
+                    or not position.isdecimal()
+                ):
+                    raise FlowError("EVIDENCE_CURSOR_INVALID", 422)
+                after = int(position)
+            items, following = evidence.page(db, cutoff, after=after, limit=limit)
+            return {
+                "sha256": stored["sha256"],
+                "coding_phase_id": cutoff.coding_phase_id,
+                "completeness": cutoff.completeness,
+                "reason": cutoff.reason,
+                "items": items,
+                "next_cursor": (
+                    f"{cutoff.coding_phase_id}:{following}"
+                    if following is not None
+                    else None
+                ),
+            }
 
     def seal(self, context, definition, operation_id):
         with self._locked(context.session_id) as (_, state, row):
@@ -300,24 +411,15 @@ class StageResources:
                 row.status = "sealed"
                 return None
             if row.artifact_json is None:
-                files = self.sandbox.export_volume(
-                    self._view(row, state, status="submitting")
-                )
-                stored = self.snapshots.write(files)
-                row.artifact_json = {
-                    "sha256": stored.content_sha256,
-                    "size_bytes": stored.size_bytes,
-                    "file_count": stored.file_count,
-                }
+                if "read_frozen_code" in state.phase.definition.capabilities:
+                    raise FlowError("FROZEN_SNAPSHOT_MISSING", 503)
+                self._capture_snapshot(row, state)
+            self._read_snapshot(row)
             stored = row.artifact_json
-            self.snapshots.read(
-                stored["sha256"],
-                size_bytes=stored["size_bytes"],
-                file_count=stored["file_count"],
-            )
             row.status = "sealed"
             return Artifact(
                 workspace_id=row.workspace_id,
+                evidence=stored.get("evidence"),
                 reference="stage-snapshot:" + row.workspace_id + ":" + stored["sha256"],
                 sha256=stored["sha256"],
             )
@@ -412,6 +514,19 @@ class StageResources:
                 selected = view.allowed_files if paths is None else paths
                 for path in selected:
                     validate_file(view, path)
+                if "read_frozen_code" in state.phase.definition.capabilities:
+                    contents = {
+                        f.path: f.content for f in self._read_snapshot(row).files
+                    }
+                    return replace(view, read_only=True), {
+                        path: {
+                            "content": contents[path],
+                            "version": self._observe(
+                                db, row.workspace_id, path, contents[path]
+                            ),
+                        }
+                        for path in selected
+                    }
                 workspace, epoch = row.workspace_id, state.phase.permission_epoch
                 before = self._versions(db, workspace, selected)
             if paths is None:

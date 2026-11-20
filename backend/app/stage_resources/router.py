@@ -6,6 +6,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -81,6 +82,22 @@ def perform(action):
         raise
     except Exception:
         raise FlowError("WORKSPACE_OPERATION_UNCERTAIN", 503) from None
+
+
+@router.get("/{phase_id}/frozen-code")
+def frozen_code(phase_id: str, sid=Depends(identity), gateway=Depends(resources)):
+    return perform(lambda: gateway.frozen_code(sid, phase_id))
+
+
+@router.get("/{phase_id}/evidence")
+def frozen_evidence(
+    phase_id: str,
+    sid=Depends(identity),
+    gateway=Depends(resources),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, max_length=160),
+):
+    return perform(lambda: gateway.evidence_page(sid, phase_id, cursor, limit))
 
 
 @router.get("/{phase_id}/files", response_model=FileTree)

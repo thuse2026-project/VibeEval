@@ -36,6 +36,7 @@ type Props = {
   actions?: ReactNode
   submissionFields?: ReactNode
   submitLabel?: string
+  continuesToQuestions?: boolean
   busy: boolean
   tabSelectionDisabled?: boolean
   onSelectFile: (path: string | null) => void
@@ -79,6 +80,7 @@ export function WorkspaceScreen({
   actions,
   submissionFields,
   submitLabel = '提交答卷',
+  continuesToQuestions = false,
   busy,
   tabSelectionDisabled = busy,
   onSelectFile,
@@ -258,16 +260,16 @@ export function WorkspaceScreen({
             }
           }}>
             <span className="section-icon" aria-hidden="true">↑</span>
-            <h2 id="submit-title">确认提交答卷？</h2>
+            <h2 id="submit-title">{continuesToQuestions ? '确认结束编程？' : '确认提交答卷？'}</h2>
             <p className="muted">提交前请核对以下信息</p>
             <dl className="submission-summary"><div><dt>作答时间</dt><dd className="mono">{practice ? '本阶段不计时' : formatRemaining(remaining)}</dd></div><div><dt>文件状态</dt><dd>{saveLabel[saveState]}</dd></div></dl>
-            <p>提交前会保存全部修改并冻结快照；提交后不能继续编辑。</p>
+            <p>{continuesToQuestions ? '确认后将保存并锁定代码，随后开始 10 分钟独立问答。' : '提交前会保存全部修改并冻结快照；提交后不能继续编辑。'}</p>
             {submissionFields}
             {submitError && <div className="banner banner-error">{submitError}</div>}
             <div className="modal-actions">
               <button className="btn" autoFocus disabled={submitting} onClick={() => setConfirmSubmit(false)}>返回工作台</button>
               <button className="btn primary" disabled={submitting || remaining<=0} onClick={() => void submit()}>
-                {submitting ? '提交中…' : '确认提交'}
+                {continuesToQuestions ? (submitting ? '正在固定代码…' : '确认结束编程') : (submitting ? '提交中…' : '确认提交')}
               </button>
             </div>
           </div>
