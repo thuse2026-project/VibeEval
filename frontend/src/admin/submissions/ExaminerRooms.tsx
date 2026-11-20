@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../shared/api';
+import './examiner-rooms.css';
 
 const request = <T,>(path: string, body?: unknown) => api<T>(path, body, '/api/v1/admin/r2');
 const rooms = 'rooms';
@@ -10,7 +11,7 @@ type Stage = { id: string; title: string; receipt: { id: string } | null; decisi
 type Quote = { objective: number; original_subjective: number; subjective: number; raw: number; cap: number | null; final: number };
 type Decision = { score: Quote; delta: number; reason: string; examiner: string; at: number; action: string };
 type Listing = { items: Room[]; next_cursor: string | null; meta: { current_template: { title: string; version: string; can_create: boolean } | null } };
-type Detail = { title: string; receipt: { id: string; kind: string }; submission: { summary?: { value: string }; phases: { questions?: { id: string; title: string; body: string }[]; answers: Record<string, { value: unknown }> }[] }; grading: { state: string; message?: string; revision: string; maximum?: number; subjective?: number; objective?: { score: number; groups: { key: string; name?: string; score: number; max: number }[] }; manual_criteria?: { key: string; name?: string; max: number }[]; review?: { scores: Record<string, number>; evidence?: Record<string, string> }; changes?: { path: string; diff: string; truncated: boolean }[] }; decision: Decision | null };
+type Detail = { title: string; receipt: { id: string; kind: string }; submission: { summary?: { value: string }; phases: { questions?: { id: string; title: string; body: string }[]; answers: Record<string, { value: unknown }> }[] }; grading: { state: string; message?: string; revision: string; maximum?: number; subjective?: number; objective?: { score: number; cap?: number | null; groups: { key: string; name?: string; score: number; max: number }[] }; manual_criteria?: { key: string; name?: string; max: number }[]; review?: { scores: Record<string, number>; evidence?: Record<string, string> }; changes?: { path: string; diff: string; truncated: boolean }[] }; decision: Decision | null };
 type Event = { id: string; actor: string; kind: string; text?: string; occurred_at: number; conversation_id: string; status?: string; approval?: string; path?: string; diff_id?: string; exit_code?: number; tool?: string };
 const eventLabel = (event: Event) => {
   if (event.kind === 'approval') return event.status === 'approved' ? '批准执行' : event.status === 'rejected' ? '拒绝执行' : '审批结束';
@@ -37,6 +38,7 @@ export default function ExaminerRooms({ roomId, onNavigate, onExpired }: { roomI
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [timeline, setTimeline] = useState<Timeline | null>(null);
+  const [tab, setTab] = useState<'grades' | 'timeline'>('grades');
   const [conversation, setConversation] = useState('');
   const [diffs, setDiffs] = useState<Record<string, Diff>>({});
   const [delta, setDelta] = useState('0');
@@ -102,38 +104,59 @@ export default function ExaminerRooms({ roomId, onNavigate, onExpired }: { roomI
     });
   }
 
-  return <section className="status-panel examiner-rooms">
+  const selectedGrade = detail?.grading;
+  const originalScore = selectedGrade?.state === 'scored' && selectedGrade.objective
+    ? Math.min(selectedGrade.objective.cap ?? 100, selectedGrade.objective.score + (selectedGrade.subjective ?? 0))
+    : null;
+
+  return <section className="examiner-rooms">
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {roomId ? <>
-      <button className="secondary" onClick={() => onNavigate('/admin/r2')}>返回考试房间</button>
-      <button className="secondary" onClick={() => { setError(''); refresh(v => v + 1); }}>刷新结果</button>
-      <h1>{room?.candidate_name ?? '考试结果'}</h1>
-      {room && <p>{room.exam_title} · {states[room.exam_status]}</p>}
-      <nav className="r2-review-actions" aria-label="题目">{room?.stages.map((item, i) =>
+      <div className="examiner-toolbar">
+        <button className="secondary" onClick={() => onNavigate('/admin/r2')}>← 返回考试房间</button>
+        <button className="secondary" onClick={() => { setError(''); refresh(v => v + 1); }}>刷新结果</button>
+      </div>
+      <div className="examiner-heading"><div><h1>{room?.candidate_name ?? '考试结果'}</h1>
+        {room && <p>{room.exam_title}</p>}</div>{room && <span className="examiner-badge">{states[room.exam_status]}</span>}</div>
+      <div className="examiner-layout">
+      <nav className="examiner-stages" aria-label="题目">{room?.stages.map((item, i) =>
         <button key={item.id} disabled={busy || !item.receipt || room.exam_status !== 'completed'} aria-pressed={item.id === stage}
-          onClick={() => { if (stage !== item.id) { setDetail(null); setTimeline(null); setConversation(''); setPreview(null); setDelta('0'); setReason(''); setStage(item.id); } }}>
-          {i + 1}. {item.title}{item.decision ? ` · ${item.decision.score.final} 分 · 已锁定` : ''}
+          onClick={() => { if (stage !== item.id) { setDetail(null); setTimeline(null); setTab('grades'); setConversation(''); setPreview(null); setDelta('0'); setReason(''); setStage(item.id); } }}>
+          <strong>{i + 1}. {item.title}</strong><small>{item.decision ? `${item.decision.score.final} 分 · 已锁定` : item.receipt ? '已交卷' : '待交卷'}</small>
         </button>)}</nav>
-      {detail && <>
-        <h2>{detail.title}</h2>
+      {detail && <article className="examiner-content">
+        <section className="examiner-card examiner-heading"><h2>{detail.title}</h2>
+          <strong className="examiner-score">{detail.decision ? `${detail.decision.score.final} / 100` : originalScore === null ? '评分未齐' : `${originalScore} / 100`}</strong>
+        </section>
+        <nav className="examiner-tabs" aria-label="答卷内容">
+          <button aria-pressed={tab === 'grades'} onClick={() => setTab('grades')}>评分与答卷</button>
+          <button aria-pressed={tab === 'timeline'} onClick={() => { setTab('timeline'); if (!timeline) void loadTimeline(); }}>作答过程</button>
+        </nav>
+        {tab === 'grades' ? <>
+        <section className="examiner-card">
+        <h3>考生答卷</h3>
         {detail.submission.phases.flatMap(phase => (phase.questions ?? []).map(question => <details key={question.id}>
           <summary>{question.title}</summary><pre>{question.body}</pre>
           {phase.answers[question.id] && <pre>{typeof phase.answers[question.id].value === 'string' ? String(phase.answers[question.id].value) : JSON.stringify(phase.answers[question.id].value, null, 2)}</pre>}
         </details>))}
         {detail.submission.summary?.value && <p>提交说明：{detail.submission.summary.value}</p>}
+        </section>
+        <section className="examiner-card">
         <h3>评分</h3>
-        {detail.grading.objective && <ul>{detail.grading.objective.groups.map(part => <li key={part.key}>{part.name ?? part.key} · {part.score} / {part.max}</li>)}</ul>}
-        {detail.grading.review && <ul>{detail.grading.manual_criteria?.map(part => <li key={part.key}>{part.name ?? part.key} · {detail.grading.review?.scores[part.key]} / {part.max}{detail.grading.review?.evidence?.[part.key] && <p>{detail.grading.review.evidence[part.key]}</p>}</li>)}</ul>}
+        {detail.grading.objective && <dl className="examiner-points">{detail.grading.objective.groups.map(part => <div key={part.key}><dt>{part.name ?? part.key}</dt><dd>{part.score} / {part.max}</dd></div>)}</dl>}
+        {detail.grading.review && <dl className="examiner-points">{detail.grading.manual_criteria?.map(part => <div key={part.key}><dt>{part.name ?? part.key}{detail.grading.review?.evidence?.[part.key] && <small>{detail.grading.review.evidence[part.key]}</small>}</dt><dd>{detail.grading.review?.scores[part.key]} / {part.max}</dd></div>)}</dl>}
         {detail.grading.state !== 'scored' && <p>{detail.grading.message ?? '评分尚未齐全'}</p>}
         {detail.receipt.kind === 'code' && <a href={`/admin/r2/submissions/${detail.receipt.id}`}>查看评测与评分来源</a>}
         {detail.grading.changes?.map(change => <details key={change.path}><summary>最终差异 · {change.path}</summary><pre>{change.diff}</pre>{change.truncated && <p>差异已截断</p>}</details>)}
+        </section>
+        </> : <section className="examiner-card">
         <h3>作答过程</h3>
         {!timeline ? <button disabled={busy} onClick={() => void loadTimeline()}>加载作答过程</button> :
           <><label>对话 <select disabled={busy} value={conversation} onChange={event => { setConversation(event.target.value); void loadTimeline(0, event.target.value); }}>
             <option value="">全部对话</option>{timeline.conversations.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
           </select></label>
           {!timeline.items.length && <p>没有可回放的 Agent 记录。</p>}
-          <ol>{timeline.items.map(event => <li key={event.id}><strong>{event.actor === 'candidate' ? '考生' : 'Agent'} · {time(event.occurred_at)}</strong>
+          <ol className="examiner-timeline">{timeline.items.map(event => <li key={event.id}><strong>{event.actor === 'candidate' ? '考生' : 'Agent'}</strong> <small>{time(event.occurred_at)}</small>
             {event.text ? <p className="examiner-preserve">{event.text}</p> : <p>{eventLabel(event)} · {event.status}{event.approval && ` · ${event.approval}`}{event.exit_code != null && ` · 退出码 ${event.exit_code}`}</p>}
             {event.diff_id && <details onToggle={e => { if (e.currentTarget.open && !diffs[event.id]) void loadDiff(event); }}>
               <summary>查看差异 · {event.path}</summary><pre>{diffs[event.id]?.diff ?? '正在读取差异…'}</pre>
@@ -142,9 +165,11 @@ export default function ExaminerRooms({ roomId, onNavigate, onExpired }: { roomI
             </details>}
           </li>)}</ol>
           {timeline.next_cursor !== null && <button disabled={busy} onClick={() => void loadTimeline(timeline.next_cursor!)}>加载更多</button>}</>}
+        </section>}
+        {(detail.decision || (detail.receipt.kind === 'code' && detail.grading.state === 'scored')) && <section className="examiner-card">
         <h3>考官复核</h3>
         {detail.decision ? <p>{detail.decision.action === 'confirm' ? '已确认原分' : '已调分'}并锁定 · {detail.decision.score.final} 分 · {detail.decision.examiner} · {time(detail.decision.at)}{detail.decision.reason && ` · ${detail.decision.reason}`}</p> :
-          detail.grading.state === 'scored' && <form onSubmit={event => { event.preventDefault(); void run(async () => {
+          <form onSubmit={event => { event.preventDefault(); void run(async () => {
             const number = Number(delta);
             if (number !== 0 && !reason.trim()) throw new Error('调分需要填写理由');
             const payload = { score_revision: detail.grading.revision, delta: number };
@@ -165,13 +190,18 @@ export default function ExaminerRooms({ roomId, onNavigate, onExpired }: { roomI
             } finally { refresh(v => v + 1); }
           })}>确认锁定</button>
         </section>}
-      </>}
+        </section>}
+      </article>}
+      </div>
     </> : <>
-      <h1>考试房间</h1>
-      <div className="r2-review-actions">
+      <div className="examiner-heading">
+        <div><h1>考试房间</h1><p>查看入场状态、各题成绩与作答过程。</p></div>
+        <button className="primary" disabled={busy || !list?.meta.current_template?.can_create} onClick={() => { setCreating(true); setCreateKey(crypto.randomUUID()); }}>＋ 创建房间</button>
+      </div>
+      <section className="examiner-card examiner-list">
+      <div className="examiner-toolbar examiner-filters">
         <input aria-label="搜索考生" placeholder="搜索考生姓名" value={query} onChange={e => { setQuery(e.target.value); setCredential(null); }} />
         <select aria-label="考试状态" value={filter} onChange={e => { setFilter(e.target.value); setCredential(null); }}><option value="">全部状态</option>{Object.entries(states).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-        <button className="primary" disabled={busy || !list?.meta.current_template?.can_create} onClick={() => { setCreating(true); setCreateKey(crypto.randomUUID()); }}>创建房间</button>
         <a href="/admin/r2/submissions">历史答卷与评分</a>
       </div>
       {list && !list.meta.current_template?.can_create && <p>房间创建需要启用试卷与凭证配置。</p>}
@@ -191,7 +221,7 @@ export default function ExaminerRooms({ roomId, onNavigate, onExpired }: { roomI
       </form>}
       <div className="examiner-scroll"><table><thead><tr><th>考生</th><th>试卷</th><th>状态</th><th>入场截止</th><th>操作</th></tr></thead>
         <tbody>{list?.items.flatMap(item => [
-          <tr key={item.id}><td>{item.candidate_name}</td><td>{item.exam_title}</td><td>{states[item.exam_status]}</td><td>{time(item.admission_expires_at)}</td><td>
+          <tr key={item.id}><td><strong>{item.candidate_name}</strong></td><td>{item.exam_title}</td><td><span className="examiner-badge" data-status={item.exam_status}>{states[item.exam_status]}</span></td><td>{time(item.admission_expires_at)}</td><td>
             {item.exam_status === 'completed' && <button onClick={() => { setCredential(null); onNavigate(`/admin/r2/rooms/${item.id}`); }}>查看结果</button>}
             {item.token_available && <button disabled={busy} aria-expanded={credential?.id === item.id} onClick={() => {
               if (credential?.id === item.id) setCredential(null);
@@ -208,6 +238,7 @@ export default function ExaminerRooms({ roomId, onNavigate, onExpired }: { roomI
         const next = await request<Listing>(`${rooms}?${new URLSearchParams({ status: filter, q: query, cursor: list.next_cursor! })}`);
         setList({ ...next, items: [...list.items, ...next.items] });
       })}>加载更多</button>}
+      </section>
     </>}
   </section>;
 }
