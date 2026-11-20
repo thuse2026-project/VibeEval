@@ -102,14 +102,11 @@ def context_limit(error):
 def error_receipt(error, payload):
     raw = payload.get("usage") if isinstance(payload, dict) else None
     if isinstance(raw, dict):
-        keys = (
-            "prompt_tokens",
-            "completion_tokens",
-            "total_tokens",
-            "prompt_cache_hit_tokens",
-            "prompt_cache_miss_tokens",
-        )
+        keys = ("prompt_tokens", "completion_tokens", "total_tokens")
         values = {key: raw.get(key) for key in keys}
+        for key in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens"):
+            if raw.get(key) is not None:
+                values[key] = raw[key]
         if all(
             value is None or type(value) is int and value >= 0
             for value in values.values()

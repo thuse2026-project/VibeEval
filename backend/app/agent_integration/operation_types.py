@@ -68,5 +68,9 @@ class ExecutionSnapshot(FrozenModel):
     file_change: dict | None = None
 
 
+class ReceiptPersistenceError(RuntimeError):
+    """The dispatched operation can be inspected again after rollback."""
+
+
 class OperationWaiting(RuntimeError):
     pass

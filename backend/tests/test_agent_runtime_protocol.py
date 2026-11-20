@@ -94,6 +94,8 @@ class RuntimeProviderErrorTests(unittest.IsolatedAsyncioTestCase):
             "https://fixture.test/v1", "fixture-key", "fixture/model"
         )
 
+        usage = {"total_tokens": 7, "credential": "do-not-retain"}
+
         def transport(request):
             return httpx.Response(
                 400,
@@ -102,7 +104,7 @@ class RuntimeProviderErrorTests(unittest.IsolatedAsyncioTestCase):
                         "code": "context_length_exceeded",
                         "message": "private vendor details",
                     },
-                    "usage": {"total_tokens": 7, "credential": "do-not-retain"},
+                    "usage": usage,
                 },
             )
 
@@ -115,6 +117,20 @@ class RuntimeProviderErrorTests(unittest.IsolatedAsyncioTestCase):
             {"prompt_tokens": None, "completion_tokens": None, "total_tokens": 7},
         )
         self.assertNotIn("private", str(raised.exception))
+
+        usage.update(prompt_cache_hit_tokens=0, prompt_cache_miss_tokens=4)
+        with self.assertRaises(ContextLimitError) as cached:
+            await LLMClient(
+                settings, transport=httpx.MockTransport(transport)
+            ).complete({"messages": [], "max_tokens": 10})
+        self.assertEqual(
+            cached.exception.usage,
+            {
+                **raised.exception.usage,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 4,
+            },
+        )
 
     async def test_only_structured_context_errors_signal_compaction_retry(self):
         settings = LLMSettings(

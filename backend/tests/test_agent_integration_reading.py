@@ -90,9 +90,7 @@ class MaterialProjectionTests(unittest.TestCase):
         next_page = query.model_copy(update={"path_offset": first["next_path_offset"]})
         second = json.loads(reader.search("scope", next_page).text)
         self.assertIsNone(second["next_path_offset"])
-        self.assertEqual(
-            workspace.read_many.call_args.args, ("scope", files[16:])
-        )
+        self.assertEqual(workspace.read_many.call_args.args, ("scope", files[16:]))
         workspace.read.assert_not_called()
 
     def test_utf16_crlf_and_inclusive_lines_keep_precise_offsets(self):

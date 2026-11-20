@@ -1,0 +1,192 @@
+{
+  "package_id": "tinydb-pilot-v1",
+  "source_commit": "edff96aeb2616402e9489d46e90a592c05565621",
+  "onboarding": [
+    {
+      "id": "Q1",
+      "max_score": 20,
+      "criteria": [
+        {
+          "id": "Q1.1",
+          "description": "TinyDB 管理存储实例和命名表，默认表提供简便入口",
+          "points": 4
+        },
+        {
+          "id": "Q1.2",
+          "description": "Table 负责文档的访问和增删改查",
+          "points": 4
+        },
+        {
+          "id": "Q1.3",
+          "description": "Query 构造可对文档求值的查询条件",
+          "points": 4
+        },
+        {
+          "id": "Q1.4",
+          "description": "Storage 读取和写入数据库状态",
+          "points": 4
+        },
+        {
+          "id": "Q1.5",
+          "description": "数据库包含命名表，表以文档编号组织文档；说明其联系",
+          "points": 4
+        }
+      ],
+      "evidence": "tinydb/database.py; tinydb/table.py; tinydb/queries.py; tinydb/storages.py"
+    },
+    {
+      "id": "Q2",
+      "max_score": 20,
+      "criteria": [
+        {
+          "id": "Q2.1",
+          "description": "__getattr__ 将未定义的方法转发到默认表",
+          "points": 5
+        },
+        {
+          "id": "Q2.2",
+          "description": "table(default_table_name) 获取或创建默认表对象",
+          "points": 5
+        },
+        {
+          "id": "Q2.3",
+          "description": "Table.all 调用迭代，__iter__ 经 _read_table 调用 storage.read，JSONStorage 解析文件",
+          "points": 5
+        },
+        {
+          "id": "Q2.4",
+          "description": "将编号及文档包装为 Document 并形成列表返回",
+          "points": 5
+        }
+      ],
+      "evidence": "database.py:111,251; table.py:235,732,779; storages.py:125"
+    },
+    {
+      "id": "Q3",
+      "max_score": 20,
+      "criteria": [
+        {
+          "id": "Q3.1",
+          "description": "a is b，_tables 按名称缓存并复用 Table 对象",
+          "points": 8
+        },
+        {
+          "id": "Q3.2",
+          "description": "a 与 c 为不同 Table 对象",
+          "points": 4
+        },
+        {
+          "id": "Q3.3",
+          "description": "共用 db 的 storage 实例",
+          "points": 4
+        },
+        {
+          "id": "Q3.4",
+          "description": "存储的数据库映射按表名区分内容，_read_table 取当前表",
+          "points": 4
+        }
+      ],
+      "evidence": "database.py:111-133; table.py:779-802"
+    },
+    {
+      "id": "Q4",
+      "max_score": 20,
+      "criteria": [
+        {
+          "id": "Q4.1",
+          "description": "仅 A 被返回",
+          "points": 6
+        },
+        {
+          "id": "Q4.2",
+          "description": "search 对文档应用条件并收集匹配结果，B 不满足比较",
+          "points": 6
+        },
+        {
+          "id": "Q4.3",
+          "description": "路径读取缺少 age 导致 KeyError，_generate_test 的 runner 捕获后返回 False，C 被过滤",
+          "points": 8
+        }
+      ],
+      "evidence": "queries.py:218-252; table.py:249-297"
+    },
+    {
+      "id": "Q5",
+      "max_score": 20,
+      "criteria": [
+        {
+          "id": "Q5.1",
+          "description": "read 返回整个数据库状态，空存储可返回 None",
+          "points": 4
+        },
+        {
+          "id": "Q5.2",
+          "description": "write 接收并保存整个数据库状态，不能仅处理一条记录",
+          "points": 4
+        },
+        {
+          "id": "Q5.3",
+          "description": "初始化参数与资源管理正确，需要时实现 close；无资源时可沿用默认 close",
+          "points": 4
+        },
+        {
+          "id": "Q5.4",
+          "description": "通过 TinyDB(storage=自定义存储类, ...) 接入",
+          "points": 4
+        },
+        {
+          "id": "Q5.5",
+          "description": "覆盖空库、写后读与命名表隔离等有效验证",
+          "points": 4
+        }
+      ],
+      "evidence": "storages.py:36-76; database.py:86-95"
+    }
+  ],
+  "review": [
+    {
+      "id": "R1",
+      "reference": "_update_table 未清理查询缓存；先查询 done=False，更新为 True，再查询仍返回旧记录",
+      "criteria": [
+        {
+          "id": "location",
+          "points": 10
+        },
+        {
+          "id": "trigger",
+          "points": 15
+        },
+        {
+          "id": "actual_expected",
+          "points": 15
+        },
+        {
+          "id": "cause",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "id": "R2",
+      "reference": "_get_next_id 在字符串键上先 max 后转 int；写入 1..10 后关闭重开，再插入计算出重复编号 10 并抛 ValueError",
+      "criteria": [
+        {
+          "id": "location",
+          "points": 10
+        },
+        {
+          "id": "trigger",
+          "points": 15
+        },
+        {
+          "id": "actual_expected",
+          "points": 15
+        },
+        {
+          "id": "cause",
+          "points": 10
+        }
+      ]
+    }
+  ]
+}
