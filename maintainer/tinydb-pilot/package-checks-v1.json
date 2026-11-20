@@ -1,0 +1,63 @@
+{
+  "python": "3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]",
+  "output": "C:\\Workspace\\AI Coding 平台\\tmp\\tinydb-pilot-v1-rebuilt",
+  "checks": {
+    "01-explore": {
+      "cache_memory": {
+        "passed": true
+      },
+      "cache_json": {
+        "passed": true
+      },
+      "reopen_id": {
+        "passed": true
+      },
+      "normal_persistence_and_table_isolation": {
+        "passed": true
+      },
+      "missing_field_query": {
+        "passed": true
+      }
+    },
+    "02-answer": {
+      "cache_memory": {
+        "passed": true
+      },
+      "cache_json": {
+        "passed": true
+      },
+      "reopen_id": {
+        "passed": true
+      },
+      "normal_persistence_and_table_isolation": {
+        "passed": true
+      },
+      "missing_field_query": {
+        "passed": true
+      }
+    },
+    "03-review": {
+      "cache_memory": {
+        "passed": false,
+        "error": "AssertionError: expected 0 pending documents, got 1"
+      },
+      "cache_json": {
+        "passed": false,
+        "error": "AssertionError: expected 0 pending documents, got 1"
+      },
+      "reopen_id": {
+        "passed": false,
+        "error": "ValueError: Document with ID 10 already exists"
+      },
+      "normal_persistence_and_table_isolation": {
+        "passed": true
+      },
+      "missing_field_query": {
+        "passed": true
+      }
+    }
+  },
+  "source_fidelity": true,
+  "archives_crc_ok": true,
+  "cursor_ui_tested": false
+}

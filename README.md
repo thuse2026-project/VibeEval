@@ -14,6 +14,8 @@ Release 1 统一实现见 PR #8，陈智恒已完成人工验收；包含真实�
 
 ## 文档入口
 
+- [第一、第二题 TinyDB v1 接入说明](docs/tinydb-pilot-handoff.md)：仓库上手、代码审阅的考生包、答案、评分规则及验证入口；当前为离线试答材料，尚未自动接入考试平台。
+
 - [完整 VibeEval 文档](docs/requirements/VibeEval-AICoding%20平台.md)：一期范围以附录 E 为主要依据，正文和其他附录作为背景参考。
 - [一期接口草案](docs/api.md)：从附录 E 提取的初始联调参考，尚待组内确认；确认后的接口变更统一在此维护。
 - [会议室预约样题](problems/python-debug-01/README.md)：完整考生工程，包含两个待修复缺陷和公开测试。
