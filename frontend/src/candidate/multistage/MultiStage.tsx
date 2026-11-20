@@ -7,6 +7,7 @@ import { DatasetteVerification, hasDatasetteVerification } from './DatasetteVeri
 import '../workspace/workspace.css'
 import type { AgentFileChange } from '../workspace/AgentPanelV2'
 import { command, current, examRequest, type Attempt, type Receipt, v2 } from './api'
+import { QuestionStage } from './QuestionStage'
 import './multistage.css'
 
 // The private preview can extend a manually selected attempt to the last supported date.
@@ -21,8 +22,6 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
   const [files, setFiles] = useState<FileEntry[]>([])
   const [selected, setSelected] = useState('')
   const [revision, setRevision] = useState(0)
-  const [text, setText] = useState('')
-  const [summaryRevision, setSummaryRevision] = useState(0)
   const [question, setQuestion] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -31,7 +30,6 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
   const [loadingPath, setLoadingPath] = useState<string | null>(null)
   const [, redraw] = useState(0)
   const request = useRef(0)
-  const submissionKey = useRef<{ key: string; summary: string } | null>(null)
   const submitting = useRef(false)
   const autosave = useRef(new Map<string, number>())
   const [queue] = useState(() => new SaveQueue(
@@ -71,14 +69,12 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
   useEffect(() => {
     const abort = new AbortController()
     void (async () => {
-      const [tree, questions, summary] = await Promise.all([
+      const [tree, questions] = await Promise.all([
         examRequest<{ files: FileEntry[] }>(prefix + '/files', 'GET', undefined, abort.signal),
         examRequest<{ items: { body: string }[] }>(prefix + '/questions', 'GET', undefined, abort.signal),
-        examRequest<{ value: string | null; revision: number }>(v2 + stagePath + '/summary', 'GET', undefined, abort.signal),
       ])
       if (abort.signal.aborted) return
       setFiles(tree.files); setQuestion(questions.items[0]?.body ?? '')
-      setText(summary.value ?? ''); setSummaryRevision(summary.revision)
       const first = tree.files.find(item => item.path === 'README.md') ?? tree.files[0]
       if (first) {
         const id = request.current
@@ -145,11 +141,6 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
     if (useDraft) await queue.save(path)
   }
 
-  async function saveSummary() {
-    const saved = await examRequest<{ revision: number }>(v2 + stagePath + '/summary', 'PUT', { expected_revision: summaryRevision, text })
-    setSummaryRevision(saved.revision)
-  }
-
   async function submit() {
     if (locked || submitting.current) throw new Error('请等待当前操作结束后提交。')
     submitting.current = true
@@ -158,8 +149,10 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       await queue.flush()
       const latest = await current()
       if (latest.current_stage.id !== state.current_stage.id) { await refresh(); return }
-      if (submissionKey.current?.summary !== text) submissionKey.current = { key: crypto.randomUUID(), summary: text }
-      await command<Receipt>(stagePath + '/submit', latest, { summary: text }, submissionKey.current.key)
+      if (latest.next_action === 'finish_phase') {
+        await command<Attempt>(`/phases/${latest.current_phase.id}/finish`, latest)
+      }
+      else await command<Receipt>(stagePath + '/submit', latest)
       await refresh()
     } catch (failure) {
       await refresh().catch(() => undefined)
@@ -192,7 +185,8 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       loadingPath={loadingPath}
       activeReadonly={!draft || draft.readonly || locked || !state.capabilities.includes('write_repository')}
       saveState={queue.saving ? 'saving' : openFiles.some(item => queue.drafts[item.path].error) ? 'error' : openFiles.some(item => item.dirty) ? 'idle' : 'saved'}
-      busy={locked} onSelectFile={choose} onEdit={edit} onSubmit={submit} submitLabel="提交本阶段"
+      busy={locked} onSelectFile={choose} onEdit={edit} onSubmit={submit} submitLabel={state.next_action === 'finish_phase' ? '结束编程，进入独立问答' : '提交本题'}
+      submissionNotice={state.next_action === 'finish_phase' ? '将停止 Agent 和终端、保存并固定代码，此后不能修改或返回编程。' : undefined}
       tabSelectionDisabled={busy || agentBusy || remaining <= 0}
       sessionId={terminalAvailable ? phase : null}
       terminalPrefix="/api/v2/phases/" resizable
@@ -216,12 +210,6 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
         <span aria-label="阶段进度">{state.stages.findIndex(item => item.id === state.current_stage.id) + 1}/{state.stages.length}</span>
         <button disabled={locked || queue.saving} onClick={() => handle(() => queue.flush())}>保存代码</button>
         <button disabled={locked || !selected} onClick={() => handle(() => select(selected, true))}>重新读取文件</button>
-      </div>}
-      submissionFields={<div className="r2-summary">
-        <label htmlFor="r2-summary">改动与验证说明</label>
-        <textarea id="r2-summary" placeholder="写明主要改动和验证结果" value={text} maxLength={1500}
-          disabled={locked} onChange={event => setText(event.target.value)} />
-        <button disabled={locked} onClick={() => handle(saveSummary)}>保存说明</button>
       </div>}
     />
   </div>
@@ -284,16 +272,20 @@ export default function MultiStage() {
   const deadline = active ? state?.current_phase.deadline_at : state?.transition_deadline_at
   const remaining = deadline == null ? 0 : Math.max(0, Math.ceil(deadline - (state?.server_now ?? 0) - (clock - sync.current) / 1000))
   if (state?.current_phase.status === 'active' && state.current_stage.status === 'active') {
+    if (state.current_phase.key === 'answer' || state.current_phase.key === 'interview') {
+      return <QuestionStage key={state.current_phase.id} state={state} refresh={refresh} remaining={remaining} />
+    }
     return <CodeStage key={state.current_phase.id} state={state} modelReady={modelReady} refresh={refresh} remaining={remaining} />
   }
   return <div className="r2-page">
-    <header className="topbar"><a className="brand" href="/entry?mode=r2">VibeEval</a><span>Datasette 两题联测</span></header>
+    <header className="topbar"><a className="brand" href="/entry?mode=r2">VibeEval</a><span>R2 四题考试</span></header>
     <main>
       <section className="r2-flow-card">
-        <h1>{state?.status === 'completed' ? '两阶段已提交' : state?.current_stage.title ?? '正在进入工作台'}</h1>
+        <h1>{state?.status === 'completed' ? '答卷已提交' : state?.current_stage.title ?? '正在进入工作台'}</h1>
+        {state?.status === 'completed' && <p>感谢作答，可以离场。</p>}
         {error && <p role="alert">{error} <a href="/entry?mode=r2">返回入场</a></p>}
         {state?.error_code && <p role="alert">环境处理中：{state.error_code}</p>}
-        {state && <ol className="r2-progress">{state.stages.map(item => <li key={item.id}
+        {state && state.status !== 'completed' && <ol className="r2-progress">{state.stages.map(item => <li key={item.id}
           aria-current={item.id === state.current_stage.id && !item.receipt ? 'step' : undefined}>
           <strong>{item.title}</strong>
           <span>{item.receipt ? '已提交' : item.id === state.current_stage.id ? '当前阶段' : '待开始'}</span>

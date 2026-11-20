@@ -35,6 +35,7 @@ type Props = {
   onAgentWorkspaceChange: (change: AgentFileChange) => void
   actions?: ReactNode
   submissionFields?: ReactNode
+  submissionNotice?: ReactNode
   submitLabel?: string
   busy: boolean
   tabSelectionDisabled?: boolean
@@ -78,6 +79,7 @@ export function WorkspaceScreen({
   onAgentWorkspaceChange,
   actions,
   submissionFields,
+  submissionNotice = '提交前会保存全部修改并冻结快照；提交后不能继续编辑。',
   submitLabel = '提交答卷',
   busy,
   tabSelectionDisabled = busy,
@@ -261,7 +263,7 @@ export function WorkspaceScreen({
             <h2 id="submit-title">确认提交答卷？</h2>
             <p className="muted">提交前请核对以下信息</p>
             <dl className="submission-summary"><div><dt>作答时间</dt><dd className="mono">{practice ? '本阶段不计时' : formatRemaining(remaining)}</dd></div><div><dt>文件状态</dt><dd>{saveLabel[saveState]}</dd></div></dl>
-            <p>提交前会保存全部修改并冻结快照；提交后不能继续编辑。</p>
+            <p>{submissionNotice}</p>
             {submissionFields}
             {submitError && <div className="banner banner-error">{submitError}</div>}
             <div className="modal-actions">

@@ -3,8 +3,9 @@ export type Stage = { id: string; title: string; status: string; receipt: Receip
 export type Attempt = {
   attempt_id: string; status: string; server_now: number; state_version: number
   transition_deadline_at: number | null; error_code: string | null
-  current_stage: { id: string; key: string; status: string; title: string }
-  current_phase: { id: string; status: string; deadline_at: number | null }
+  next_action?: 'finish_phase' | 'submit_stage' | 'submit_exam' | null
+  current_stage: { id: string; key: string; ordinal?: number; status: string; title: string }
+  current_phase: { id: string; key?: string; title?: string; status: string; deadline_at: number | null }
   capabilities: string[]; stages: Stage[]
 }
 
