@@ -1,3 +1,4 @@
-# Preserve distributed exercise bytes: manifests and source verification use SHA-256.
-problems/tinydb-pilot-v1/** -text
-maintainer/tinydb-pilot/** -text
+# Keep exercise text stable for source and distribution hashes.
+problems/tinydb-pilot-v1/** text eol=lf
+problems/tinydb-pilot-v1/*.zip binary
+maintainer/tinydb-pilot/** text eol=lf

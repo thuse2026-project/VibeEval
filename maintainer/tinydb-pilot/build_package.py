@@ -36,7 +36,7 @@ QUESTIONS = [
 def write(root, path, text):
     target = root/path
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text.strip()+'\n', encoding='utf-8')
+    target.write_text(text.strip()+'\n', encoding='utf-8', newline='\n')
 
 def workspace(root, name, ai):
     settings = {'files.autoSave': 'afterDelay', 'files.autoSaveDelay': 1000,
@@ -79,7 +79,7 @@ TinyDB 是 Python 文档数据库，用字典表示文档，支持命名表、�
 不通过外部仓库、互联网或历史版本比对寻找答案。
 ''')
         workspace(folder,folder.name, i==0)
-    (phases[2]/'repository/tinydb/table.py').write_text(review,encoding='utf-8')
+    (phases[2]/'repository/tinydb/table.py').write_text(review,encoding='utf-8',newline='\n')
     write(out,'开始试答.md','''# TinyDB 第一版试答：先读此文件
 
 包编号：tinydb-pilot-v1。仅包含前两个考试阶段，共 55 分钟；三个工作区分别对应探索、独立答题、独立审阅。

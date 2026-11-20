@@ -1,6 +1,6 @@
 {
   "python": "3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]",
-  "output": "C:\\Workspace\\AI Coding 平台\\tmp\\tinydb-pilot-v1-rebuilt",
+  "output": "C:\\Workspace\\AI Coding 平台\\tmp\\tinydb-publish-lf-check",
   "checks": {
     "01-explore": {
       "cache_memory": {
