@@ -38,7 +38,7 @@ function EvidenceView({ phase, frozen }: { phase: string; frozen: FrozenCode }) 
   }, [frozen.coding_phase_id, frozen.sha256, phase])
 
   useEffect(() => { void load() }, [load])
-  const completedRuns = new Set(items.filter(item => item.kind === 'test_run' && item.data.status === 'completed').map(item => item.data.run_id))
+  const completedRuns = new Set(items.filter(item => item.kind === 'test_run' && item.data.status !== 'started').map(item => item.data.run_id))
   const reason = page?.reason === 'COLLECTION_NOT_CONNECTED' ? '操作记录采集尚未接通，请考官复核。'
     : page?.reason === 'CAPTURE_GAP' ? '平台检测到部分操作记录缺失，请考官复核。' : page?.reason
   return <section className="r2-evidence" aria-label="本题操作记录">
@@ -101,6 +101,7 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
   const [frozen, setFrozen] = useState<FrozenCode | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const submissionKey = useRef<string | null>(null)
   const canReadNotes = state.capabilities.includes('read_notes')
   const canReadFrozen = state.capabilities.includes('read_frozen_code')
 
@@ -168,7 +169,8 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
       for (const question of questions) await save(question.id)
       if (Object.values(draftsRef.current).some(draft => draft.status !== 'saved')) throw new Error('仍有回答未保存，请核对冲突或网络错误后重试。')
       const latest = await current()
-      await command<Receipt>(`/stages/${latest.current_stage.id}/submit`, latest)
+      if (!submissionKey.current) submissionKey.current = crypto.randomUUID()
+      await command<Receipt>(`/stages/${latest.current_stage.id}/submit`, latest, {}, submissionKey.current)
       await refresh()
     } catch (failure) { setError((failure as Error).message) }
     finally { setBusy(false) }

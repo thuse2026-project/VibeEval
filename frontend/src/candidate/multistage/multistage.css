@@ -99,6 +99,8 @@
 .r2-evidence-list dt { color: #667784; font-size: 11px; }
 .r2-evidence-list dd, .r2-evidence-list pre { min-width: 0; margin: 0; font-size: 11px; }
 .r2-muted { color: #667784; }
+.r2-test-run-result { margin-top: 10px; padding: 10px; border: 1px solid #d9e0e5; background: #fff; }
+.r2-test-run-result pre { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 850px) {
   .r2-question-topbar { grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
@@ -108,3 +110,12 @@
   .r2-question-layout { overflow: auto; }
   .r2-question-nav, .r2-answer-panel, .r2-reference-pane { overflow: visible; }
 }
+.r2-text-stage { max-width: 100rem; margin: auto; padding: 1rem 2rem; }
+.r2-text-stage header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.r2-text-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+.r2-text-columns aside, .r2-text-columns > fieldset { min-width: 0; max-height: 75vh; overflow: auto; padding: 1rem; }
+.r2-text-stage label, .r2-text-stage textarea { display: block; width: 100%; }
+.r2-text-stage textarea { min-height: 5rem; box-sizing: border-box; }
+.r2-text-stage select { max-width: 100%; }
+.r2-text-stage pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .r2-text-columns { grid-template-columns: minmax(0, 1fr); } }

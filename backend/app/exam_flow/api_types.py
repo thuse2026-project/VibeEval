@@ -48,6 +48,7 @@ class AttemptView(Contract):
     retry_at: int | None
     current_stage: CurrentStage
     current_phase: CurrentPhase
+    next_action: Literal["finish_phase", "submit_stage", "submit_exam"] | None
     capabilities: list[Capability]
     stages: list[StageProgress]
 

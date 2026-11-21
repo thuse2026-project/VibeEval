@@ -1,6 +1,6 @@
 """Trusted published task manifests and stage-local sandbox bindings."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated
 
 from pydantic import Field, TypeAdapter, model_validator
@@ -81,6 +81,9 @@ class ResourceSpec(Contract):
     image_ref: str = Field(pattern=r"^(?:[^\s]+@)?sha256:[0-9a-f]{64}$")
     files: tuple[str, ...] = Field(min_length=1, max_length=200)
     writable: tuple[str, ...] = ()
+    file_sha256: dict[str, Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]] = Field(
+        default_factory=dict
+    )
     agent_policy: RunPolicy = Field(
         default_factory=lambda: RunPolicy(mode="confirm_actions")
     )
@@ -96,6 +99,8 @@ class ResourceSpec(Contract):
             raise ValueError("invalid published manifest")
         if any(p.endswith(".vibeeval-save") for p in self.files):
             raise ValueError("staging names are reserved")
+        if set(self.file_sha256) - (set(self.files) - set(self.writable)):
+            raise ValueError("only published read-only files can be pinned")
         return self
 
 
@@ -104,6 +109,7 @@ class WorkspaceView(SessionView):
     allowed_files: tuple[str, ...] = ()
     writable_files: tuple[str, ...] = ()
     read_only: bool = False
+    file_sha256: dict[str, str] = field(default_factory=dict)
 
 
 def binding_view(value):

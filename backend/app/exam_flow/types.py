@@ -18,6 +18,7 @@ from pydantic import (
 Identifier = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 Capability = Literal[
     "read_repository",
+    "read_frozen_code",
     "write_repository",
     "use_terminal",
     "use_agent",
@@ -62,6 +63,18 @@ class StageDefinition(Contract):
     def unique_keys(self):
         if len({p.key for p in self.phases}) != len(self.phases):
             raise ValueError("phase keys must be unique within a stage")
+        for index, phase in enumerate(self.phases):
+            if "read_frozen_code" in phase.capabilities and (
+                self.submission_kind != "code"
+                or index != len(self.phases) - 1
+                or index == 0
+                or "write_repository" not in self.phases[index - 1].capabilities
+                or phase.capabilities
+                != {"read_frozen_code", "read_repository", "edit_answers"}
+            ):
+                raise ValueError(
+                    "frozen-code review must follow coding and allow only reading and answers"
+                )
         return self
 
 
@@ -97,8 +110,16 @@ class PublicQuestion(Contract):
     answer_schema: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class EvidenceCutoff(Contract):
+    coding_phase_id: Identifier
+    sequence: int = Field(strict=True, ge=0)
+    completeness: Literal["complete", "partial"]
+    reason: Literal["COLLECTION_NOT_CONNECTED", "CAPTURE_GAP"] | None = None
+
+
 class Artifact(Contract):
     workspace_id: Identifier
+    evidence: EvidenceCutoff | None = None
     reference: str = Field(min_length=1, max_length=512)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 

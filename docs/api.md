@@ -4,6 +4,10 @@
 
 一期范围与分工见 [原始需求文档](requirements/VibeEval-AICoding%20平台.md) 附录 E。确认后的联调契约统一更新本页，原始文档保留讨论背景。
 
+## R2 四题考生端联调
+
+第 8.2 节的当前接口稿见[环节状态、草稿与冻结证据](r2-candidate-api.md)，随附[同会话请求和响应](r2-candidate-api-examples.json)。新增字段与证据接口的确认状态见该稿。
+
 ## 待确认项
 
 - 考生 WebSocket 鉴权和考试状态流转（HTTP 入场及恢复已约定如下）。

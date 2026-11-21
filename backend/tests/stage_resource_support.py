@@ -94,6 +94,15 @@ class Sandbox:
         self.volumes[view.session_id][path] = content
         return {"saved": True}
 
+    def run_command(self, view, command):
+        self.calls.append(("run_command", view, command))
+        return {
+            "exit_code": 0,
+            "timed_out": False,
+            "truncated": False,
+            "output": "Ran: " + command,
+        }
+
     def close_workspace(self, view):
         self.calls.append(("close", view))
         if self.fail_close:

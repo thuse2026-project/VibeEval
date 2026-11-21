@@ -90,6 +90,7 @@ class PostgreSQLTests(unittest.TestCase):
                 "exam_sessions",
                 "exam_flow_attempts",
                 "stage_workspaces",
+                "stage_evidence",
                 "stage_file_revisions",
                 "agent_scopes",
                 "snapshots",

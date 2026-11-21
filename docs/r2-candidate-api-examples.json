@@ -1,0 +1,1199 @@
+{
+  "description": "同一测试会话。实际 FastAPI 路由和 Cookie 鉴权，受控时钟、内存流程库和资源替身；工作分支含拟新增 next_action。第三题 close 故障为注入。",
+  "requests": [
+    {
+      "name": "exploring",
+      "method": "GET",
+      "path": "/api/v2/attempts/current",
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 4,
+        "server_now": 1795150800,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 0,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+          "key": "tinydb-understanding",
+          "ordinal": 1,
+          "title": "仓库理解",
+          "status": "active",
+          "workspace_id": "workspace_b5f19c7904574e1aaff9af0e9ad0588b"
+        },
+        "current_phase": {
+          "id": "phase_aee7f2052e994442b6c1e813cfe51c4b",
+          "key": "explore",
+          "title": "仓库探索",
+          "status": "active",
+          "permission_epoch": 1,
+          "started_at": 1795150800,
+          "deadline_at": 1795152000
+        },
+        "next_action": "finish_phase",
+        "capabilities": [
+          "edit_notes",
+          "read_notes",
+          "read_repository",
+          "use_agent"
+        ],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "active",
+            "receipt": null
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "locked",
+            "receipt": null
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "locked",
+            "receipt": null
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "locked",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "questions_hidden",
+      "method": "GET",
+      "path": "/api/v2/phases/phase_aee7f2052e994442b6c1e813cfe51c4b/questions",
+      "status": 403,
+      "response": {
+        "detail": {
+          "code": "QUESTIONS_NOT_AVAILABLE"
+        }
+      }
+    },
+    {
+      "name": "save_notes",
+      "method": "PUT",
+      "path": "/api/v2/phases/phase_aee7f2052e994442b6c1e813cfe51c4b/notes",
+      "request": {
+        "expected_revision": 0,
+        "text": "检查表名与存储的关联。"
+      },
+      "status": 200,
+      "response": {
+        "revision": 1,
+        "value": "检查表名与存储的关联。",
+        "saved_at": 1795150800
+      }
+    },
+    {
+      "name": "notes_conflict",
+      "method": "PUT",
+      "path": "/api/v2/phases/phase_aee7f2052e994442b6c1e813cfe51c4b/notes",
+      "request": {
+        "expected_revision": 0,
+        "text": "另一窗口的笔记"
+      },
+      "status": 409,
+      "response": {
+        "detail": {
+          "code": "REVISION_CONFLICT"
+        }
+      }
+    },
+    {
+      "name": "reload_notes",
+      "method": "GET",
+      "path": "/api/v2/phases/phase_aee7f2052e994442b6c1e813cfe51c4b/notes",
+      "status": 200,
+      "response": {
+        "revision": 1,
+        "value": "检查表名与存储的关联。",
+        "saved_at": 1795150800
+      }
+    },
+    {
+      "name": "end_exploration",
+      "method": "POST",
+      "path": "/api/v2/phases/phase_aee7f2052e994442b6c1e813cfe51c4b/finish",
+      "request": {
+        "request_key": "end_exploration",
+        "expected_state_version": 5
+      },
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 9,
+        "server_now": 1795150800,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 0,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+          "key": "tinydb-understanding",
+          "ordinal": 1,
+          "title": "仓库理解",
+          "status": "active",
+          "workspace_id": "workspace_b5f19c7904574e1aaff9af0e9ad0588b"
+        },
+        "current_phase": {
+          "id": "phase_ebc473e70a2646c7be289da1548c4ab0",
+          "key": "answer",
+          "title": "独立答题",
+          "status": "active",
+          "permission_epoch": 1,
+          "started_at": 1795150800,
+          "deadline_at": 1795151700
+        },
+        "next_action": "submit_stage",
+        "capabilities": [
+          "edit_answers",
+          "read_notes",
+          "read_repository"
+        ],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "active",
+            "receipt": null
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "locked",
+            "receipt": null
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "locked",
+            "receipt": null
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "locked",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "readonly_notes",
+      "method": "GET",
+      "path": "/api/v2/phases/phase_ebc473e70a2646c7be289da1548c4ab0/notes",
+      "status": 200,
+      "response": {
+        "revision": 1,
+        "value": "检查表名与存储的关联。",
+        "saved_at": 1795150800
+      }
+    },
+    {
+      "name": "readonly_notes_denied",
+      "method": "PUT",
+      "path": "/api/v2/phases/phase_ebc473e70a2646c7be289da1548c4ab0/notes",
+      "request": {
+        "expected_revision": 1,
+        "text": "改写"
+      },
+      "status": 403,
+      "response": {
+        "detail": {
+          "code": "CAPABILITY_DENIED"
+        }
+      }
+    },
+    {
+      "name": "old_phase_denied",
+      "method": "GET",
+      "path": "/api/v2/phases/phase_aee7f2052e994442b6c1e813cfe51c4b/notes",
+      "status": 409,
+      "response": {
+        "detail": {
+          "code": "PHASE_CLOSED"
+        }
+      }
+    },
+    {
+      "name": "five_questions",
+      "method": "GET",
+      "path": "/api/v2/phases/phase_ebc473e70a2646c7be289da1548c4ab0/questions",
+      "status": 200,
+      "response": {
+        "items": [
+          {
+            "id": "q1",
+            "title": "项目结构",
+            "body": "请说明 TinyDB、Table、Query、Storage 分别承担什么职责，并说明数据库、表、文档之间的组织关系。回答应体现模块之间如何配合，不必列出全部类或方法。",
+            "answer_schema": {
+              "type": "string",
+              "maxLength": 1500
+            }
+          },
+          {
+            "id": "q2",
+            "title": "执行过程",
+            "body": "假设 db 是一个已打开的 TinyDB 对象，使用默认 JSONStorage，文件中已有合法数据。执行 db.all() 时，TinyDB 类并没有直接定义 all 方法。请说明这次调用怎样到达存储层、怎样得到返回结果。请给出关键函数及调用关系，无需描述操作系统底层文件调用。",
+            "answer_schema": {
+              "type": "string",
+              "maxLength": 1500
+            }
+          },
+          {
+            "id": "q3",
+            "title": "对象与数据组织",
+            "body": "在同一个 db 上依次执行 a = db.table('users')、b = db.table('users')、c = db.table('logs')。a 与 b 是否为同一个对象？a 与 c 是否为同一个对象？它们如何使用底层存储并区分数据？请根据实现解释，不必讨论并发或缓存。",
+            "answer_schema": {
+              "type": "string",
+              "maxLength": 1500
+            }
+          },
+          {
+            "id": "q4",
+            "title": "行为推断",
+            "body": "在全新的 MemoryStorage 数据库中依次插入 {'name': 'A', 'age': 20}、{'name': 'B', 'age': 17}、{'name': 'C'}，然后执行 db.search(Query().age >= 18)。结果包含哪些 name？第三条文档没有 age，为什么会得到相应结果？请结合查询条件求值过程解释。无需运行代码。",
+            "answer_schema": {
+              "type": "string",
+              "maxLength": 1500
+            }
+          },
+          {
+            "id": "q5",
+            "title": "扩展影响",
+            "body": "希望为 TinyDB 增加一种本地存储实现，保持调用方现有的 Table 增删改查接口。请说明需要遵守哪些存储接口约定、如何接入，以及你会检查哪些行为。只要求设计与验证思路，不需要编写实现，也不要求设计并发或事务。",
+            "answer_schema": {
+              "type": "string",
+              "maxLength": 1500
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "save_q1",
+      "method": "PUT",
+      "path": "/api/v2/phases/phase_ebc473e70a2646c7be289da1548c4ab0/answers/q1",
+      "request": {
+        "expected_revision": 0,
+        "value": "TinyDB 管理表，存储层负责读写。"
+      },
+      "status": 200,
+      "response": {
+        "revision": 1,
+        "value": "TinyDB 管理表，存储层负责读写。",
+        "saved_at": 1795150800
+      }
+    },
+    {
+      "name": "answer_conflict",
+      "method": "PUT",
+      "path": "/api/v2/phases/phase_ebc473e70a2646c7be289da1548c4ab0/answers/q1",
+      "request": {
+        "expected_revision": 0,
+        "value": "另一窗口的回答"
+      },
+      "status": 409,
+      "response": {
+        "detail": {
+          "code": "REVISION_CONFLICT"
+        }
+      }
+    },
+    {
+      "name": "reload_answers",
+      "method": "GET",
+      "path": "/api/v2/phases/phase_ebc473e70a2646c7be289da1548c4ab0/answers",
+      "status": 200,
+      "response": {
+        "q1": {
+          "revision": 1,
+          "value": "TinyDB 管理表，存储层负责读写。",
+          "saved_at": 1795150800
+        }
+      }
+    },
+    {
+      "name": "submit_first",
+      "method": "POST",
+      "path": "/api/v2/stages/stage_86b49b971ae64695b4715bb9d93f7773/submit",
+      "request": {
+        "request_key": "submit_first",
+        "expected_state_version": 10
+      },
+      "status": 200,
+      "response": {
+        "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+        "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+        "kind": "text",
+        "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+        "submitted_at": 1795150800,
+        "close_reason": "manual"
+      }
+    },
+    {
+      "name": "start_review",
+      "method": "POST",
+      "path": "/api/v2/stages/stage_ff56d55303b042c2b86da69d1c397e25/start",
+      "request": {
+        "request_key": "start_review",
+        "expected_state_version": 14
+      },
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 17,
+        "server_now": 1795150800,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 0,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+          "key": "tinydb-review",
+          "ordinal": 2,
+          "title": "代码审阅",
+          "status": "active",
+          "workspace_id": "workspace_6176edf508cf4e1aabd3a477107c0c9d"
+        },
+        "current_phase": {
+          "id": "phase_d43557299ff44a44ac3044bae43d69ed",
+          "key": "review",
+          "title": "独立审阅",
+          "status": "active",
+          "permission_epoch": 1,
+          "started_at": 1795150800,
+          "deadline_at": 1795152000
+        },
+        "next_action": "submit_stage",
+        "capabilities": [
+          "edit_answers",
+          "read_repository"
+        ],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+              "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+              "kind": "text",
+              "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "active",
+            "receipt": null
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "locked",
+            "receipt": null
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "locked",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "save_report",
+      "method": "PUT",
+      "path": "/api/v2/phases/phase_d43557299ff44a44ac3044bae43d69ed/answers/findings",
+      "request": {
+        "expected_revision": 0,
+        "value": {
+          "conclusion": "none",
+          "reports": []
+        }
+      },
+      "status": 200,
+      "response": {
+        "revision": 1,
+        "value": {
+          "conclusion": "none",
+          "reports": []
+        },
+        "saved_at": 1795150800
+      }
+    },
+    {
+      "name": "submit_review",
+      "method": "POST",
+      "path": "/api/v2/stages/stage_ff56d55303b042c2b86da69d1c397e25/submit",
+      "request": {
+        "request_key": "submit_review",
+        "expected_state_version": 18
+      },
+      "status": 200,
+      "response": {
+        "id": "submission_53baf9e62419456ba4e62e54b0afb88d",
+        "stage_id": "stage_ff56d55303b042c2b86da69d1c397e25",
+        "kind": "text",
+        "content_sha256": "3069a5719ea1fbf5da7440cae1a5817c9ffc876b2f96ce560c78fdf68d422647",
+        "submitted_at": 1795150800,
+        "close_reason": "manual"
+      }
+    },
+    {
+      "name": "start_coding",
+      "method": "POST",
+      "path": "/api/v2/stages/stage_c94ccfae5cf5435ab1592c8c23ec684e/start",
+      "request": {
+        "request_key": "start_coding",
+        "expected_state_version": 22
+      },
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 25,
+        "server_now": 1795150800,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 0,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+          "key": "column-statistics",
+          "ordinal": 3,
+          "title": "业务拓展 · 补齐列统计",
+          "status": "active",
+          "workspace_id": "workspace_249f5f46b4684ec3b2a235a89654060b"
+        },
+        "current_phase": {
+          "id": "phase_87ada424c5e7416caaa40347417d4e59",
+          "key": "coding",
+          "title": "业务拓展 · 补齐列统计",
+          "status": "active",
+          "permission_epoch": 1,
+          "started_at": 1795150800,
+          "deadline_at": 1795153800
+        },
+        "next_action": "finish_phase",
+        "capabilities": [
+          "read_repository",
+          "use_agent",
+          "use_terminal",
+          "write_repository"
+        ],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+              "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+              "kind": "text",
+              "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_53baf9e62419456ba4e62e54b0afb88d",
+              "stage_id": "stage_ff56d55303b042c2b86da69d1c397e25",
+              "kind": "text",
+              "content_sha256": "3069a5719ea1fbf5da7440cae1a5817c9ffc876b2f96ce560c78fdf68d422647",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "active",
+            "receipt": null
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "locked",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "close_temporarily_failed",
+      "method": "POST",
+      "path": "/api/v2/phases/phase_87ada424c5e7416caaa40347417d4e59/finish",
+      "request": {
+        "request_key": "close_temporarily_failed",
+        "expected_state_version": 25
+      },
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 27,
+        "server_now": 1795150800,
+        "transition_deadline_at": null,
+        "error_code": "RESOURCE_CLOSE_FAILED",
+        "failure_count": 1,
+        "retry_at": 1795150805,
+        "current_stage": {
+          "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+          "key": "column-statistics",
+          "ordinal": 3,
+          "title": "业务拓展 · 补齐列统计",
+          "status": "active",
+          "workspace_id": "workspace_249f5f46b4684ec3b2a235a89654060b"
+        },
+        "current_phase": {
+          "id": "phase_87ada424c5e7416caaa40347417d4e59",
+          "key": "coding",
+          "title": "业务拓展 · 补齐列统计",
+          "status": "closing",
+          "permission_epoch": 2,
+          "started_at": 1795150800,
+          "deadline_at": 1795153800
+        },
+        "next_action": null,
+        "capabilities": [],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+              "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+              "kind": "text",
+              "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_53baf9e62419456ba4e62e54b0afb88d",
+              "stage_id": "stage_ff56d55303b042c2b86da69d1c397e25",
+              "kind": "text",
+              "content_sha256": "3069a5719ea1fbf5da7440cae1a5817c9ffc876b2f96ce560c78fdf68d422647",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "active",
+            "receipt": null
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "locked",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "interview_after_retry",
+      "method": "GET",
+      "path": "/api/v2/attempts/current",
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 30,
+        "server_now": 1795150805,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 1,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+          "key": "column-statistics",
+          "ordinal": 3,
+          "title": "业务拓展 · 补齐列统计",
+          "status": "active",
+          "workspace_id": "workspace_249f5f46b4684ec3b2a235a89654060b"
+        },
+        "current_phase": {
+          "id": "phase_95926f4a09134233827d68eea2261d58",
+          "key": "interview",
+          "title": "独立问答",
+          "status": "active",
+          "permission_epoch": 1,
+          "started_at": 1795150805,
+          "deadline_at": 1795151405
+        },
+        "next_action": "submit_stage",
+        "capabilities": [
+          "edit_answers",
+          "read_frozen_code",
+          "read_repository"
+        ],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+              "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+              "kind": "text",
+              "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_53baf9e62419456ba4e62e54b0afb88d",
+              "stage_id": "stage_ff56d55303b042c2b86da69d1c397e25",
+              "kind": "text",
+              "content_sha256": "3069a5719ea1fbf5da7440cae1a5817c9ffc876b2f96ce560c78fdf68d422647",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "active",
+            "receipt": null
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "locked",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "submit_third",
+      "method": "POST",
+      "path": "/api/v2/stages/stage_c94ccfae5cf5435ab1592c8c23ec684e/submit",
+      "request": {
+        "request_key": "submit_third",
+        "expected_state_version": 30
+      },
+      "status": 200,
+      "response": {
+        "id": "submission_be26557bb92648aab9e095930cd18eb8",
+        "stage_id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+        "kind": "code",
+        "content_sha256": "5f9a73a020413aec8e449f7c7bfe2588db79b90dd905c47bae79b585e78a5a44",
+        "submitted_at": 1795150805,
+        "close_reason": "manual"
+      }
+    },
+    {
+      "name": "start_fourth",
+      "method": "POST",
+      "path": "/api/v2/stages/stage_8c19fbf17ecd4822b337ae9f74e59f34/start",
+      "request": {
+        "request_key": "start_fourth",
+        "expected_state_version": 34
+      },
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 37,
+        "server_now": 1795150805,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 1,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+          "key": "facet-pagination",
+          "ordinal": 4,
+          "title": "历史 Bug 修复 · 筛选与分页",
+          "status": "active",
+          "workspace_id": "workspace_e0620fba7b084dbf966560cb5e9cf25c"
+        },
+        "current_phase": {
+          "id": "phase_277025a957be42c9ae7db9660ec5a09e",
+          "key": "coding",
+          "title": "历史 Bug 修复 · 筛选与分页",
+          "status": "active",
+          "permission_epoch": 1,
+          "started_at": 1795150805,
+          "deadline_at": 1795153205
+        },
+        "next_action": "finish_phase",
+        "capabilities": [
+          "read_repository",
+          "use_agent",
+          "use_terminal",
+          "write_repository"
+        ],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+              "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+              "kind": "text",
+              "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_53baf9e62419456ba4e62e54b0afb88d",
+              "stage_id": "stage_ff56d55303b042c2b86da69d1c397e25",
+              "kind": "text",
+              "content_sha256": "3069a5719ea1fbf5da7440cae1a5817c9ffc876b2f96ce560c78fdf68d422647",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_be26557bb92648aab9e095930cd18eb8",
+              "stage_id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+              "kind": "code",
+              "content_sha256": "5f9a73a020413aec8e449f7c7bfe2588db79b90dd905c47bae79b585e78a5a44",
+              "submitted_at": 1795150805,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "active",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "timeout_to_interview",
+      "method": "GET",
+      "path": "/api/v2/attempts/current",
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "running",
+        "state_version": 41,
+        "server_now": 1795153205,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 1,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+          "key": "facet-pagination",
+          "ordinal": 4,
+          "title": "历史 Bug 修复 · 筛选与分页",
+          "status": "active",
+          "workspace_id": "workspace_e0620fba7b084dbf966560cb5e9cf25c"
+        },
+        "current_phase": {
+          "id": "phase_947bf7acb15646d4a98d0e1e768c8b94",
+          "key": "interview",
+          "title": "独立问答",
+          "status": "active",
+          "permission_epoch": 1,
+          "started_at": 1795153205,
+          "deadline_at": 1795153805
+        },
+        "next_action": "submit_exam",
+        "capabilities": [
+          "edit_answers",
+          "read_frozen_code",
+          "read_repository"
+        ],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+              "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+              "kind": "text",
+              "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_53baf9e62419456ba4e62e54b0afb88d",
+              "stage_id": "stage_ff56d55303b042c2b86da69d1c397e25",
+              "kind": "text",
+              "content_sha256": "3069a5719ea1fbf5da7440cae1a5817c9ffc876b2f96ce560c78fdf68d422647",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_be26557bb92648aab9e095930cd18eb8",
+              "stage_id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+              "kind": "code",
+              "content_sha256": "5f9a73a020413aec8e449f7c7bfe2588db79b90dd905c47bae79b585e78a5a44",
+              "submitted_at": 1795150805,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "active",
+            "receipt": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "submit_last",
+      "method": "POST",
+      "path": "/api/v2/stages/stage_8c19fbf17ecd4822b337ae9f74e59f34/submit",
+      "request": {
+        "request_key": "submit_last",
+        "expected_state_version": 41
+      },
+      "status": 200,
+      "response": {
+        "id": "submission_43421c440f9844ed89d679b3ffbb4688",
+        "stage_id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+        "kind": "code",
+        "content_sha256": "4d6d146a368d93319bb44bae5ad7e20b2d418316bf5081225d9becf6c51e9046",
+        "submitted_at": 1795153205,
+        "close_reason": "manual"
+      }
+    },
+    {
+      "name": "completed",
+      "method": "GET",
+      "path": "/api/v2/attempts/current",
+      "status": 200,
+      "response": {
+        "attempt_id": "attempt_8968b632866041bc973accc58fae2b84",
+        "status": "completed",
+        "state_version": 44,
+        "server_now": 1795153205,
+        "transition_deadline_at": null,
+        "error_code": null,
+        "failure_count": 1,
+        "retry_at": null,
+        "current_stage": {
+          "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+          "key": "facet-pagination",
+          "ordinal": 4,
+          "title": "历史 Bug 修复 · 筛选与分页",
+          "status": "submitted",
+          "workspace_id": "workspace_e0620fba7b084dbf966560cb5e9cf25c"
+        },
+        "current_phase": {
+          "id": "phase_947bf7acb15646d4a98d0e1e768c8b94",
+          "key": "interview",
+          "title": "独立问答",
+          "status": "closed",
+          "permission_epoch": 2,
+          "started_at": 1795153205,
+          "deadline_at": 1795153805
+        },
+        "next_action": null,
+        "capabilities": [],
+        "stages": [
+          {
+            "id": "stage_86b49b971ae64695b4715bb9d93f7773",
+            "ordinal": 1,
+            "title": "仓库理解",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_ffb22b9353a14da0b3f494ce80ee2bd7",
+              "stage_id": "stage_86b49b971ae64695b4715bb9d93f7773",
+              "kind": "text",
+              "content_sha256": "fe893ee557dd97008513ab8bb56f476d2bbce1c29d2a39d7ba6a0d803d58a88b",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_ff56d55303b042c2b86da69d1c397e25",
+            "ordinal": 2,
+            "title": "代码审阅",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_53baf9e62419456ba4e62e54b0afb88d",
+              "stage_id": "stage_ff56d55303b042c2b86da69d1c397e25",
+              "kind": "text",
+              "content_sha256": "3069a5719ea1fbf5da7440cae1a5817c9ffc876b2f96ce560c78fdf68d422647",
+              "submitted_at": 1795150800,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+            "ordinal": 3,
+            "title": "业务拓展 · 补齐列统计",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_be26557bb92648aab9e095930cd18eb8",
+              "stage_id": "stage_c94ccfae5cf5435ab1592c8c23ec684e",
+              "kind": "code",
+              "content_sha256": "5f9a73a020413aec8e449f7c7bfe2588db79b90dd905c47bae79b585e78a5a44",
+              "submitted_at": 1795150805,
+              "close_reason": "manual"
+            }
+          },
+          {
+            "id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+            "ordinal": 4,
+            "title": "历史 Bug 修复 · 筛选与分页",
+            "status": "submitted",
+            "receipt": {
+              "id": "submission_43421c440f9844ed89d679b3ffbb4688",
+              "stage_id": "stage_8c19fbf17ecd4822b337ae9f74e59f34",
+              "kind": "code",
+              "content_sha256": "4d6d146a368d93319bb44bae5ad7e20b2d418316bf5081225d9becf6c51e9046",
+              "submitted_at": 1795153205,
+              "close_reason": "manual"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "proposed_evidence": {
+    "description": "以下两项只演示同一会话的接口约定。摘要取自资源替身的导出，手工测试回执是构造数据，未运行该命令。",
+    "frozen_code": {
+      "method": "GET",
+      "path": "/api/v2/phases/phase_95926f4a09134233827d68eea2261d58/frozen-code",
+      "response": {
+        "workspace_id": "workspace_249f5f46b4684ec3b2a235a89654060b",
+        "sha256": "1d086ef554284c48566f3bd9a8e1516127dc5f8a2ca4de4f3a240222ea73a0a3",
+        "coding_phase_id": "phase_87ada424c5e7416caaa40347417d4e59",
+        "closed_at": 1795150805,
+        "evidence": {
+          "coding_phase_id": "phase_87ada424c5e7416caaa40347417d4e59",
+          "sequence": 1,
+          "completeness": "complete",
+          "reason": null
+        }
+      }
+    },
+    "page": {
+      "method": "GET",
+      "path": "/api/v2/phases/phase_95926f4a09134233827d68eea2261d58/evidence?limit=50",
+      "response": {
+        "coding_phase_id": "phase_87ada424c5e7416caaa40347417d4e59",
+        "sha256": "1d086ef554284c48566f3bd9a8e1516127dc5f8a2ca4de4f3a240222ea73a0a3",
+        "completeness": "complete",
+        "reason": null,
+        "items": [
+          {
+            "id": "run1-start",
+            "kind": "test_run",
+            "actor": "candidate",
+            "at": 1795150800,
+            "data": {
+              "command": "python -m unittest discover -s tests",
+              "status": "started",
+              "exit_code": null,
+              "output": "",
+              "code_version": "fixture-execution-version-1",
+              "run_id": "run1"
+            }
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    "late_test_completion": {
+      "description": "可信记录器稍后报告同一次测试完成。即使使用开始时的 at，旧环节也不可再写入。",
+      "item": {
+        "id": "run1-end",
+        "kind": "test_run",
+        "actor": "candidate",
+        "at": 1795150800,
+        "data": {
+          "command": "python -m unittest discover -s tests",
+          "status": "completed",
+          "exit_code": 0,
+          "output": "OK",
+          "code_version": "fixture-execution-version-1",
+          "run_id": "run1"
+        }
+      },
+      "expected_error": "PHASE_CLOSED",
+      "expected_visible_event_ids": [
+        "run1-start"
+      ]
+    }
+  },
+  "verified_evidence": {
+    "description": "PostgreSQL 16.2 + FastAPI 测试会话。命令记录及沙箱为测试替身，真实 HTTP 响应、冻结序号、分页、评分导出来自此次回归测试。",
+    "http": [
+      {
+        "method": "GET",
+        "path": "/api/v2/phases/phase_interview/evidence",
+        "status": 401,
+        "response": {
+          "detail": {
+            "code": "CANDIDATE_NOT_AUTHENTICATED"
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/v2/phases/phase_interview/frozen-code",
+        "status": 200,
+        "response": {
+          "workspace_id": "workspace_7e41207bea08468c9aeb5ee0050177fb",
+          "sha256": "2e616a437a6342c9fb978dc5070ed937645c3c26c8a1bb4d841afb79e44fe3a0",
+          "coding_phase_id": "phase_a6de9e1bb1a34a1faec1bc50d1788002",
+          "closed_at": 2000000005,
+          "evidence": {
+            "coding_phase_id": "phase_a6de9e1bb1a34a1faec1bc50d1788002",
+            "sequence": 2,
+            "completeness": "complete",
+            "reason": null
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/v2/phases/phase_interview/evidence?limit=1",
+        "status": 200,
+        "response": {
+          "sha256": "2e616a437a6342c9fb978dc5070ed937645c3c26c8a1bb4d841afb79e44fe3a0",
+          "coding_phase_id": "phase_a6de9e1bb1a34a1faec1bc50d1788002",
+          "completeness": "complete",
+          "reason": null,
+          "items": [
+            {
+              "at": 2000000000,
+              "id": "edit1",
+              "data": {
+                "path": "solution.py",
+                "version": 2
+              },
+              "kind": "edit",
+              "actor": "candidate"
+            }
+          ],
+          "next_cursor": "phase_a6de9e1bb1a34a1faec1bc50d1788002:1"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/v2/phases/phase_interview/evidence?limit=1&cursor=phase_a6de9e1bb1a34a1faec1bc50d1788002%3A1",
+        "status": 200,
+        "response": {
+          "sha256": "2e616a437a6342c9fb978dc5070ed937645c3c26c8a1bb4d841afb79e44fe3a0",
+          "coding_phase_id": "phase_a6de9e1bb1a34a1faec1bc50d1788002",
+          "completeness": "complete",
+          "reason": null,
+          "items": [
+            {
+              "at": 2000000000,
+              "id": "run1-start",
+              "data": {
+                "run_id": "run1",
+                "status": "started",
+                "command": "python -m unittest",
+                "exit_code": null,
+                "code_version": "v2"
+              },
+              "kind": "test_run",
+              "actor": "candidate"
+            }
+          ],
+          "next_cursor": null
+        }
+      }
+    ],
+    "grading_artifact": {
+      "sha256": "2e616a437a6342c9fb978dc5070ed937645c3c26c8a1bb4d841afb79e44fe3a0",
+      "evidence": {
+        "sequence": 2,
+        "completeness": "complete",
+        "coding_phase_id": "phase_a6de9e1bb1a34a1faec1bc50d1788002"
+      },
+      "reference": "stage-snapshot:workspace_7e41207bea08468c9aeb5ee0050177fb:2e616a437a6342c9fb978dc5070ed937645c3c26c8a1bb4d841afb79e44fe3a0",
+      "workspace_id": "workspace_7e41207bea08468c9aeb5ee0050177fb"
+    }
+  }
+}
