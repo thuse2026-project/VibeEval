@@ -29,6 +29,7 @@ def head(db, phase_id):
 
 
 def append(db, phase_id, item):
+    item = EvidenceItem.model_validate(item)
     payload = item.model_dump(mode="json")
     previous = db.scalar(
         select(StageEvidence).where(
