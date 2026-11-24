@@ -539,6 +539,7 @@ class StageResourceTests(unittest.TestCase):
             self.gateway.read(self.sid, interview, "solution.py")["content"],
             "changed\n",
         )
+        self.flow.save_answer(self.sid, interview, "item", 0, "a saved answer")
         receipt = self.submit("submit3")
         artifact = self.flow.export_submission(self.sid, stage)["content"]["artifact"]
         self.assertEqual(artifact["sha256"], frozen["sha256"])
@@ -568,6 +569,20 @@ class StageResourceTests(unittest.TestCase):
                 db.delete(db.get(StageEvidence, (coding, 2)))
             self.assertEqual(examiner.post(url).status_code, 503)
             self.assertEqual(examiner.get(url).json(), job)
+        # Even an internally consistent receipt cannot turn a known saved answer
+        # into a normally unanswered question.
+        from app.exam_flow.types import digest as content_digest
+        from examples.r2_interview_grading import export_interview_submission
+
+        with self.factory.begin() as db:
+            attempt = db.get(ExamFlowAttempt, self.sid)
+            data = deepcopy(attempt.state_json)
+            closed = data["stages"][2]
+            closed["submission"]["phases"][-1]["answers"].clear()
+            closed["receipt"]["content_sha256"] = content_digest(closed["submission"])
+            attempt.state_json = data
+        with self.assertRaisesRegex(FlowError, "SEALED_ANSWERS_MISMATCH"):
+            export_interview_submission(self.flow, self.sid, stage)
 
     def test_four_stage_objective_recovers_and_preserves_other_components(self):
         from app.admin.stage_evaluation import grade_job_objective

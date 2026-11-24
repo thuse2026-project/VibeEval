@@ -96,6 +96,23 @@
 
 同一规则下重复请求复用完成结果。若此前已写出有效的封存评测报告、任务更新尚未提交，重试会校验并接回该报告。沙箱基础设施失败保留失败状态和空分数，可以重试。已绑定的规则指纹变化返回 409；报告与固定代码、规则或分组不一致返回 503。重试保留问答和过程分项。此接口不发布成绩。
 
+### 读取第三、四题的问答评分建议
+
+考官沿用 `GET /grading-job`，读取 `components.answers`。每问满分 10 分。`suggested` 表示两问的机器建议已通过结构与引用检查，建议分在 `suggestion.score`；`answers.score` 此时仍为空，供后续人工评定和确认发布使用。存在待复核分项时，保留可核对的分项和另一问的得分，本项及受影响的合计为空。引用有效表示能在封存材料中找到出处，对得分理由的判断仍需评分校准。
+
+写入入口只在服务端运行。从已配置四题版的 `backend` 目录执行：
+
+```sh
+python -m examples.r2_interview_grading SESSION_ID STAGE_ID PRIVATE_RULE.json
+python -m examples.r2_interview_grading SESSION_ID STAGE_ID PRIVATE_RULE.json --delivery ATTEMPT.json
+```
+
+第一条命令核对封存答案与已保存草稿、固定代码和截止范围内的事件，按需创建任务并返回 `input_sha256`。规则文件由维护者为本场明确选择，包含 `version`、`prompt_version`、`task_version`、`questions_sha256`（封存问答环节的 `definition.question_ref`）及 `questions`。其中 `q1`、`q2` 各自按分项 ID 列出满分 `maximum`、评分依据 `anchor` 和是否需要文件或事件引用 `evidence_required`。测试量表只用于开发验证。
+
+第二条命令接收可信评分进程的投递。外层记录绑定摘要、尝试序号（1 或 2）、模型、推理档、输出上限、用量和耗时。模型原始 JSON 字符串放在 `response`，超时或服务暂不可用则填 `transient_error`。完整字段见 `backend/app/grading/interview.py` 中的 `Delivery` 和 `Suggestion`。两问分别提交分项、理由、原文摘录、引用、复核原因及合计。事件用 `event_id`，代码用相对路径及从 1 开始、含两端的行号。未作答项的建议只能为 0；已保存答案与封存材料不符会中止读取。纯手工作答可用编辑、测试或代码支持满分建议。
+
+格式、引用或得分校验失败，或模型发生瞬时故障，首次返回 `retryable`，相同配置的第二次仍失败则返回 `needs_review`。重复投递同一编号和内容会读回同一结果，同号不同内容会被拒绝。`attempts` 留存失败原因和调用元数据。此版本负责接收和校验评分结果，真实模型调度、考官接手和最终发布仍待接入。
+
 ## TinyDB 两题的本地交接
 
 从仓库的 `backend` 目录运行 `python -m examples.build_tinydb_images`。这个命令需要本机 Docker 已有 `python:3.13-slim`，也可以用 `--base` 指定本机的 Python 镜像。构建只打包清单允许的源码，输出的两个镜像 ID 分别用于 `VIBEEVAL_TINYDB_CORRECT_IMAGE` 和 `VIBEEVAL_TINYDB_REVIEW_IMAGE`。工作区准备时还会逐文件核对摘要；两份镜像即使包含同名文件，也不能互换。

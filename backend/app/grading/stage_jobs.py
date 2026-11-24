@@ -12,7 +12,7 @@ from app.exam_flow.types import EvidenceCutoff, FlowError, digest
 from app.stage_resources.evidence import page
 
 
-def evidence_basis(db, content):
+def evidence_basis(db, content, event_ids=None):
     artifact = content["artifact"]
     cutoff = EvidenceCutoff.model_validate(artifact["evidence"])
     if not any(
@@ -26,6 +26,8 @@ def evidence_basis(db, content):
     while True:
         items, after = page(db, cutoff, after=after, limit=100)
         for item in items:
+            if event_ids is not None:
+                event_ids.add(item["id"])
             counts[item["kind"]] += 1
             fingerprint.update(bytes.fromhex(digest(item)))
         if after is None:
@@ -46,7 +48,7 @@ def view(row):
     }
 
 
-def create_job(metadata, exported, resources):
+def create_job(metadata, exported, resources, *, event_ids=None):
     receipt, content = exported["receipt"], exported["content"]
     if content["definition"] != "r2-four-stage":
         raise HTTPException(409, "评分任务仅支持四题版答卷")
@@ -77,7 +79,7 @@ def create_job(metadata, exported, resources):
         if receipt["kind"] == "code":
             try:
                 basis["code_sha256"] = content["artifact"]["sha256"]
-                evidence = evidence_basis(db, content)
+                evidence = evidence_basis(db, content, event_ids)
             except (KeyError, TypeError, ValueError, FlowError) as error:
                 raise HTTPException(503, "封存证据暂不可读，请恢复后重试") from error
             basis["evidence"] = evidence
