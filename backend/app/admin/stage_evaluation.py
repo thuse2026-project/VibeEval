@@ -150,45 +150,61 @@ def total_score(objective, review):
     )
 
 
+def validate_objective(objective, exported, metadata, rule):
+    if objective is None:
+        return
+    try:
+        groups = {c["key"]: c for c in objective["groups"]}
+        if (
+            objective["status"] != "completed"
+            or objective["submission_id"] != metadata["submission_id"]
+            or objective["snapshot_sha256"] != exported["content"]["artifact"]["sha256"]
+            or objective["rule_sha256"] != rule["fingerprint"]
+            or len(groups) != len(objective["groups"])
+            or type(objective["score"]) is not int
+            or set(groups) != {c["key"] for c in rule["criteria"]}
+            or objective["score"] != sum(c["score"] for c in groups.values())
+            or (
+                "max" in objective
+                and objective["max"] != sum(c["max"] for c in rule["criteria"])
+            )
+        ):
+            raise ValueError
+        for c in rule["criteria"]:
+            actual = groups[c["key"]]
+            if (
+                type(actual["passed"]) is not bool
+                or type(actual["score"]) is not int
+                or type(actual["max"]) is not int
+                or actual["score"] != (c["max"] if actual["passed"] else 0)
+                or actual["max"] != c["max"]
+            ):
+                raise ValueError
+        expected_cap = (
+            rule.get("failure_cap")
+            if any(
+                c.get("core") and not groups[c["key"]]["passed"]
+                for c in rule["criteria"]
+            )
+            else None
+        )
+        if objective.get("cap") != expected_cap:
+            raise ValueError
+    except (ValueError, KeyError, TypeError) as error:
+        raise HTTPException(503, "客观评测结果与封存答卷或规则不一致") from error
+
+
 def records(root, exported, metadata, rule):
     objective = read_record(root / "objective.json")
+    validate_objective(objective, exported, metadata, rule)
     review = read_record(root / "review.json")
-    expected = exported["content"]["artifact"]["sha256"]
     try:
-        for value in (objective, review):
-            if value is not None and (
-                value["snapshot_sha256"] != expected
-                or value["rule_sha256"] != rule["fingerprint"]
-            ):
-                raise ValueError
-        if objective is not None:
-            groups = {c["key"]: c for c in objective["groups"]}
-            if (
-                objective["status"] != "completed"
-                or objective["submission_id"] != metadata["submission_id"]
-                or set(groups) != {c["key"] for c in rule["criteria"]}
-                or objective["score"] != sum(c["score"] for c in groups.values())
-            ):
-                raise ValueError
-            for c in rule["criteria"]:
-                actual = groups[c["key"]]
-                if (
-                    type(actual["passed"]) is not bool
-                    or actual["score"] != (c["max"] if actual["passed"] else 0)
-                    or actual["max"] != c["max"]
-                ):
-                    raise ValueError
-            expected_cap = (
-                rule.get("failure_cap")
-                if any(
-                    c.get("core") and not groups[c["key"]]["passed"]
-                    for c in rule["criteria"]
-                )
-                else None
-            )
-            if objective.get("cap") != expected_cap:
-                raise ValueError
         if review is not None:
+            if (
+                review["snapshot_sha256"] != exported["content"]["artifact"]["sha256"]
+                or review["rule_sha256"] != rule["fingerprint"]
+            ):
+                raise ValueError
             maxima = {c["key"]: c["max"] for c in rule["manual"]}
             if (
                 type(review["revision"]) is not int
@@ -388,6 +404,50 @@ def detail(request: Request, submission_id: str):
     }
 
 
+def grade_job_objective(resources, metadata, exported, rule, root):
+    stage_jobs.create_job(metadata, exported, resources)
+    with resources.factory.begin() as db:
+        row = db.get(StageGradingJob, metadata["submission_id"], with_for_update=True)
+        previous = row.components["objective"]
+        if previous.get("rule_sha256", rule["fingerprint"]) != rule["fingerprint"]:
+            raise HTTPException(409, "客观评分规则版本已变更，需要显式重评")
+        if previous["status"] == "completed":
+            validate_objective(previous, exported, metadata, rule)
+            return previous
+        # Recover a verified result even if the previous request stopped after
+        # writing the grading record but before committing the database row.
+        report = read_record(root / "objective.json")
+        validate_objective(report, exported, metadata, rule)
+        if report is None:
+            report = evaluate_and_record(exported, metadata, rule, root)
+
+        row.components = {**row.components, "objective": report}
+        return report
+
+
+def evaluate_and_record(exported, metadata, rule, root):
+    report = evaluate(
+        exported["files"],
+        rule,
+        metadata["image"],
+        os.environ.get("SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"),
+    )
+    report.update(
+        run_id=uuid.uuid4().hex,
+        evaluated_at=int(time.time()),
+        submission_id=metadata["submission_id"],
+        snapshot_sha256=exported["content"]["artifact"]["sha256"],
+        rule_version=rule["rule_version"],
+        rule_sha256=rule["fingerprint"],
+    )
+    if report["status"] == "completed":
+        validate_objective(report, exported, metadata, rule)
+    atomic_record(root / "last-attempt.json", report)
+    if report["status"] == "completed":
+        atomic_record(root / "objective.json", report)
+    return report
+
+
 @router.post(
     "/submissions/{submission_id}/evaluate",
     dependencies=[Depends(require_browser_header)],
@@ -399,24 +459,9 @@ def grade(request: Request, submission_id: str):
     if not GRADE_GATE.acquire(blocking=False):
         raise HTTPException(409, "已有客观评测进行中，请稍后读取结果")
     try:
-        report = evaluate(
-            exported["files"],
-            rule,
-            metadata["image"],
-            os.environ.get("SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"),
-        )
-        report.update(
-            run_id=uuid.uuid4().hex,
-            evaluated_at=int(time.time()),
-            submission_id=submission_id,
-            snapshot_sha256=exported["content"]["artifact"]["sha256"],
-            rule_version=rule["rule_version"],
-            rule_sha256=rule["fingerprint"],
-        )
-        atomic_record(root / "last-attempt.json", report)
-        if report["status"] == "completed":
-            atomic_record(root / "objective.json", report)
-        return report
+        if metadata.get("definition") == "r2-four-stage":
+            return grade_job_objective(resources, metadata, exported, rule, root)
+        return evaluate_and_record(exported, metadata, rule, root)
     except OSError:
         raise HTTPException(503, "评测记录未能保存，本次不发布分数") from None
     finally:

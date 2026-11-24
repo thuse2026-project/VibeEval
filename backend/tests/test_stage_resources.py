@@ -569,6 +569,115 @@ class StageResourceTests(unittest.TestCase):
             self.assertEqual(examiner.post(url).status_code, 503)
             self.assertEqual(examiner.get(url).json(), job)
 
+    def test_four_stage_objective_recovers_and_preserves_other_components(self):
+        from app.admin.stage_evaluation import grade_job_objective
+        from app.db.models import StageGradingJob
+        from app.exam_flow.types import digest as content_digest
+
+        stage = "stage_objective"
+        sid = "submission_" + "a" * 32
+        content = {
+            "definition": "r2-four-stage",
+            "definition_version": "v1",
+            "stage_id": stage,
+            "task_version": "bug-v1",
+            "phases": [
+                {
+                    "id": "phase_test_job",
+                    "definition": {"key": "coding", "capabilities": []},
+                }
+            ],
+            "artifact": {
+                "sha256": "1" * 64,
+                "evidence": {
+                    "coding_phase_id": "phase_test_job",
+                    "sequence": 0,
+                    "completeness": "partial",
+                    "reason": "CAPTURE_GAP",
+                },
+            },
+        }
+        exported = {
+            "content": content,
+            "files": [],
+            "receipt": {
+                "id": sid,
+                "kind": "code",
+                "content_sha256": content_digest(content),
+            },
+        }
+        metadata = {"stage_id": stage, "submission_id": sid, "image": "test"}
+        rule = {
+            "fingerprint": "rules",
+            "rule_version": "v1",
+            "failure_cap": 50,
+            "criteria": [{"key": "core", "max": 70, "core": True}],
+        }
+        failure = {"status": "infrastructure_failed", "score": None}
+        completed = {
+            "status": "completed",
+            "score": 0,
+            "max": 70,
+            "cap": 50,
+            "groups": [
+                {"key": "core", "max": 70, "core": True, "passed": False, "score": 0}
+            ],
+        }
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch(
+                "app.admin.stage_evaluation.evaluate", side_effect=[failure, completed]
+            ) as runner,
+        ):
+
+            def grade():
+                return grade_job_objective(
+                    self.gateway, metadata, exported, rule, Path(temp)
+                )
+
+            self.assertIsNone(grade()["score"])
+            with self.factory.begin() as db:
+                job = db.get(StageGradingJob, sid)
+                job.components = {
+                    **job.components,
+                    "answers": {"status": "reviewed", "score": 15},
+                }
+            report = grade()
+            self.assertEqual((report["score"], report["cap"]), (0, 50))
+            self.assertEqual(grade(), report)
+            # Simulate a restart between the atomic file write and DB commit.
+            with self.factory.begin() as db:
+                job = db.get(StageGradingJob, sid)
+                job.components = {
+                    **job.components,
+                    "objective": {"status": "pending", "score": None},
+                }
+            self.assertEqual(grade(), report)
+            self.assertEqual(runner.call_count, 2)
+            with self.factory() as db:
+                components = db.get(StageGradingJob, sid).components
+                self.assertEqual(components["objective"], report)
+                self.assertEqual(components["answers"]["score"], 15)
+                self.assertEqual(components["process"]["status"], "needs_review")
+            from fastapi import HTTPException
+
+            with (
+                patch.dict(rule, fingerprint="modified-rule"),
+                self.assertRaises(HTTPException) as conflict,
+            ):
+                grade()
+            self.assertEqual(conflict.exception.status_code, 409)
+            with self.factory.begin() as db:
+                job = db.get(StageGradingJob, sid)
+                job.components = {
+                    **job.components,
+                    "objective": {**report, "score": 70},
+                }
+            with self.assertRaises(HTTPException) as corrupt:
+                grade()
+            self.assertEqual(corrupt.exception.status_code, 503)
+            self.assertEqual(runner.call_count, 2)
+
     def test_candidate_test_runs_record_server_command_output_and_code_version(self):
         active = self.coding()
         phase = active["current_phase"]["id"]
