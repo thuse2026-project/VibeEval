@@ -153,6 +153,15 @@ class ExamFlowAttempt(Base):
     state_json: Mapped[dict] = mapped_column(JSONB)
 
 
+class StageGradingJob(Base):
+    __tablename__ = "stage_grading_jobs"
+
+    submission_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    basis: Mapped[dict] = mapped_column(JSONB)
+    components: Mapped[dict] = mapped_column(JSONB)
+
+
 class StageWorkspace(Base):
     __tablename__ = "stage_workspaces"
     workspace_id: Mapped[str] = mapped_column(String(128), primary_key=True)

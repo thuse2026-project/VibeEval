@@ -2,9 +2,9 @@
 
 import hashlib
 import time
-from uuid import uuid4
 from contextlib import contextmanager
 from dataclasses import replace
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -640,13 +640,17 @@ class StageResources:
                 else:
                     version = self._observe(db, row.workspace_id, path, content)
                     row.evidence_status = "partial"
-                    evidence.append(db, phase_id, {
-                        "id": "edit-" + uuid4().hex,
-                        "kind": "edit",
-                        "actor": "candidate",
-                        "at": int(self.clock()),
-                        "data": {"path": path, "version": version},
-                    })
+                    evidence.append(
+                        db,
+                        phase_id,
+                        {
+                            "id": "edit-" + uuid4().hex,
+                            "kind": "edit",
+                            "actor": "candidate",
+                            "at": int(self.clock()),
+                            "data": {"path": path, "version": version},
+                        },
+                    )
         if conflict is not None:
             raise SaveConflict(conflict)
         return {"path": path, "new_version": version, "saved_at": int(self.clock())}
@@ -703,9 +707,18 @@ class StageResources:
             truncated = bool(result.get("truncated", False))
             if type(exit_code) is not int or not isinstance(output, str):
                 raise ValueError("invalid sandbox test result")
-            status = "timed_out" if timed_out else "completed" if exit_code == 0 else "failed"
+            status = (
+                "timed_out"
+                if timed_out
+                else "completed" if exit_code == 0 else "failed"
+            )
         except Exception:
-            exit_code, output, timed_out, truncated = None, "测试运行失败（SANDBOX_OPERATION_FAILED）", False, False
+            exit_code, output, timed_out, truncated = (
+                None,
+                "测试运行失败（SANDBOX_OPERATION_FAILED）",
+                False,
+                False,
+            )
             status, error_code = "failed", "SANDBOX_OPERATION_FAILED"
 
         completion = {

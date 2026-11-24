@@ -18,7 +18,14 @@ from sqlalchemy import select
 from app.admin.evaluation import changes
 from app.admin.router import current_session
 from app.core.security import require_browser_header
-from app.db.models import ExamFlowAttempt, ExamSession, Invitation, StageWorkspace
+from app.db.models import (
+    ExamFlowAttempt,
+    ExamSession,
+    Invitation,
+    StageGradingJob,
+    StageWorkspace,
+)
+from app.grading import stage_jobs
 from app.grading.candidate_tests import compare_tests
 from app.grading.datasette import evaluate, load_rule
 from app.grading.rubrics import POLICIES
@@ -28,7 +35,7 @@ GRADE_GATE = threading.Lock()
 REVIEW_GATE = threading.Lock()
 
 
-def context(request, submission_id, *, answer_sheet_only=False):
+def context(request, submission_id, *, answer_sheet_only=False, allow_text=False):
     if not re.fullmatch(r"submission_[a-f0-9]{32}", submission_id):
         raise HTTPException(404, "未找到多阶段答卷")
     flow = request.app.state.exam_flow
@@ -74,7 +81,7 @@ def context(request, submission_id, *, answer_sheet_only=False):
                 "task_version": workspace.spec_json["task_version"],
                 "image": workspace.sandbox_image_ref,
             }
-        if answer_sheet_only:
+        if answer_sheet_only or (allow_text and metadata["kind"] == "text"):
             exported = flow.export_submission(
                 metadata["session_id"], metadata["stage_id"]
             )
@@ -319,6 +326,25 @@ def submissions(
             }
     except Exception:
         raise HTTPException(503, "多阶段答卷列表暂不可读") from None
+
+
+@router.post(
+    "/submissions/{submission_id}/grading-job",
+    dependencies=[Depends(require_browser_header)],
+)
+def create_grading_job(request: Request, submission_id: str):
+    metadata, exported, resources = context(request, submission_id, allow_text=True)
+    return stage_jobs.create_job(metadata, exported, resources)
+
+
+@router.get("/submissions/{submission_id}/grading-job")
+def grading_job(request: Request, submission_id: str):
+    _, _, resources = context(request, submission_id, answer_sheet_only=True)
+    with resources.factory() as db:
+        row = db.get(StageGradingJob, submission_id)
+        if row is None:
+            raise HTTPException(404, "该答卷尚未创建评分任务")
+        return stage_jobs.view(row)
 
 
 @router.get("/submissions/{submission_id}/answer-sheet")

@@ -181,6 +181,61 @@ class StageResourceTests(unittest.TestCase):
             self.assertEqual(response.json()["content"], exported["content"])
             self.assertEqual(response.json()["receipt"], exported["receipt"])
 
+    def test_sealed_answer_creates_one_examiner_job_on_concurrent_retries(self):
+        from copy import deepcopy
+
+        from app.admin.router import current_session
+        from app.db.models import ExamFlowAttempt, StageGradingJob
+
+        with self.factory.begin() as db:
+            row = db.get(ExamFlowAttempt, self.sid)
+            state = deepcopy(row.state_json)
+            state["definition"]["key"] = "r2-four-stage"
+            row.state_json = state
+        active = self.begin()
+        answering = self.flow.finish_phase(
+            self.sid, active["current_phase"]["id"], active["state_version"], "finish"
+        )
+        self.flow.save_answer(
+            self.sid, answering["current_phase"]["id"], "item", 0, "my answer"
+        )
+        receipt = self.submit("submit1")
+        app = create_app(
+            {}, entry_store=SimpleNamespace(factory=self.factory), exam_flow=self.flow
+        )
+        endpoint = "/api/v1/admin/r2/submissions/" + receipt["id"] + "/grading-job"
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as client:
+            self.assertEqual(client.get(endpoint).status_code, 401)
+            self.assertEqual(client.post(endpoint).status_code, 401)
+            app.dependency_overrides[current_session] = lambda: SimpleNamespace(
+                username="examiner"
+            )
+            self.assertEqual(client.get(endpoint).status_code, 404)
+            with ThreadPoolExecutor(2) as pool:
+                responses = list(pool.map(lambda _: client.post(endpoint), range(2)))
+            for response in responses:
+                self.assertEqual(response.status_code, 200, response.text)
+            job = client.get(endpoint).json()
+            self.assertEqual(job, responses[0].json())
+            self.assertEqual(job, responses[1].json())
+            self.assertEqual(
+                job["basis"]["answers"],
+                [
+                    {
+                        "phase_id": answering["current_phase"]["id"],
+                        "question_id": "item",
+                        "revision": 1,
+                    }
+                ],
+            )
+            with self.factory.begin() as db:
+                db.get(StageGradingJob, receipt["id"]).components = {
+                    "answers": {"status": "reviewed", "score": 5}
+                }
+            self.assertEqual(
+                client.post(endpoint).json()["components"]["answers"]["score"], 5
+            )
+
     def test_live_terminal_and_file_api_revoked_on_submit(self):
         active = self.coding()
         phase = active["current_phase"]["id"]
@@ -383,6 +438,7 @@ class StageResourceTests(unittest.TestCase):
         with self.factory.begin() as db:
             row = db.get(ExamFlowAttempt, self.sid)
             data = deepcopy(row.state_json)
+            data["definition"]["key"] = "r2-four-stage"
             for definition in (
                 data["definition"]["stages"][2],
                 data["stages"][2]["definition"],
@@ -483,7 +539,7 @@ class StageResourceTests(unittest.TestCase):
             self.gateway.read(self.sid, interview, "solution.py")["content"],
             "changed\n",
         )
-        self.submit("submit3")
+        receipt = self.submit("submit3")
         artifact = self.flow.export_submission(self.sid, stage)["content"]["artifact"]
         self.assertEqual(artifact["sha256"], frozen["sha256"])
         with self.factory() as db:
@@ -493,6 +549,25 @@ class StageResourceTests(unittest.TestCase):
         self.assertEqual((items, following), ([edited, started], None))
         with self.assertRaisesRegex(FlowError, "PHASE_CLOSED"):
             self.gateway.evidence_page(self.sid, interview, None, 50)
+        from app.admin.router import current_session
+
+        app.dependency_overrides[current_session] = lambda: SimpleNamespace(
+            username="reviewer"
+        )
+        url = "/api/v1/admin/r2/submissions/" + receipt["id"] + "/grading-job"
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as examiner:
+            response = examiner.post(url)
+            self.assertEqual(response.status_code, 200, response.text)
+            job = response.json()
+            self.assertEqual(job["basis"]["code_sha256"], frozen["sha256"])
+            self.assertEqual(
+                job["basis"]["evidence"]["event_counts"], {"edit": 1, "test_run": 1}
+            )
+            self.assertIsNone(job["components"]["process"]["score"])
+            with self.factory.begin() as db:
+                db.delete(db.get(StageEvidence, (coding, 2)))
+            self.assertEqual(examiner.post(url).status_code, 503)
+            self.assertEqual(examiner.get(url).json(), job)
 
     def test_candidate_test_runs_record_server_command_output_and_code_version(self):
         active = self.coding()
@@ -513,7 +588,9 @@ class StageResourceTests(unittest.TestCase):
                 .where(StageEvidence.phase_id == phase)
                 .order_by(StageEvidence.sequence)
             ).all()
-        start, finish = (item.payload for item in items if item.payload["kind"] == "test_run")
+        start, finish = (
+            item.payload for item in items if item.payload["kind"] == "test_run"
+        )
         self.assertNotEqual(start["id"], finish["id"])
         self.assertEqual(start["data"]["run_id"], finish["data"]["run_id"])
         self.assertEqual(start["data"]["command"], "python -m unittest")

@@ -80,6 +80,16 @@
 
 **复验入口。** 在隔离 PostgreSQL 配置下，从 backend 运行 `python -m unittest discover -s tests -p test_stage_resources.py -k interview`。该用例先写入一条编辑和一条测试开始记录，模拟代码导出失败，在重试前投递迟到的结束回执，再恢复问答。它核对两页 HTTP 响应、最终答卷的代码摘要与截止序号，以及评分端实际读出的记录。新数据库表随 Alembic 0013 创建。
 
+## 考官按回执创建和读取评分任务
+
+四题版分支 `codex/r2-grading-jobs` 增加两个考官接口，以 `/api/v1/admin/r2/submissions/{submission_id}` 为前缀。部署此分支时先运行 Alembic 迁移至 `0014_stage_grading_jobs`。该迁移的父版本是包含 `stage_evidence` 的 `0013`。考官房间分支另有同号迁移，整合前需核对两个分支的数据库版本。
+
+- 登录考官后，`POST /grading-job`（带 `X-VibeEval-Request: 1`，无请求正文）按回执建立任务，重复调用返回原任务。服务端核对封存答卷摘要，编程题还从快照读取代码、按固定截止序号读取证据。并发创建只保留一行，重试保留已有分项。
+- `GET /grading-job` 返回 `submission_id`、`created_at`、`basis`、`components`。尚未建任务返回 404。两种请求均需考官身份。通过同一回执的 `GET /answer-sheet` 可读取封存题面和答案，按 `basis.answers` 中的环节、题目和修订号定位。修订号为 null 表示没有该问的已保存答案。
+- 编程题的 `basis` 含代码摘要、采集完整度、证据截止点、按类型统计的事件数和证据摘要。`test_run` 统计事件条数，一次运行可有开始和结束两条。采集为 partial 时过程分项标记 `needs_review` 并保留原因，初始分数均为 null。此接口准备评分材料；自动评分、人工评定和发布分别由后续步骤处理。
+
+11 月 24 日用两份封存答卷复验了上述接口。代码摘要 `cad56ded780b` 对应一次编辑、一次测试的起止记录；`9c9a5001675f` 对应两次编辑，未收录测试事件。两份任务的问答修订号均与封存答案相符，过程分项均为待复核。验证只从共享库和代码快照读取输入，任务写入连接私有的 PostgreSQL 临时表。共享预览 `743ddc1` 尚未部署评分任务接口。
+
 ## TinyDB 两题的本地交接
 
 从仓库的 `backend` 目录运行 `python -m examples.build_tinydb_images`。这个命令需要本机 Docker 已有 `python:3.13-slim`，也可以用 `--base` 指定本机的 Python 镜像。构建只打包清单允许的源码，输出的两个镜像 ID 分别用于 `VIBEEVAL_TINYDB_CORRECT_IMAGE` 和 `VIBEEVAL_TINYDB_REVIEW_IMAGE`。工作区准备时还会逐文件核对摘要；两份镜像即使包含同名文件，也不能互换。
