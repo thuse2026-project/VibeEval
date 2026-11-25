@@ -12,6 +12,22 @@
 .r2-page button:disabled { cursor: default; }
 .r2-page [role="alert"] { color: #a42929; }
 .r2-page pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.r2-stage-shell { position: relative; min-height: 100dvh; }
+.r2-progress-float { position: fixed; right: 18px; bottom: 42px; z-index: 30; width: min(220px, calc(100vw - 36px)); padding: 10px 12px; color: #243746; background: #ffffffee; border: 1px solid #cbd8e1; border-radius: 8px; box-shadow: 0 8px 24px #172b3a1c; backdrop-filter: blur(8px); }
+.r2-progress-float-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.r2-progress-float-head strong { font-variant-numeric: tabular-nums; }
+.r2-progress-float-head span { padding: 3px 7px; border-radius: 999px; font-size: 11px; }
+.r2-progress-float-head .objective { color: #155e75; background: #cffafe; }
+.r2-progress-float-head .subjective { color: #854d0e; background: #fef3c7; }
+.r2-progress-float progress { display: block; width: 100%; height: 6px; margin: 8px 0 5px; accent-color: #2563eb; }
+.r2-progress-float small { display: block; overflow: hidden; color: #667784; text-overflow: ellipsis; white-space: nowrap; }
+.r2-notice-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: #172b3a66; }
+.r2-subjective-notice { width: min(440px, 100%); padding: 24px; color: #243746; background: #fff; border: 1px solid #d9e0e5; border-radius: 10px; box-shadow: 0 18px 60px #172b3a33; }
+.r2-notice-kicker { color: #1d4ed8; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+.r2-subjective-notice h2 { margin: 8px 0 10px; font-size: 20px; }
+.r2-subjective-notice p { margin: 0; color: #52606d; line-height: 1.7; }
+.r2-subjective-notice-meta { display: grid; gap: 6px; margin: 16px 0 20px; padding: 10px 12px; color: #52606d; background: #f8fafb; border: 1px solid #d9e0e5; border-radius: 6px; font-size: 12px; }
+.r2-subjective-notice button { width: 100%; }
 .r2-workspace .ide-main { grid-template-columns: var(--file-width) 8px minmax(0, 1fr); }
 .r2-workspace .ide-main.has-ai { grid-template-columns: var(--file-width) 8px minmax(0, 1fr) 8px var(--agent-width); }
 .r2-workspace .pane-divider { background: #cbd5e1; cursor: col-resize; touch-action: none; user-select: none; }
@@ -59,6 +75,7 @@
   .r2-workspace .ide-statusbar { padding-inline: 8px; }
   .r2-workspace .agent-panel-head { padding-inline: 8px; }
   .r2-workspace .agent-composer { padding-inline: 8px; }
+  .r2-progress-float { right: 10px; bottom: 34px; width: min(205px, calc(100vw - 20px)); }
 }
 @media (max-width: 700px) and (max-height: 640px) {
   .r2-workspace .agent-panel { overflow-y: auto; overscroll-behavior: contain; }

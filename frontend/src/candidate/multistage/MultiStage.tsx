@@ -14,6 +14,22 @@ import './multistage.css'
 // The private preview can extend a manually selected attempt to the last supported date.
 const PRACTICE_DEADLINE = 253402300799
 
+function StageProgress({ state }: { state: Attempt }) {
+  const index = Math.max(0, state.stages.findIndex(item => item.id === state.current_stage.id))
+  const total = Math.max(1, state.stages.length)
+  const subjective = total >= 4
+    ? index >= 2
+    : ['column-statistics', 'facet-pagination'].includes(state.current_stage.key)
+  return <aside className="r2-progress-float" aria-label="考试进度">
+    <div className="r2-progress-float-head">
+      <strong>第 {index + 1} / {total} 题</strong>
+      <span className={subjective ? 'subjective' : 'objective'}>{subjective ? '主观题' : '客观题'}</span>
+    </div>
+    <progress value={index + 1} max={total} aria-label={`第 ${index + 1} 题，共 ${total} 题`} />
+    <small>{state.current_stage.title}</small>
+  </aside>
+}
+
 function CodeStage({ state, modelReady, refresh, remaining }: {
   state: Attempt; modelReady: boolean; refresh: () => Promise<void>; remaining: number
 }) {
@@ -245,6 +261,7 @@ export default function MultiStage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [clock, setClock] = useState(() => performance.now())
+  const [showSubjectiveNotice, setShowSubjectiveNotice] = useState(false)
   const sync = useRef(performance.now())
   const version = useRef(-1)
   function accept(value: Attempt) {
@@ -285,6 +302,20 @@ export default function MultiStage() {
     return () => { stopped = true; window.clearTimeout(timer) }
   }, [polling])
 
+  const attemptId = state?.attempt_id
+  const attemptStatus = state?.status
+  const stageCount = state?.stages.length ?? 0
+  useEffect(() => {
+    if (!attemptId || attemptStatus !== 'admitted' || stageCount < 4) return
+    const key = `vibeeval.subjective-notice.${attemptId}`
+    if (!sessionStorage.getItem(key)) setShowSubjectiveNotice(true)
+  }, [attemptId, attemptStatus, stageCount])
+
+  function dismissSubjectiveNotice() {
+    if (state) sessionStorage.setItem(`vibeeval.subjective-notice.${state.attempt_id}`, '1')
+    setShowSubjectiveNotice(false)
+  }
+
   async function transition(path: string) {
     if (!state || busy) return
     setBusy(true); setError('')
@@ -297,13 +328,12 @@ export default function MultiStage() {
   const deadline = active ? state?.current_phase.deadline_at : state?.transition_deadline_at
   const remaining = deadline == null ? 0 : Math.max(0, Math.ceil(deadline - (state?.server_now ?? 0) - (clock - sync.current) / 1000))
   if (state?.current_phase.status === 'active' && state.current_stage.status === 'active') {
-    if (state.current_stage.key.startsWith('tinydb-')) {
-      return <TinyDbStage key={state.current_phase.id} state={state} remaining={remaining} refresh={refresh} modelReady={modelReady} />
-    }
-    if (state.current_phase.key === 'answer' || state.current_phase.key === 'interview' || state.capabilities.includes('read_frozen_code')) {
-      return <QuestionStage key={state.current_phase.id} state={state} refresh={refresh} remaining={remaining} />
-    }
-    return <CodeStage key={state.current_phase.id} state={state} modelReady={modelReady} refresh={refresh} remaining={remaining} />
+    const activeStage = state.current_stage.key.startsWith('tinydb-')
+      ? <TinyDbStage key={state.current_phase.id} state={state} remaining={remaining} refresh={refresh} modelReady={modelReady} />
+      : state.current_phase.key === 'answer' || state.current_phase.key === 'interview' || state.capabilities.includes('read_frozen_code')
+        ? <QuestionStage key={state.current_phase.id} state={state} refresh={refresh} remaining={remaining} />
+        : <CodeStage key={state.current_phase.id} state={state} modelReady={modelReady} refresh={refresh} remaining={remaining} />
+    return <div className="r2-stage-shell">{activeStage}<StageProgress state={state} /></div>
   }
   if (state?.status === 'completed' && state.stages.length === 4 && state.current_stage.key === 'facet-pagination') {
     return <main className="r2-page"><section className="r2-flow-card"><h1>答卷已提交</h1><p>感谢作答，可以离场。</p></section></main>
@@ -311,6 +341,15 @@ export default function MultiStage() {
   return <div className="r2-page">
     <header className="topbar"><a className="brand" href="/entry?mode=r2">VibeEval</a><span>{state?.stages.length === 4 ? '四题考试' : 'Datasette 两题联测'}</span></header>
     <main>
+      {showSubjectiveNotice && <div className="r2-notice-backdrop">
+        <section className="r2-subjective-notice" role="dialog" aria-modal="true" aria-labelledby="subjective-notice-title">
+          <span className="r2-notice-kicker">考试提醒</span>
+          <h2 id="subjective-notice-title">本场考试包含主观题</h2>
+          <p>第三、四题在编程结束后会进入独立问答。请在编程阶段完成保存和验证，结束编程后不能返回修改代码。</p>
+          <div className="r2-subjective-notice-meta"><span>第 1、2 题 · 客观题</span><span>第 3、4 题 · 主观题</span></div>
+          <button className="primary" autoFocus onClick={dismissSubjectiveNotice}>知道了</button>
+        </section>
+      </div>}
       <section className="r2-flow-card">
         <h1>{state?.status === 'completed' ? '答卷已提交' : state?.current_stage.title ?? '正在进入工作台'}</h1>
         {state?.stages.length === 4 && state.stages[0].id === state.current_stage.id && (
