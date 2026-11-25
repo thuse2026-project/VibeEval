@@ -23,11 +23,11 @@ test('coding completion freezes the phase instead of submitting the stage', asyn
     return route.fulfill({ status: 404, json: { detail: { code: 'NOT_FOUND' } } });
   });
   await page.goto('/r2-workspace');
-  await expect(page.getByRole('button', { name: '结束编程，进入独立问答' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '结束编程，固定代码并进入问答' })).toBeVisible();
   await expect(page.getByText('改动与验证说明')).toHaveCount(0);
-  await page.getByRole('button', { name: '结束编程，进入独立问答' }).click();
+  await page.getByRole('button', { name: '结束编程，固定代码并进入问答' }).click();
   await expect(page.getByText('将停止 Agent 和终端、保存并固定代码，此后不能修改或返回编程。')).toBeVisible();
-  await page.getByRole('button', { name: '确认提交' }).click();
+  await page.getByRole('button', { name: '确认结束编程' }).click();
   await expect.poll(() => posts).toContain('/api/v2/phases/phase-coding/finish');
   expect(posts).not.toContain('/api/v2/stages/stage-3/submit');
 });

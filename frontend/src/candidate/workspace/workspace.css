@@ -2,7 +2,7 @@
 .candidate-workspace button { font: inherit; font-size: 13px; font-weight: 600; border: 1px solid #cbd5e1; border-radius: 6px; color: #334155; background: #fff; padding: 8px 14px; cursor: pointer; }
 .candidate-workspace button:hover:not(:disabled) { background: #eff6ff; border-color: #93c5fd; }
 .candidate-workspace button:disabled { opacity: .5; cursor: not-allowed; }
-.candidate-workspace button:focus-visible, .candidate-workspace a:focus-visible, .candidate-workspace input:focus-visible { outline: 3px solid #60a5fa; outline-offset: 3px; }
+.candidate-workspace button:focus-visible, .candidate-workspace a:focus-visible, .candidate-workspace input:focus-visible, .candidate-workspace textarea:focus-visible, .candidate-workspace select:focus-visible { outline: 3px solid #60a5fa; outline-offset: 3px; }
 .candidate-workspace button.primary, .candidate-workspace button.submit { width: auto; min-height: 0; margin: 0; color: #fff; background: #2563eb; border-color: #2563eb; }
 .candidate-workspace button.primary:hover:not(:disabled), .candidate-workspace button.submit:hover:not(:disabled) { background: #1d4ed8; }
 .candidate-workspace a { color: #2563eb; }
@@ -175,7 +175,7 @@
 .candidate-workspace .agent-close { width: 28px; height: 28px; padding: 0; font-size: 17px; }
 .candidate-workspace .agent-conversation-bar { display: flex; gap: 6px; padding: 7px 10px; border-bottom: 1px solid #e2e8f0; }
 .candidate-workspace .agent-conversation-bar button { flex: none; padding: 3px 8px; }
-.candidate-workspace .agent-conversation-bar :is(select, input) { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #334155; }
+.candidate-workspace .agent-conversation-bar :is(select, input) { flex: 1; min-width: 0; min-height: 34px; padding: 7px 9px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #334155; text-overflow: ellipsis; }
 .candidate-workspace .agent-messages { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px; }
 .candidate-workspace .agent-empty { padding: 12px 4px; color: #64748b; font-size: 13px; }
 .candidate-workspace .agent-message { margin: 0 0 10px; padding: 8px 10px; border-radius: 6px; overflow-wrap: anywhere; }
@@ -208,6 +208,7 @@
 .candidate-workspace .agent-markdown pre { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; margin: 10px 0; padding: 10px; border: 1px solid #334155; border-radius: 5px; background: #0f172a; color: #e2e8f0; line-height: 1.5; }
 .candidate-workspace .agent-markdown pre code { white-space: pre; font-size: 11px; }
 .candidate-workspace .agent-markdown blockquote { margin: 8px 0; padding-left: 10px; border-left: 3px solid #94a3b8; color: #475569; }
+.candidate-workspace .agent-markdown a { color: #1d4ed8; overflow-wrap: anywhere; }
 .candidate-workspace .agent-run-state { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #475569; font-size: 11px; overflow-wrap: anywhere; }
 .candidate-workspace .agent-run-state button { flex: none; padding: 4px 9px; }
 .candidate-workspace .agent-activity { margin: 8px 0; padding: 6px 8px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }

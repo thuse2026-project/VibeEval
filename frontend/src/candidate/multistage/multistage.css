@@ -53,6 +53,13 @@
   .r2-workspace .agent-composer { padding-block: 4px; }
   .r2-workspace .ide-statusbar > span:last-child { display: none; }
 }
+@media (max-width: 420px) {
+  .r2-workspace .ide-topbar { gap: 7px; padding-inline: 10px; }
+  .r2-workspace .ide-topbar .logo { font-size: 16px; }
+  .r2-workspace .ide-statusbar { padding-inline: 8px; }
+  .r2-workspace .agent-panel-head { padding-inline: 8px; }
+  .r2-workspace .agent-composer { padding-inline: 8px; }
+}
 @media (max-width: 700px) and (max-height: 640px) {
   .r2-workspace .agent-panel { overflow-y: auto; overscroll-behavior: contain; }
   .r2-workspace .agent-messages { min-height: 4rem; }

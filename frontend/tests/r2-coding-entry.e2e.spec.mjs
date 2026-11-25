@@ -30,6 +30,6 @@ test('coding before an interview opens without access to the final submission su
   await expect(page.locator('.editor-file-status')).toContainText('README.md')
   expect(summaryReads).toEqual([])
   await page.getByRole('button', { name: '结束编程，固定代码并进入问答' }).click()
-  await expect(page.getByRole('dialog')).toContainText('开始 10 分钟独立问答')
+  await expect(page.getByRole('dialog')).toContainText('确认结束编程？')
   await expect(page.getByRole('dialog').getByRole('textbox')).toHaveCount(0)
 })
