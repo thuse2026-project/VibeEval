@@ -274,7 +274,7 @@ export function WorkspaceScreen({
             <h2 id="submit-title">{continuesToQuestions ? '确认结束编程？' : '确认提交答卷？'}</h2>
             <p className="muted">提交前请核对以下信息</p>
             <dl className="submission-summary"><div><dt>作答时间</dt><dd className="mono">{practice ? '本阶段不计时' : formatRemaining(remaining)}</dd></div><div><dt>文件状态</dt><dd>{saveLabel[saveState]}</dd></div></dl>
-            <p>{continuesToQuestions ? '将停止 Agent 和终端、保存并固定代码，此后不能修改或返回编程。' : submissionNotice}</p>
+            <p>{continuesToQuestions ? '将停止 Agent 和终端、保存并固定代码，此后不能修改或返回编程。代码固定后开始 10 分钟独立问答。' : submissionNotice}</p>
             {submissionFields}
             {submitError && <div className="banner banner-error">{submitError}</div>}
             <div className="modal-actions">

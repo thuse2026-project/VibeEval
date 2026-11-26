@@ -5,7 +5,7 @@ import { command, current, examRequest, RequestError, type Attempt, type Receipt
 
 type Question = { id: string; title: string; body: string; answer_schema?: { maxLength?: number } }
 type SavedDraft = { revision: number; value: unknown }
-type Draft = { value: string; revision: number; status: 'saved' | 'dirty' | 'saving' | 'conflict' | 'error'; message?: string }
+type Draft = { value: string; revision: number; status: 'saved' | 'dirty' | 'saving' | 'conflict' | 'error'; message?: string; serverValue?: string }
 type FrozenCode = { workspace_id: string; sha256: string; coding_phase_id: string; closed_at: number }
 type EvidenceItem = { id: string; kind: 'message' | 'approval' | 'edit' | 'test_run'; actor: 'candidate' | 'agent' | 'system'; at: number; data: Record<string, unknown> }
 type EvidencePage = { coding_phase_id: string; sha256: string; completeness: 'complete' | 'partial'; reason: string | null; items: EvidenceItem[]; next_cursor: string | null }
@@ -48,7 +48,7 @@ function EvidenceView({ phase, frozen }: { phase: string; frozen: FrozenCode }) 
     {error && <p role="alert">{error} <button onClick={() => void load()}>重试</button></p>}
     {!loading && !error && items.length === 0 && <p className="r2-muted">本题没有已收录的操作记录。</p>}
     <ol className="r2-evidence-list">{items.map(item => {
-      const unfinished = item.kind === 'test_run' && item.data.status === 'started' && !completedRuns.has(item.data.run_id)
+      const unfinished = page && !page.next_cursor && item.kind === 'test_run' && item.data.status === 'started' && !completedRuns.has(item.data.run_id)
       return <li key={item.id}><header><strong>{actorName[item.actor]} · {kindName[item.kind]}</strong><time>{new Date(item.at * 1000).toLocaleString()}</time></header>
         {unfinished && <p className="r2-unfinished">截止时未完成</p>}
         <dl>{Object.entries(item.data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd><pre>{display(value)}</pre></dd></div>)}</dl>
@@ -65,6 +65,7 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const draftsRef = useRef<Record<string, Draft>>({})
   const timers = useRef(new Map<string, number>())
+  const pending = useRef(new Map<string, Promise<void>>())
   const [active, setActive] = useState('')
   const [notes, setNotes] = useState<string | null>(null)
   const [frozen, setFrozen] = useState<FrozenCode | null>(null)
@@ -80,9 +81,7 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
     setDrafts(draftsRef.current)
   }
 
-  async function save(id: string) {
-    const draft = draftsRef.current[id]
-    if (!draft || draft.status === 'saved' || draft.status === 'saving') return
+  async function write(id: string, draft: Draft) {
     const sent = draft.value
     update(id, { status: 'saving', message: undefined })
     try {
@@ -90,17 +89,36 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
       const latest = draftsRef.current[id]
       update(id, { revision: result.revision, status: latest.value === sent ? 'saved' : 'dirty' })
     } catch (failure) {
-      if (failure instanceof RequestError && failure.status === 409) {
-        const latest = await examRequest<Record<string, SavedDraft>>(`${prefix}/answers`)
-        update(id, { revision: latest[id]?.revision ?? draft.revision, status: 'conflict', message: '另一窗口已保存新版本。你的草稿仍保留，请核对后重试保存。' })
+      if (failure instanceof RequestError && failure.code === 'REVISION_CONFLICT') {
+        update(id, { status: 'conflict', serverValue: undefined, message: '版本冲突。请重新获取服务器答案后核对。' })
+        const latest = (await examRequest<Record<string, SavedDraft>>(`${prefix}/answers`))[id]
+        if (latest?.value === sent) {
+          update(id, { revision: latest.revision, status: draftsRef.current[id].value === sent ? 'saved' : 'dirty', message: undefined })
+          return
+        }
+        update(id, { revision: latest?.revision ?? draft.revision, serverValue: String(latest?.value ?? ''), status: 'conflict', message: '另一窗口已保存新版本。请核对后选择要保留的答案。' })
       } else update(id, { status: 'error', message: (failure as Error).message })
       throw failure
+    }
+  }
+
+  async function save(id: string) {
+    while (true) {
+      const running = pending.current.get(id)
+      if (running) { await running; continue }
+      const draft = draftsRef.current[id]
+      if (!draft || draft.status === 'saved') return
+      if (draft.status === 'conflict') throw new Error('请先处理答案的版本冲突。')
+      const next = write(id, draft).finally(() => pending.current.delete(id))
+      pending.current.set(id, next)
+      await next
     }
   }
 
   function edit(id: string, value: string) {
     update(id, { value, status: draftsRef.current[id]?.status === 'conflict' ? 'conflict' : 'dirty' })
     window.clearTimeout(timers.current.get(id))
+    if (draftsRef.current[id].status === 'conflict') return
     timers.current.set(id, window.setTimeout(() => { timers.current.delete(id); void save(id).catch(() => undefined) }, 1200))
   }
 
@@ -160,7 +178,16 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
         {selected ? <><h1>{selected.title}</h1><p className="r2-question-body">{selected.body}</p>
           <label htmlFor="r2-answer">你的回答</label><textarea id="r2-answer" rows={14} maxLength={selected.answer_schema?.maxLength ?? 1500} disabled={busy || remaining <= 0} value={draft?.value ?? ''} onChange={event => edit(selected.id, event.target.value)} />
           <div className="r2-answer-status"><span>{draft?.value.length ?? 0} / {selected.answer_schema?.maxLength ?? 1500}</span><span>{draft?.status === 'saving' ? '正在保存…' : draft?.status === 'saved' ? '已保存' : draft?.status === 'conflict' ? '版本冲突，草稿已保留' : '尚未保存'}</span></div>
-          {draft?.message && <p role="alert">{draft.message} <button disabled={busy} onClick={() => void save(selected.id).catch(failure => setError((failure as Error).message))}>重试保存</button></p>}
+          {draft?.message && <div role="alert">{draft.message}
+            {draft.status === 'conflict' && draft.serverValue !== undefined && <>
+              <details><summary>查看服务器答案</summary><pre>{draft.serverValue}</pre></details>
+              <button disabled={busy} onClick={() => update(selected.id, { value: draft.serverValue ?? '', status: 'saved', message: undefined })}>使用服务器答案</button>
+            </>}
+            <button disabled={busy} onClick={() => {
+              update(selected.id, { status: 'dirty' })
+              void save(selected.id).catch(failure => setError((failure as Error).message))
+            }}>{draft.status === 'conflict' && draft.serverValue !== undefined ? '保留我的答案' : '重试保存'}</button>
+          </div>}
         </> : <p>正在读取题目…</p>}
       </section>
   </AnswerWorkspace>

@@ -204,7 +204,6 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       saveState={queue.saving ? 'saving' : openFiles.some(item => queue.drafts[item.path].error) ? 'error' : openFiles.some(item => item.dirty) ? 'idle' : 'saved'}
       busy={locked} onSelectFile={choose} onEdit={edit} onSubmit={submit} continuesToQuestions={continuesToQuestions}
       submitLabel={continuesToQuestions ? '结束编程，固定代码并进入问答' : '提交本阶段'}
-      submissionNotice={continuesToQuestions ? '将停止 Agent 和终端、保存并固定代码，此后不能修改或返回编程。' : undefined}
       tabSelectionDisabled={busy || agentBusy || remaining <= 0}
       sessionId={terminalAvailable ? phase : null}
       terminalPrefix="/api/v2/phases/" resizable

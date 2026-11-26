@@ -106,6 +106,7 @@ function operationTarget(item: AgentOperation) {
 }
 
 export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, hidden, beforeRun, onBusy, onClose, onWorkspaceChange }: Props) {
+  const previewEntry = import.meta.env.MODE === 'design-review' ? import.meta.env.VITE_AGENT_PREVIEW_ENTRY : undefined
   const agentApi = useMemo(() => createAgentApi(prefix), [prefix])
   const staged = prefix?.startsWith('/api/v2/') ?? false
   const [intent, setIntent] = useState<'plan' | 'default'>('plan')
@@ -162,7 +163,7 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
   }, [agentApi, onWorkspaceChange])
 
   useEffect(() => {
-    if (!modelReady) return
+    if (!modelReady || previewEntry) return
     let cancelled = false
     setLoadingConversations(true)
     setConversations([])
@@ -190,7 +191,7 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
       if (!cancelled) setLoadingConversations(false)
     })
     return () => { cancelled = true; target.current = '' }
-  }, [agentApi, sessionId, modelReady, refresh])
+  }, [agentApi, sessionId, modelReady, refresh, previewEntry])
 
   useEffect(() => {
     if (!sessionId || !conversationId) return
@@ -383,7 +384,9 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
       <h2>Agent 助手</h2>
       <button className="agent-close" aria-label="关闭 Agent 面板" title="关闭面板" onClick={onClose}>×</button>
     </header>
-    {!modelReady ? <p className="agent-empty">模型服务尚未配置。可以先编辑文件、运行测试和提交。</p> : <>
+    {previewEntry ? <p className="agent-empty">此页用于评审界面。要与只读 Agent 对话，请使用入场凭证进入
+      <a href={previewEntry} target="_blank" rel="noreferrer">真实联测工作台</a>。</p>
+      : !modelReady ? <p className="agent-empty">当前工作台未连接模型服务。</p> : <>
       {titleEdit ? <form className="agent-conversation-bar" onSubmit={event => { event.preventDefault(); void saveTitle() }}
         onKeyDown={event => { if (event.key === 'Escape' && !busy) setTitleEdit(null) }}>
         <input aria-label="对话名称" placeholder="输入对话名称" autoFocus required maxLength={200} disabled={busy}

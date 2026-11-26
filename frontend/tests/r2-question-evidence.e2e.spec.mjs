@@ -85,18 +85,24 @@ test('independent answers preserve conflicts and show frozen paged evidence', as
   await expect(page.getByText('def fixed():')).toBeVisible();
   await page.getByRole('button', { name: '操作记录' }).click();
   await expect(page.getByText('记录不完整：平台检测到部分操作记录缺失，请考官复核。')).toBeVisible();
-  await expect(page.getByText('截止时未完成')).toBeVisible();
+  await expect(page.getByText('截止时未完成')).toHaveCount(0);
 
   const answer = page.getByLabel('你的回答');
   await answer.fill('我核对了实际失败输出，确认触发条件。');
   await expect(page.getByText('版本冲突，草稿已保留')).toBeVisible();
   await expect(answer).toHaveValue('我核对了实际失败输出，确认触发条件。');
-  await page.getByRole('button', { name: '重试保存' }).click();
+  await page.getByRole('button', { name: '提交整场考试' }).click();
+  await expect(page.getByText('请先处理答案的版本冲突。')).toBeVisible();
+  expect(writes).toHaveLength(1);
+  await page.getByText('查看服务器答案').click();
+  await expect(page.getByText('另一窗口版本', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '保留我的答案' }).click();
   await expect(page.getByText('已保存', { exact: true }).last()).toBeVisible();
   expect(writes.map(item => item.expected_revision)).toEqual([0, 2]);
 
   await page.getByRole('button', { name: '加载更多记录' }).click();
   await expect(page.getByText('已读取 solution.py')).toBeVisible();
+  await expect(page.getByText('截止时未完成')).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await expect(page.getByRole('button', { name: '提交整场考试' })).toBeVisible();
