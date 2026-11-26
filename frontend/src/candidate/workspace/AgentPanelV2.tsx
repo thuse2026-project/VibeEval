@@ -26,7 +26,7 @@ type Props = {
   beforeRun?: () => Promise<void>
   onBusy?: (busy: boolean) => void
   onClose: () => void
-  onWorkspaceChange: (change: AgentFileChange) => void
+  onWorkspaceChange?: (change: AgentFileChange) => void
 }
 type Message = { role: 'user' | 'assistant'; text: string }
 
@@ -153,7 +153,7 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
       const change = item.file_result?.change
       if (item.kind !== 'file_edit' || item.status !== 'succeeded' || change?.applied !== true || !change.path || notifiedChanges.current.has(item.operation_id)) continue
       notifiedChanges.current.add(item.operation_id)
-      onWorkspaceChange({
+      onWorkspaceChange?.({
         operationId: item.operation_id,
         path: change.path,
         version: change.current_version ?? null,

@@ -113,6 +113,10 @@ python -m examples.r2_interview_grading SESSION_ID STAGE_ID PRIVATE_RULE.json --
 
 格式、引用或得分校验失败，或模型发生瞬时故障，首次返回 `retryable`，相同配置的第二次仍失败则返回 `needs_review`。重复投递同一编号和内容会读回同一结果，同号不同内容会被拒绝。`attempts` 留存失败原因和调用元数据。此版本负责接收和校验评分结果，真实模型调度、考官接手和最终发布仍待接入。
 
+## 四题工作台与答题页
+
+11 月 26 日约定四题均分两段，共 175 分钟。新入场的第二题先进入只读 IDE（`inspect`，20 分钟），结束阅读后进入缺陷报告（`review`，10 分钟）。旧会话沿用入场时绑定的定义。第一题探索笔记在 IDE 文件树显示为 `note.md`，读写仍使用当前环节的 notes 接口。四题的答题页共用题目导航、作答区与只读参考材料；本版布局供评审。
+
 ## TinyDB 两题的本地交接
 
 从仓库的 `backend` 目录运行 `python -m examples.build_tinydb_images`。这个命令需要本机 Docker 已有 `python:3.13-slim`，也可以用 `--base` 指定本机的 Python 镜像。构建只打包清单允许的源码，输出的两个镜像 ID 分别用于 `VIBEEVAL_TINYDB_CORRECT_IMAGE` 和 `VIBEEVAL_TINYDB_REVIEW_IMAGE`。工作区准备时还会逐文件核对摘要；两份镜像即使包含同名文件，也不能互换。

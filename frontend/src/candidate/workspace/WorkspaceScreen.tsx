@@ -32,7 +32,10 @@ type Props = {
   agentCanExecute?: boolean
   beforeAgentRun?: () => Promise<void>
   onAgentBusy?: (busy: boolean) => void
-  onAgentWorkspaceChange: (change: AgentFileChange) => void
+  onAgentWorkspaceChange?: (change: AgentFileChange) => void
+  initialAgentOpen?: boolean
+  directSubmit?: boolean
+  saveHint?: string
   actions?: ReactNode
   submissionFields?: ReactNode
   submissionNotice?: ReactNode
@@ -78,6 +81,7 @@ export function WorkspaceScreen({
   beforeAgentRun,
   onAgentBusy,
   onAgentWorkspaceChange,
+  initialAgentOpen = false, directSubmit = false, saveHint = "5 秒自动保存 · Python 3.12 · UTF-8",
   actions,
   submissionFields,
   submissionNotice = '提交前会保存全部修改并冻结快照；提交后不能继续编辑。',
@@ -90,8 +94,8 @@ export function WorkspaceScreen({
   onSubmit,
 }: Props) {
   const [leftTab, setLeftTab] = useState<'files' | 'problem' | 'verification'>('files')
-  const [agentOpened, setAgentOpened] = useState(false)
-  const [agentVisible, setAgentVisible] = useState(false)
+  const [agentOpened, setAgentOpened] = useState(initialAgentOpen)
+  const [agentVisible, setAgentVisible] = useState(initialAgentOpen)
   const agentOpen = Boolean(agentScope && agentVisible)
   const main = useRef<HTMLDivElement>(null)
   const [fileWidth, setFileWidth] = useState(19)
@@ -181,7 +185,10 @@ export function WorkspaceScreen({
           setAgentOpened(true)
           setAgentVisible(!agentOpen)
         }}>Agent</button>}
-        <button className="submit" disabled={busy || remaining<=0} onClick={() => { setSubmitError(null); setConfirmSubmit(true) }}>
+        <button className="submit" disabled={busy || remaining<=0} onClick={() => {
+          if (directSubmit) { void onSubmit(); return }
+          setSubmitError(null); setConfirmSubmit(true)
+        }}>
           {submitLabel}
         </button>
       </div>
@@ -215,19 +222,30 @@ export function WorkspaceScreen({
         </aside>
 
         {resizable && divider('files')}
-        <CodeEditor
-          tabs={tabs}
-          selectDisabled={tabSelectionDisabled}
-          closeDisabled={busy}
-          loadRevision={editorRevision}
-          path={editorPath}
-          value={content}
-          readOnly={activeReadonly}
-          wrapLines={resizable}
-          onSelect={selectFile}
-          onClose={closeFile}
-          onChange={onEdit}
-        />
+        <div className="ide-center">
+          <CodeEditor
+            tabs={tabs}
+            selectDisabled={tabSelectionDisabled}
+            closeDisabled={busy}
+            loadRevision={editorRevision}
+            path={editorPath}
+            value={content}
+            readOnly={activeReadonly}
+            wrapLines={resizable}
+            onSelect={selectFile}
+            onClose={closeFile}
+            onChange={onEdit}
+          />
+          <div className="ide-terminal" hidden={!termOpen}>
+            <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
+              visible={termOpen} onCollapse={() => setTermOpen(false)} />
+          </div>
+          {!termOpen && (
+            <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
+              展开终端
+            </button>
+          )}
+        </div>
         {resizable && agentOpen && divider('agent')}
         {agentScope && agentOpened && <AgentPanel key={agentScope} sessionId={agentScope}
           prefix={agentPrefix} modelReady={agentModelReady} canExecute={agentCanExecute} hidden={!agentOpen}
@@ -235,20 +253,11 @@ export function WorkspaceScreen({
           onClose={() => setAgentVisible(false)} onWorkspaceChange={onAgentWorkspaceChange} />}
       </div>
 
-      <div className="ide-terminal" hidden={!termOpen}>
-        <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
-          visible={termOpen} onCollapse={() => setTermOpen(false)} />
-      </div>
-      {!termOpen && (
-        <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
-          展开终端
-        </button>
-      )}
       <footer className="ide-statusbar">
         <span className="editor-file-status" role="status" title={loadingPath ?? editorPath ?? undefined}>
           {loadingPath ? `正在读取 ${loadingPath}…` : editorPath ? editorPath + (activeReadonly ? ' · 只读' : ' · 可编辑') : '请选择文件'}
         </span>
-        {actions}<span>5 秒自动保存 · Python 3.12 · UTF-8</span>
+        {actions}<span>{saveHint}</span>
       </footer>
       {confirmSubmit && (
         <div className="modal-backdrop">

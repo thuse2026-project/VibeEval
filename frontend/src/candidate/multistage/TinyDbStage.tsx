@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AgentPanel } from '../workspace/AgentPanelV2'
+import { ReadonlyFiles } from './ReadonlyFiles'
+import { AnswerWorkspace } from './AnswerWorkspace'
+import { ReadingWorkspace } from './ReadingWorkspace'
 import {
   command,
   current,
@@ -83,6 +85,7 @@ export function ReportEditor({
             <label key={k}>
               {labels[k]}
               <textarea
+                aria-label={labels[k]}
                 value={item[k]}
                 onChange={(e) => {
                   const revised = { ...item, [k]: e.target.value }
@@ -142,15 +145,13 @@ export function TinyDbStage({
 }) {
   const phase = state.current_phase.id
   const prefix = v2 + '/phases/' + phase
-  const explore = state.capabilities.includes('edit_notes')
+  const explore = !state.capabilities.includes('edit_answers')
+  const canEditNotes = state.capabilities.includes('edit_notes')
+  const [questionIndex, selectQuestion] = useState(0)
   const readNotes = state.capabilities.includes('read_notes')
   const [loaded, setLoaded] = useState(false)
   const [problems, setProblems] = useState<Problem[]>([])
   const [values, setValues] = useState<Record<string, Value>>({})
-  const [paths, setPaths] = useState<string[]>([])
-  const [path, setPath] = useState('')
-  const [content, setContent] = useState('')
-  const [query, setQuery] = useState('')
   const [error, setError] = useState('')
   const [status, setStatus] = useState('正在读取')
   const [busy, setBusy] = useState(false)
@@ -158,7 +159,6 @@ export function TinyDbStage({
     key: string
     draft: Draft
   } | null>(null)
-  const [showAgent, setShowAgent] = useState(true)
   const revisions = useRef<Record<string, number>>({})
   const dirty = useRef(new Map<string, Value>())
   const pending = useRef<Promise<void> | null>(null)
@@ -170,12 +170,11 @@ export function TinyDbStage({
     const get = <T,>(suffix: string) =>
       examRequest<T>(prefix + suffix, 'GET', undefined, abort.signal)
     Promise.all([
-      get<{ files: { path: string }[] }>('/files'),
       explore ? { items: [] } : get<{ items: Problem[] }>('/questions'),
       readNotes ? get<Draft>('/notes') : null,
       explore ? {} : get<Record<string, Draft>>('/answers'),
     ])
-      .then(([tree, questions, notes, answers]) => {
+      .then(([questions, notes, answers]) => {
         if (abort.signal.aborted) return
         const drafts: Record<string, Draft> = { ...answers }
         if (notes) drafts.notes = notes
@@ -189,8 +188,6 @@ export function TinyDbStage({
               .map(([k, d]) => [k, d.value!]),
           ),
         )
-        setPaths(tree.files.map((f) => f.path))
-        setPath(tree.files[0]?.path ?? '')
         setProblems(questions.items)
         setLoaded(true)
         setStatus('已保存')
@@ -204,24 +201,6 @@ export function TinyDbStage({
       window.clearTimeout(timer.current)
     }
   }, [prefix, explore, readNotes, retry])
-  useEffect(() => {
-    const abort = new AbortController()
-    setContent('')
-    if (path)
-      examRequest<{ content: string }>(
-        prefix + '/file?path=' + encodeURIComponent(path),
-        'GET',
-        undefined,
-        abort.signal,
-      )
-        .then((f) => {
-          if (!abort.signal.aborted) setContent(f.content)
-        })
-        .catch((e) => {
-          if (!abort.signal.aborted) setError(String(e))
-        })
-    return () => abort.abort()
-  }, [prefix, path])
   const flush = useCallback(async () => {
     if (pending.current) return pending.current
     const save = async () => {
@@ -305,7 +284,7 @@ export function TinyDbStage({
     if (
       !window.confirm(
         explore
-          ? '结束探索并关闭 Agent？之后只能查阅笔记。'
+          ? '结束当前阅读环节，进入独立答题？'
           : '确认提交当前作答？提交后无法返回。',
       )
     )
@@ -332,19 +311,9 @@ export function TinyDbStage({
       setBusy(false)
     }
   }
-  return (
-    <main className="r2-text-stage">
-      <header>
-        <h1>
-          {state.current_stage.title} · {state.current_phase.title}
-        </h1>
-        <span>
-          剩余 {Math.floor(remaining / 60)}:
-          {String(remaining % 60).padStart(2, '0')} · {status}
-        </span>
-      </header>
+  const alerts = <>
       {error && (
-        <p role="alert">
+        <p className="workspace-alert" role="alert">
           {error}{' '}
           {!loaded && (
             <button onClick={() => setRetry(retry + 1)}>重新读取</button>
@@ -355,7 +324,7 @@ export function TinyDbStage({
         </p>
       )}
       {conflict && (
-        <section role="alert">
+        <section className="workspace-alert" role="alert">
           另一窗口已经保存了新版本。服务器内容：
           <pre>
             {typeof conflict.draft.value === 'string'
@@ -387,47 +356,25 @@ export function TinyDbStage({
           </button>
         </section>
       )}
-      <div className="r2-text-columns">
-        <aside>
-          <label>
-            查找文件
-            <input value={query} onChange={(e) => setQuery(e.target.value)} />
-          </label>
-          <select
-            aria-label="源码文件"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-          >
-            {paths
-              .filter((p) => p.includes(query) || p === path)
-              .map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-          </select>
-          <pre>{content}</pre>
-        </aside>
-        <fieldset disabled={!loaded || busy || remaining <= 0}>
-          <legend>{state.current_phase.title}</legend>
-          {explore ? (
-            <label>
-              探索笔记
-              <textarea
-                value={String(values.notes ?? '')}
-                onChange={(e) => update('notes', e.target.value)}
-              />
-            </label>
-          ) : (
-            readNotes && (
-              <details>
-                <summary>我的探索笔记</summary>
-                <pre>{String(values.notes ?? '')}</pre>
-              </details>
-            )
-          )}
-          {problems.map((q) => (
+    </>
+  const locked = !loaded || busy || !!conflict
+  if (explore) return <ReadingWorkspace state={state} remaining={remaining} modelReady={modelReady}
+    busy={locked} saveState={conflict ? 'conflict' : error ? 'error' : status === '已保存' ? 'saved' : 'idle'}
+    notes={readNotes && loaded ? String(values.notes ?? '') : undefined} noteRevision={revisions.current.notes}
+    editNotes={canEditNotes ? value => update('notes', value) : undefined}
+    submitLabel={canEditNotes ? '结束探索，进入独立答题' : '结束阅读，填写报告'} submit={finish} alerts={alerts} />
+  const q = problems[questionIndex]
+  return <AnswerWorkspace state={state} remaining={remaining} status={status} busy={locked} submit={finish}
+    questions={problems} active={q?.id ?? ''} select={id => selectQuestion(problems.findIndex(p => p.id === id))}
+    answered={id => { const v = values[id]; return typeof v === 'string' ? !!v.trim() : !!v && v.conclusion !== 'undecided' }}
+    alerts={alerts} files={<ReadonlyFiles phase={phase} notes={readNotes ? String(values.notes ?? '') : undefined} />}>
+    <fieldset disabled={!loaded || busy || remaining <= 0}>{q && (
             <section key={q.id}>
               <h2>{q.title}</h2>
-              <pre>{q.body}</pre>
+              {q.id === 'findings' ? <>
+                <p>{q.body.trim().split(/\n\s*\n/)[1]}</p>
+                <details><summary>查看完整审阅任务和适用规则</summary><pre>{q.body}</pre></details>
+              </> : <pre>{q.body}</pre>}
               {q.id === 'findings' ? (
                 <ReportEditor
                   value={(values[q.id] as Report) ?? blankReport}
@@ -443,30 +390,6 @@ export function TinyDbStage({
                 </label>
               )}
             </section>
-          ))}
-          <button disabled={!!conflict} onClick={() => void finish()}>
-            {explore
-              ? '结束探索，进入独立答题'
-              : state.next_action === 'submit_exam'
-                ? '提交整场考试'
-                : '提交本题'}
-          </button>
-        </fieldset>
-      </div>
-      {explore &&
-        (showAgent ? (
-          <AgentPanel
-            hidden={false}
-            sessionId={phase}
-            prefix="/api/v2/phases/"
-            modelReady={modelReady}
-            canExecute={false}
-            onClose={() => setShowAgent(false)}
-            onWorkspaceChange={() => {}}
-          />
-        ) : (
-          <button onClick={() => setShowAgent(true)}>打开只读 Agent</button>
-        ))}
-    </main>
-  )
+          )}</fieldset>
+  </AnswerWorkspace>
 }

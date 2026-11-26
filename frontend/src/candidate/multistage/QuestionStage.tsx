@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FileContentResponse, FileEntry } from '../../shared/types'
+import { AnswerWorkspace } from './AnswerWorkspace'
+import { ReadonlyFiles } from './ReadonlyFiles'
 import { command, current, examRequest, RequestError, type Attempt, type Receipt, v2 } from './api'
 
 type Question = { id: string; title: string; body: string; answer_schema?: { maxLength?: number } }
@@ -54,38 +55,6 @@ function EvidenceView({ phase, frozen }: { phase: string; frozen: FrozenCode }) 
       </li>
     })}</ol>
     {page?.next_cursor && <button disabled={loading} onClick={() => void load(page.next_cursor ?? undefined)}>{loading ? '正在读取…' : '加载更多记录'}</button>}
-  </section>
-}
-
-function ReadonlyFiles({ phase, frozen }: { phase: string; frozen: FrozenCode | null }) {
-  const [files, setFiles] = useState<FileEntry[]>([])
-  const [selected, setSelected] = useState('')
-  const [content, setContent] = useState('')
-  const [error, setError] = useState('')
-
-  const open = useCallback(async (path: string) => {
-    setError('')
-    try {
-      const file = await examRequest<FileContentResponse>(`${v2}/phases/${phase}/file?path=${encodeURIComponent(path)}`)
-      setSelected(path); setContent(file.content)
-    } catch (failure) { setError((failure as Error).message) }
-  }, [phase])
-
-  useEffect(() => {
-    const abort = new AbortController()
-    void examRequest<{ files: FileEntry[] }>(`${v2}/phases/${phase}/files`, 'GET', undefined, abort.signal)
-      .then(value => { setFiles(value.files); if (value.files[0]) void open(value.files[0].path) })
-      .catch(failure => { if (!abort.signal.aborted) setError((failure as Error).message) })
-    return () => abort.abort()
-  }, [open, phase])
-
-  return <section className="r2-frozen-files" aria-label={frozen ? '冻结代码' : '只读源码'}>
-    <div className="r2-section-heading"><h2>{frozen ? '冻结代码' : '只读源码'}</h2>{frozen && <code title={frozen.sha256}>{frozen.sha256.slice(0, 12)}</code>}</div>
-    {error && <p role="alert">{error}</p>}
-    <div className="r2-readonly-browser">
-      <nav aria-label="只读文件列表">{files.map(file => <button key={file.path} aria-current={selected === file.path ? 'page' : undefined} onClick={() => void open(file.path)}>{file.path}</button>)}</nav>
-      <pre tabIndex={0}>{content || '选择文件查看内容'}</pre>
-    </div>
   </section>
 }
 
@@ -169,6 +138,10 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
       for (const question of questions) await save(question.id)
       if (Object.values(draftsRef.current).some(draft => draft.status !== 'saved')) throw new Error('仍有回答未保存，请核对冲突或网络错误后重试。')
       const latest = await current()
+      if (latest.current_phase.id !== phase || latest.current_phase.status !== 'active') {
+        await refresh()
+        return
+      }
       if (!submissionKey.current) submissionKey.current = crypto.randomUUID()
       await command<Receipt>(`/stages/${latest.current_stage.id}/submit`, latest, {}, submissionKey.current)
       await refresh()
@@ -178,18 +151,11 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
 
   const selected = questions.find(question => question.id === active)
   const draft = active ? drafts[active] : undefined
-  return <div className="r2-question-page">
-    <header className="r2-question-topbar">
-      <div><strong>第 {state.current_stage.ordinal ?? state.stages.findIndex(item => item.id === state.current_stage.id) + 1} 题</strong><span>{state.current_phase.title ?? '独立问答'}</span></div>
-      <span className="r2-save-summary">{Object.values(drafts).some(item => item.status === 'conflict' || item.status === 'error') ? '保存需要处理' : Object.values(drafts).some(item => item.status !== 'saved') ? '正在保存' : '已保存'}</span>
-      <time aria-label="当前环节剩余时间">{Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}</time>
-      <button className="primary" disabled={busy || remaining <= 0} onClick={() => void submit()}>{state.next_action === 'submit_exam' ? '提交整场考试' : '提交本题'}</button>
-    </header>
-    {error && <p className="r2-page-alert" role="alert">{error}</p>}
-    <main className="r2-question-layout">
-      <nav className="r2-question-nav" aria-label="问题导航">{questions.map((question, index) => <button key={question.id} aria-current={question.id === active ? 'page' : undefined} onClick={() => setActive(question.id)}>
-        <span>问题 {index + 1}</span><small>{drafts[question.id]?.status === 'saved' ? '已保存' : drafts[question.id]?.status === 'conflict' ? '有冲突' : '未保存'}</small>
-      </button>)}</nav>
+  return <AnswerWorkspace state={state} remaining={remaining} status={Object.values(drafts).some(d => d.status !== 'saved') ? '有未保存的回答' : '已保存'}
+    busy={busy || !questions.length} submit={submit} questions={questions} active={active} select={setActive}
+    answered={id => Boolean(drafts[id]?.value.trim())} alerts={error && <p className="r2-page-alert" role="alert">{error}</p>}
+    files={<ReadonlyFiles phase={phase} notes={notes} sha={frozen?.sha256} />}
+    evidence={frozen && <EvidenceView phase={phase} frozen={frozen} />}>
       <section className="r2-answer-panel">
         {selected ? <><h1>{selected.title}</h1><p className="r2-question-body">{selected.body}</p>
           <label htmlFor="r2-answer">你的回答</label><textarea id="r2-answer" rows={14} maxLength={selected.answer_schema?.maxLength ?? 1500} disabled={busy || remaining <= 0} value={draft?.value ?? ''} onChange={event => edit(selected.id, event.target.value)} />
@@ -197,11 +163,5 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
           {draft?.message && <p role="alert">{draft.message} <button disabled={busy} onClick={() => void save(selected.id).catch(failure => setError((failure as Error).message))}>重试保存</button></p>}
         </> : <p>正在读取题目…</p>}
       </section>
-      <aside className="r2-reference-pane">
-        {notes !== null && <section><h2>探索笔记</h2><pre>{notes || '没有已保存的笔记'}</pre></section>}
-        {state.capabilities.includes('read_repository') && <ReadonlyFiles phase={phase} frozen={frozen} />}
-        {frozen && <EvidenceView phase={phase} frozen={frozen} />}
-      </aside>
-    </main>
-  </div>
+  </AnswerWorkspace>
 }

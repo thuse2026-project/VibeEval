@@ -23,11 +23,11 @@ test('coding completion freezes the phase instead of submitting the stage', asyn
     return route.fulfill({ status: 404, json: { detail: { code: 'NOT_FOUND' } } });
   });
   await page.goto('/r2-workspace');
-  await expect(page.getByRole('button', { name: '结束编程，进入独立问答' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '结束编程，固定代码并进入问答' })).toBeVisible();
   await expect(page.getByText('改动与验证说明')).toHaveCount(0);
-  await page.getByRole('button', { name: '结束编程，进入独立问答' }).click();
+  await page.getByRole('button', { name: '结束编程，固定代码并进入问答' }).click();
   await expect(page.getByText('将停止 Agent 和终端、保存并固定代码，此后不能修改或返回编程。')).toBeVisible();
-  await page.getByRole('button', { name: '确认提交' }).click();
+  await page.getByRole('button', { name: '确认结束编程' }).click();
   await expect.poll(() => posts).toContain('/api/v2/phases/phase-coding/finish');
   expect(posts).not.toContain('/api/v2/stages/stage-3/submit');
 });
@@ -82,9 +82,10 @@ test('independent answers preserve conflicts and show frozen paged evidence', as
 
   await page.goto('/r2-workspace');
   await expect(page.getByRole('heading', { name: '根因判断' })).toBeVisible();
+  await expect(page.getByText('def fixed():')).toBeVisible();
+  await page.getByRole('button', { name: '操作记录' }).click();
   await expect(page.getByText('记录不完整：平台检测到部分操作记录缺失，请考官复核。')).toBeVisible();
   await expect(page.getByText('截止时未完成')).toBeVisible();
-  await expect(page.getByText('def fixed():')).toBeVisible();
 
   const answer = page.getByLabel('你的回答');
   await answer.fill('我核对了实际失败输出，确认触发条件。');

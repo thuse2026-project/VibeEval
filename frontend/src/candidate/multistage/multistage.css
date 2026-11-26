@@ -119,3 +119,49 @@
 .r2-text-stage select { max-width: 100%; }
 .r2-text-stage pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .r2-text-columns { grid-template-columns: minmax(0, 1fr); } }
+
+.answer-studio { min-height:100dvh; background:#eef2f6; color:#1e293b; font-family:"Segoe UI","Microsoft YaHei",sans-serif; }
+.answer-bar { display:flex; align-items:center; gap:20px; padding:10px 22px; background:#192535; color:#f8fafc; min-height:54px; }
+.answer-bar strong { display:flex; align-items:center; gap:9px; font-size:17px; }
+.answer-bar i { font:700 14px/1 Consolas,monospace; color:#93c5fd; }
+.answer-stage { padding-left:16px; border-left:1px solid #475569; color:#d7e1eb; font-size:14px; }
+.answer-bar time { margin-left:auto; color:#fde68a; font:600 14px/1.5 Consolas,monospace; white-space:nowrap; }
+.answer-studio button { border:1px solid #cad5e1; border-radius:6px; background:white; color:#273d53; padding:7px 12px; font-size:13px; }
+.answer-bar button { background:#3368b7; color:white; border-color:#497bcc; font-weight:600; }
+.answer-layout { display:grid; grid-template-columns:minmax(165px,17%) minmax(0,1fr) minmax(260px,29%); align-items:start; min-height:calc(100dvh - 54px); }
+.answer-index,.answer-reference { padding:24px 16px; min-width:0; }
+.answer-index h2,.answer-reference>h2 { font-size:15px; margin:0 0 10px; }
+.answer-index p,.answer-meta { color:#5a6f82; font-size:12px; }
+.answer-index button { display:flex; gap:9px; align-items:baseline; width:100%; margin:6px 0; text-align:left; line-height:1.55; background:transparent; border-color:transparent; }
+.answer-index button b { font:600 12px Consolas,monospace; color:#5b728a; }
+.answer-index small { margin-left:auto; color:#6886a5; }
+.answer-index button[aria-current] { border-color:#b7cbe1; color:#174b80; background:#fff; box-shadow:inset 3px 0 #447bad; }
+.answer-sheet { min-width:0; padding:clamp(12px,2vw,32px); }
+.answer-paper { background:white; border:1px solid #d9e1ea; border-radius:10px; padding:clamp(16px,2.4vw,38px); box-shadow:0 4px 16px #24344709; }
+.answer-meta { display:flex; justify-content:space-between; gap:12px; padding-bottom:16px; margin-bottom:20px; border-bottom:1px solid #e4eaf0; }
+.answer-paper h1,.answer-paper h2 { font-size:clamp(18px,1.6vw,25px); line-height:1.5; margin:0 0 10px; }
+.answer-paper .r2-answer-panel { padding:0; }
+.answer-paper p,.answer-paper pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.8; }
+.answer-paper fieldset { padding:0; margin:0; min-width:0; border:0; }
+.answer-paper fieldset fieldset { border-top:1px solid #d6e0ea; margin-top:22px; padding-top:12px; }
+.answer-paper label { display:block; margin-top:18px; }
+.answer-paper textarea,.answer-paper select,.reference-file select { width:100%; display:block; border:1px solid #afbfcc; border-radius:6px; background:#fbfcfe; color:#1e293b; font:inherit; padding:10px; margin-top:6px; }
+.answer-paper textarea { min-height:110px; resize:vertical; line-height:1.7; }
+.answer-paper .r2-answer-panel textarea { min-height:200px; }
+.answer-paper footer { display:flex; justify-content:space-between; margin-top:24px; padding:14px 0 0; border-top:1px solid #e4eaf0; }
+.answer-reference { background:#f8fafc; align-self:stretch; border-left:1px solid #dae3ec; }
+.reference-tabs { display:flex; gap:4px; margin:14px 0; border-bottom:1px solid #d8e1ea; }
+.reference-tabs button { border:0; background:transparent; border-radius:0; }
+.reference-tabs button[aria-pressed=true] { box-shadow:inset 0 -2px #447bad; color:#174b80; }
+.reference-file { font-size:12px; color:#64758a; margin-top:12px; }
+.source-preview { padding:14px; min-height:190px; max-height:62dvh; overflow:auto; border-radius:7px; background:#1b2736; color:#d9e2ec; font:12px/1.7 Consolas,monospace; tab-size:4; }
+@media(max-width:800px) {
+ .answer-layout { grid-template-columns:minmax(0,1fr); }
+ .answer-index { display:flex; gap:6px; overflow:auto; align-items:center; padding:10px 12px; }
+ .answer-index h2,.answer-index p { display:none; }
+ .answer-index button { flex:0 0 auto; width:auto; max-width:230px; margin:0; }
+ .answer-reference { border-top:1px solid #dae3ec; }
+ .answer-bar { gap:8px; padding:9px 12px; flex-wrap:wrap; }
+ .answer-stage { flex:1; min-width:80px; }
+ .answer-bar time { font-size:12px; }
+}

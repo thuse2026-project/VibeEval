@@ -221,6 +221,7 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
         <DatasetteVerification phaseId={phase} task={state.current_stage.key} disabled={locked || !terminalAvailable}
           flush={() => queue.flush()} openTerminal={openTerminal} openFile={selectFile} onRunningChange={setTestRunning} /> : undefined}
       agentScope={remaining > 0 && state.capabilities.includes('use_agent') ? phase : null}
+      initialAgentOpen={state.capabilities.includes('use_agent')}
       agentPrefix="/api/v2/phases/" agentModelReady={modelReady}
       agentCanExecute={state.capabilities.includes('use_terminal') || state.capabilities.includes('write_repository')}
       beforeAgentRun={() => queue.flush()} onAgentBusy={setAgentBusy} onAgentWorkspaceChange={onAgentWorkspaceChange}

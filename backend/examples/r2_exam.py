@@ -176,9 +176,15 @@ def assemble(root, images, interview_path):
             )
             phases = (
                 PhaseDefinition(
-                    key="review",
-                    title="独立审阅",
+                    key="inspect",
+                    title="阅读源码",
                     duration_seconds=1200,
+                    capabilities={"read_repository"},
+                ),
+                PhaseDefinition(
+                    key="review",
+                    title="填写缺陷报告",
+                    duration_seconds=600,
                     capabilities={"read_repository", "edit_answers"},
                     question_ref=provider.register(version, [report]),
                 ),
