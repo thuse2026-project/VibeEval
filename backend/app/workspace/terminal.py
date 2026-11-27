@@ -60,7 +60,9 @@ def guarded(websocket, session_id, operation):
         return operation(view)
 
 
-async def relay(websocket, terminal, check_and_run, *, guard_output=False, record_output=None):
+async def relay(
+    websocket, terminal, check_and_run, *, guard_output=False, record_output=None
+):
     async def output():
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while True:
