@@ -253,6 +253,8 @@ def record_delivery(resources, exported, rule, delivery):
             if attempts[delivery.attempt - 1]["delivery_sha256"] != fingerprint:
                 raise ValueError("ATTEMPT_CONFLICT")
             return current
+        if "examiner_review" in row.components:
+            raise ValueError("COMPONENT_CLOSED")
         if current != {"status": "pending", "score": None} and not (
             current.get("status") == "retryable"
             and current.get("binding") == binding

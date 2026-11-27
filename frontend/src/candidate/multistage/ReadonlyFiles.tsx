@@ -9,7 +9,8 @@ export function ReadonlyFiles({ phase, sha, notes }: { phase: string; sha?: stri
   const [selected, setSelected] = useState('')
   const [content, setContent] = useState('')
   const [error, setError] = useState('')
-  const isNote = notes != null && selected === 'note.md'
+  const hasNote = notes != null
+  const isNote = hasNote && selected === 'note.md'
 
   useEffect(() => {
     const abort = new AbortController()
@@ -17,10 +18,10 @@ export function ReadonlyFiles({ phase, sha, notes }: { phase: string; sha?: stri
       if (abort.signal.aborted) return
       const paths = tree.files.filter(f => !f.is_dir)
       setFiles(paths)
-      setSelected(paths.find(f => /^(repository\/)?readme\.md$/i.test(f.path))?.path ?? paths[0]?.path ?? '')
+      setSelected(hasNote ? 'note.md' : paths.find(f => /^(repository\/)?readme\.md$/i.test(f.path))?.path ?? paths[0]?.path ?? '')
     }).catch(e => { if (!abort.signal.aborted) setError(String(e)) })
     return () => abort.abort()
-  }, [phase])
+  }, [phase, hasNote])
   useEffect(() => {
     const abort = new AbortController()
     setContent('')

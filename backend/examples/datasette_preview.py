@@ -60,7 +60,9 @@ def create_preview():
     class PreviewEntry(PostgresEntryStore):
         def admit(self, token, browser):
             admitted = super().admit(token, browser)
-            if not flow.manages(admitted["session_id"]):
+            if not admitted["exam_info"]["id"].startswith("room_") and not flow.manages(
+                admitted["session_id"]
+            ):
                 selected = definition
                 if (
                     rehearsal is not None

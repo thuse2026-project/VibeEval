@@ -28,7 +28,7 @@ from app.submissions.storage import SnapshotStore
 from app.workspace.files import encode_content
 from app.workspace.service import SaveConflict
 
-from . import evidence
+from . import evidence, process_record
 from .types import STAGE_REFERENCE_ADAPTER, ResourceSpec, WorkspaceView, validate_file
 
 
@@ -247,6 +247,8 @@ class StageResources:
                     permission_epoch=context.permission_epoch,
                 )
                 db.add(scope)
+                if "write_repository" in definition.capabilities:
+                    row.evidence_status = "complete"
             elif scope.status == "closed" or scope.workspace_id != context.workspace_id:
                 raise FlowError("AUTHORIZATION_REVOKED", 403)
             scope.status, scope.permission_epoch = "active", context.permission_epoch
@@ -307,6 +309,7 @@ class StageResources:
                 and "read_frozen_code" in phases[next_index].capabilities
             ):
                 if row.artifact_json is None:
+                    process_record.freeze(db, context.phase_id)
                     self._capture_snapshot(row, state)
                     cutoff = EvidenceCutoff(
                         coding_phase_id=context.phase_id,
@@ -639,7 +642,6 @@ class StageResources:
                     )
                 else:
                     version = self._observe(db, row.workspace_id, path, content)
-                    row.evidence_status = "partial"
                     evidence.append(
                         db,
                         phase_id,
@@ -695,7 +697,6 @@ class StageResources:
         with self.guard(session_id, phase_id, "use_terminal") as (db, _, row, current):
             if current.sandbox_id != view.sandbox_id:
                 raise FlowError("SOURCE_VERSION_CHANGED", 409)
-            row.evidence_status = "partial"
             evidence.append(db, phase_id, start)
 
         error_code = None

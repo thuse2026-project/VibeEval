@@ -144,6 +144,7 @@
 .answer-paper .r2-answer-panel { padding:0; }
 .answer-paper p,.answer-paper pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.8; }
 .answer-paper fieldset { padding:0; margin:0; min-width:0; border:0; }
+.answer-paper fieldset fieldset textarea { min-height:clamp(7rem,15dvh,12rem); }
 .answer-paper fieldset fieldset { border-top:1px solid #d6e0ea; margin-top:22px; padding-top:12px; }
 .answer-paper label { display:block; margin-top:18px; }
 .answer-paper textarea,.answer-paper select,.reference-file select { width:100%; display:block; border:1px solid #afbfcc; border-radius:6px; background:#fbfcfe; color:#1e293b; font:inherit; padding:10px; margin-top:6px; }
@@ -198,8 +199,20 @@
 .reference-markdown :is(td,th) { border:1px solid #ccd5de; padding:4px 8px; }
 @media(min-width:801px) {
  .answer-layout { grid-template-columns:clamp(138px,14%,225px) minmax(0,1fr) 6px minmax(230px,var(--reference-width)); align-items:stretch; }
- .answer-sheet { padding:clamp(12px,2vw,30px); }
- .answer-paper { border-radius:5px; box-shadow:none; }
- .answer-reference { overflow:auto; height:calc(100dvh - 55px); position:sticky; top:0; box-sizing:border-box; }
+ .answer-studio { height:100dvh; display:flex; flex-direction:column; }
+ .answer-bar { flex:none; }
+ .answer-layout { flex:1; min-height:0; grid-template-rows:minmax(0,1fr); }
+ .answer-index,.answer-reference,.answer-sheet { overflow:auto; }
+ .answer-sheet { display:flex; flex-direction:column; padding:0; background:white; }
+ .answer-paper { flex:1 0 auto; min-height:100%; box-sizing:border-box; display:flex; flex-direction:column; border:0; border-radius:0; box-shadow:none; }
+ .answer-paper > fieldset,.answer-paper > fieldset > section,.answer-paper > .r2-answer-panel,
+ .answer-paper > fieldset > section > label { flex:1; display:flex; flex-direction:column; }
+ .answer-paper > fieldset { display:contents; }
+ .answer-paper > .r2-answer-panel { overflow:visible; }
+ .answer-paper > .r2-answer-panel textarea,.answer-paper > fieldset > section > label textarea { height:10rem; flex:1 1 10rem; min-height:10rem; }
+ .answer-paper footer { flex:none; }
 }
-@media(max-width:800px) { .answer-layout > .resize-column { display:none; } }
+@media(max-width:800px) {
+ .answer-layout > .resize-column { display:none; }
+ .answer-paper > fieldset > section > label textarea,.answer-paper .r2-answer-panel textarea { min-height:clamp(10rem,35dvh,21rem); }
+}

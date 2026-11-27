@@ -71,6 +71,7 @@ def context(request, submission_id, *, answer_sheet_only=False, allow_text=False
                 "submission_id": submission_id,
                 "session_id": attempt.session_id,
                 "stage_id": stage["id"],
+                "stage_key": stage["definition"]["key"],
                 "definition": attempt.state_json["definition"]["key"],
                 "kind": stage["receipt"]["kind"],
                 "title": stage["definition"]["title"],
@@ -322,6 +323,7 @@ def submissions(
                                 "submission_id": receipt["id"],
                                 "kind": receipt["kind"],
                                 "submitted_at": receipt["submitted_at"],
+                                "definition": attempt.state_json["definition"]["key"],
                                 "close_reason": receipt["close_reason"],
                                 "title": stage["definition"]["title"],
                                 "candidate_id": invitation.candidate_id,
@@ -461,7 +463,10 @@ def grade(request: Request, submission_id: str):
     try:
         if metadata.get("definition") == "r2-four-stage":
             return grade_job_objective(resources, metadata, exported, rule, root)
-        return evaluate_and_record(exported, metadata, rule, root)
+        from app.admin.rooms import grade_write
+
+        with grade_write(resources, metadata.get("exam_id", ""), submission_id):
+            return evaluate_and_record(exported, metadata, rule, root)
     except OSError:
         raise HTTPException(503, "评测记录未能保存，本次不发布分数") from None
     finally:
@@ -517,7 +522,12 @@ def save_review(
             422, "请逐项填写代码/测试依据；测试项非零时须确认存在非复制的新增验证。"
         )
     root = location(resources, metadata, rule)
-    with REVIEW_GATE:
+    from app.admin.rooms import grade_write
+
+    with (
+        REVIEW_GATE,
+        grade_write(resources, metadata.get("exam_id", ""), submission_id),
+    ):
         _, prior = records(root, exported, metadata, rule)
         revision = prior["revision"] if prior else 0
         if revision != body.expected_revision:

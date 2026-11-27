@@ -1,6 +1,7 @@
 """Phase-bound files, PTY and the existing native Agent transport."""
 
 import os
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -20,6 +21,7 @@ from app.agent_integration.router import (
 from app.agent_integration.router import reading
 from app.agent_integration.router import router as native_agent_router
 from app.core.security import require_browser_header
+from app.db.models import StageTerminal
 from app.exam_flow.router import identity
 from app.exam_flow.types import FlowError
 from app.sandbox.terminal import DockerTerminalFactory
@@ -27,6 +29,7 @@ from app.workspace.files import InvalidFilePath, ReadOnlyFile
 from app.workspace.service import SaveConflict
 from app.workspace.terminal import relay
 
+from .process_record import record_output
 from .types import StageInputReference
 
 router = APIRouter(
@@ -165,13 +168,29 @@ async def terminal(websocket: WebSocket, phase_id: str):
             with gateway.guard(sid, phase_id, "use_terminal") as (_, _, _, view):
                 return operation(view)
 
-        def opening(view):
-            nonlocal handle
-            handle = factory.open(view)
+        terminal_id = uuid4().hex
 
-        await run_in_threadpool(check, opening)
+        def opening():
+            nonlocal handle
+            with gateway.guard(sid, phase_id, "use_terminal") as (db, _, _, view):
+                handle = factory.open(view)
+                db.add(
+                    StageTerminal(
+                        id=terminal_id,
+                        phase_id=phase_id,
+                        opened_at=int(gateway.clock()),
+                        transcript="",
+                        truncated=False,
+                    )
+                )
+
+        def output(text):
+            with gateway.guard(sid, phase_id, "use_terminal") as (db, _, workspace, _):
+                record_output(db, workspace, terminal_id, text)
+
+        await run_in_threadpool(opening)
         await websocket.accept()
-        await relay(websocket, handle, check, guard_output=True)
+        await relay(websocket, handle, check, record_output=output)
     except WebSocketDisconnect:
         return
     except (HTTPException, FlowError, ValueError, UnicodeError, KeyError):

@@ -90,6 +90,35 @@ def create_app():
         images["tinydb-understanding"] = os.environ["VIBEEVAL_TINYDB_CORRECT_IMAGE"]
         images["tinydb-review"] = os.environ["VIBEEVAL_TINYDB_REVIEW_IMAGE"]
         questions, specs, definition = assemble(root, images, Path(interview_path))
+        release = os.environ.get("VIBEEVAL_R2_RELEASE")
+        if release:
+            # Older invitations and open attempts keep their pinned provider and resources.
+            directory = Path(release)
+            current_images = {
+                **images,
+                **json.loads((directory / "images.json").read_bytes()),
+            }
+            current, revised, definition = assemble(
+                directory / "contexts", current_images, Path(interview_path)
+            )
+            stages = []
+            for stage in definition.stages:
+                if stage.submission_kind == "code":
+                    spec = revised[stage.resource_ref]
+                    specs[spec.task_version] = spec
+                    stage = stage.model_copy(update={"resource_ref": spec.task_version})
+                stages.append(stage)
+            from app.exam_flow.types import digest
+
+            definition = definition.model_copy(
+                update={
+                    "stages": tuple(stages),
+                    "version": digest([s.model_dump(mode="json") for s in stages]),
+                }
+            )
+            questions.items.update(current.items)
+            questions.code_questions.items.update(current.code_questions.items)
+
     else:
         questions, specs, definition = load_exam(root, images)
     app = build_stage_app(questions, specs)

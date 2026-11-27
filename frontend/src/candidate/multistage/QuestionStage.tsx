@@ -7,11 +7,11 @@ type Question = { id: string; title: string; body: string; answer_schema?: { max
 type SavedDraft = { revision: number; value: unknown }
 type Draft = { value: string; revision: number; status: 'saved' | 'dirty' | 'saving' | 'conflict' | 'error'; message?: string; serverValue?: string }
 type FrozenCode = { workspace_id: string; sha256: string; coding_phase_id: string; closed_at: number }
-type EvidenceItem = { id: string; kind: 'message' | 'approval' | 'edit' | 'test_run'; actor: 'candidate' | 'agent' | 'system'; at: number; data: Record<string, unknown> }
+type EvidenceItem = { id: string; kind: 'message' | 'approval' | 'edit' | 'test_run' | 'terminal' | 'command'; actor: 'candidate' | 'agent' | 'system'; at: number; data: Record<string, unknown> }
 type EvidencePage = { coding_phase_id: string; sha256: string; completeness: 'complete' | 'partial'; reason: string | null; items: EvidenceItem[]; next_cursor: string | null }
 
 const actorName = { candidate: '本人', agent: 'Agent', system: '系统' }
-const kindName = { message: '消息', approval: '审批', edit: '文件改动', test_run: '测试运行' }
+const kindName = { message: '消息', approval: '审批', edit: '文件改动', test_run: '测试运行', terminal: '终端回显', command: 'Agent 命令' }
 
 function display(value: unknown) {
   if (value === null || value === undefined || value === '') return '无'

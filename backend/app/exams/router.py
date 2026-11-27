@@ -32,9 +32,18 @@ def browser_key(request: Request) -> str | None:
 def recover(request: Request) -> dict | None:
     browser = browser_key(request)
     try:
-        return request.app.state.entry.current(browser) if browser else None
+        record = request.app.state.entry.current(browser) if browser else None
+        if record:
+            attach_managed_room(request, record)
+        return record
     except EntryError as error:
         raise HTTPException(error.status, error.message) from error
+
+
+def attach_managed_room(request, record):
+    from app.admin.rooms import attach_room
+
+    attach_room(request.app.state.entry, request.app.state.exam_flow, record)
 
 
 @router.get("/current")
@@ -83,7 +92,9 @@ def verify(body: VerifyInput, request: Request):
             429, "尝试过于频繁，请最多等待 60 秒后重试", headers={"Retry-After": "60"}
         )
     try:
-        return request.app.state.entry.admit(body.token.strip(), browser)
+        record = request.app.state.entry.admit(body.token.strip(), browser)
+        attach_managed_room(request, record)
+        return record
     except EntryError as error:
         if error.status == 401:
             failures[address].append(now)

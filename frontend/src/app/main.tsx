@@ -4,7 +4,9 @@ import Login from '../admin/login/Login';
 import Entry from '../candidate/entry/Entry';
 import Overview from '../admin/submissions/Overview';
 import Detail from '../admin/submissions/Detail';
+import FourStageReview from '../admin/submissions/FourStageReview';
 import StageReview from '../admin/submissions/StageReview';
+import ExaminerRooms from '../admin/submissions/ExaminerRooms';
 import { api, ApiError, type Examiner } from '../shared/api';
 import './style.css';
 
@@ -34,7 +36,10 @@ function App() {
   const search = location.includes('?') ? location.slice(location.indexOf('?')) : '';
   const detailMatch = pathname.match(/^\/admin\/submissions\/([^/]+)$/);
   const detailId = detailMatch?.[1] ?? null;
-  const stagedAdmin = pathname === '/admin/r2' || pathname.startsWith('/admin/r2/submissions/');
+  const stagedAdmin = pathname === '/admin/r2' || pathname.startsWith('/admin/r2/');
+  const fourId = pathname.match(/^\/admin\/r2\/four\/([^/]+)$/)?.[1] ?? null;
+  const roomId = pathname.match(/^\/admin\/r2\/rooms\/([^/]+)$/)?.[1] ?? null;
+  const roomAdmin = pathname === '/admin/r2/rooms' || roomId !== null;
   const stagedId = pathname.match(/^\/admin\/r2\/submissions\/([^/]+)$/)?.[1] ?? null;
   const source = new URLSearchParams(search).get('source') === 'demo' ? 'demo' : 'live';
   const expireSession = useCallback(() => {
@@ -104,7 +109,10 @@ function App() {
       {loading ? <div className="status-panel" role="status">正在确认登录状态…</div>
         : connectionError ? <div className="status-panel"><h1>暂时无法连接服务</h1><p role="alert">{connectionError}</p><button className="primary" onClick={() => void checkSession()}>重新连接</button></div>
         : user ? stagedAdmin
-          ? <StageReview submissionId={stagedId} search={search} onNavigate={navigate} onExpired={expireSession} />
+          ? roomAdmin
+            ? <ExaminerRooms key={roomId ?? 'list'} roomId={roomId} onNavigate={navigate} onExpired={expireSession} />
+            : fourId ? <FourStageReview key={fourId} sid={fourId} onExpired={expireSession} />
+            : <StageReview submissionId={stagedId} search={search} onNavigate={navigate} onExpired={expireSession} />
           : detailId
           ? <Detail key={`${source}:${detailId}`} submissionId={detailId} source={source} search={search}
             onNavigate={navigate} onExpired={expireSession} onLogout={() => void logout()}

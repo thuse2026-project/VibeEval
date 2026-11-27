@@ -11,7 +11,7 @@ from app.exam_flow.types import Contract, FlowError, Identifier
 
 class EvidenceItem(Contract):
     id: Identifier
-    kind: Literal["message", "approval", "edit", "test_run"]
+    kind: Literal["message", "approval", "edit", "test_run", "terminal", "command"]
     actor: Literal["candidate", "agent", "system"]
     at: int = Field(strict=True, ge=0)
     data: dict[str, JsonValue]

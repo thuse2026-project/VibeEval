@@ -1,0 +1,54 @@
+:root{font:15px/1.55 "Segoe UI","Microsoft YaHei",sans-serif;color:#213146;background:#f2f5f9;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0}
+header{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#fff;border-bottom:1px solid #dbe4ee;padding:17px max(24px,calc((100vw - 1100px)/2))}
+header strong{font-size:19px}
+header strong span,.muted,small{color:#526681}
+main{max-width:1148px;margin:auto;padding:20px 24px 48px}
+h1,h2,h3,p{margin:0 0 10px}
+h1{font-size:32px;letter-spacing:-.035em}
+h2{font-size:21px}
+h3{font-size:16px}
+button,input,select,textarea{font:inherit;color:inherit;background:white;border:1px solid #cbd8e7;border-radius:7px;padding:8px 12px}
+button{cursor:pointer;font-weight:600}
+button:hover{background:#edf3fb}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid #275bbb;outline-offset:2px}
+.primary{background:#275692;color:#fff;border-color:#275692}
+.primary:hover{background:#1a4379}
+.between,.actions,.filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.between{justify-content:space-between}
+.heading{margin-bottom:17px}
+.panel{background:white;border:1px solid #dbe4ee;border-radius:12px;padding:16px 20px;margin-bottom:12px}
+.listing{padding:0;overflow:hidden}
+.filters{padding:14px 16px;border-bottom:1px solid #e3eaf2}
+.table-scroll{overflow:auto}
+table{width:100%;border-collapse:collapse;min-width:620px;text-align:left}
+td,th{padding:12px 16px;border-bottom:1px solid #e6edf5}
+th{font-weight:600;color:#4f627b;background:#f9fbfe}
+td small,aside small{display:block}
+.badge{display:inline-block;font-size:13px;border-radius:5px;padding:2px 7px;color:#254c80;background:#edf3fc;vertical-align:middle}
+h1 .badge{margin-left:12px;letter-spacing:normal}
+.token{background:#f8fbff}
+code{overflow-wrap:anywhere;user-select:all}
+.empty{padding:16px}
+.notice{min-height:1.55em;color:#234f87}
+.back{margin-bottom:12px}
+.exam{display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px}
+aside button{display:block;width:100%;text-align:left;margin-bottom:8px}
+aside .selected,.tabs [aria-pressed=true]{background:#e6effb;border-color:#7497c4;color:#163f77}
+.tabs{display:flex;gap:8px;margin:0 0 12px}
+.score{color:#234f87;font-size:22px}
+.parts{margin:0}
+.parts div{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid #edf1f6}
+dd{margin:0;white-space:nowrap}
+.timeline{list-style:none;padding:0 0 0 14px;border-left:2px solid #dbe6f4}
+.timeline li{padding:8px 0;border-bottom:1px solid #edf1f6}
+summary{cursor:pointer;color:#234f87}
+pre{overflow:auto;background:#17253a;color:#eff6ff;padding:10px;border-radius:5px;white-space:pre}
+dialog{width:min(460px,calc(100vw - 30px));border-radius:12px;border:1px solid #bfcfe3;color:inherit;padding:22px;box-shadow:0 16px 60px #12294740}
+dialog::backdrop{background:#162a4777}
+label{display:block;margin:12px 0}
+label input,label textarea{display:block;width:100%;margin-top:5px}
+textarea{min-height:90px;resize:vertical}
+[role=alert]{color:#9f2638}
+@media(max-width:650px){main{padding:12px}.exam{grid-template-columns:1fr}aside{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.panel{padding:12px}.listing{padding:0}}

@@ -530,8 +530,8 @@ class StageResourceTests(unittest.TestCase):
             ([edited], [started], None),
         )
         self.assertEqual(second["sha256"], frozen["sha256"])
-        self.assertEqual(second["completeness"], "partial")
-        self.assertEqual(second["reason"], "CAPTURE_GAP")
+        self.assertEqual(second["completeness"], "complete")
+        self.assertIsNone(second["reason"])
         self.sandbox.volumes[frozen["workspace_id"]][
             "solution.py"
         ] = "different after freeze"
