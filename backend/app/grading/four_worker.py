@@ -249,6 +249,7 @@ def propose(loaded, client=None):
             failure=failure,
         )
         if failure:
+            suggestion = None
             status = "retryable" if not history else "needs_review"
         elif interview:
             status = (

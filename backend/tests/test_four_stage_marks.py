@@ -4,13 +4,14 @@ import json
 import unittest
 from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
 from app.admin import four_stage
 from app.db.models import ExamGradePublication
-from app.grading.four_worker import validate_text
+from app.grading.four_worker import propose, validate_text
+from app.grading.interview import Rubric
 
 
 class FourStageMarkTests(unittest.TestCase):
@@ -34,6 +35,72 @@ class FourStageMarkTests(unittest.TestCase):
         for override in [dict(key="R1.other"), dict(score=16), dict(quote="伪造引文")]:
             with self.subTest(override=override), self.assertRaises(ValueError):
                 self.evaluate(**override)
+
+    def test_interview_with_unverified_citations_never_offers_a_score(self):
+        questions = ["q1", "q2"]
+        rule = Rubric(
+            version="test",
+            prompt_version="test",
+            task_version="test",
+            questions_sha256="a" * 64,
+            questions={
+                q: {"check": dict(maximum=10, anchor="核对", evidence_required=True)}
+                for q in questions
+            },
+        )
+        row = SimpleNamespace(basis={}, components={"answers": {"status": "pending"}})
+        db = MagicMock()
+        db.get.return_value = row
+        resources = SimpleNamespace(
+            factory=SimpleNamespace(begin=lambda: nullcontext(db))
+        )
+        criteria = [
+            dict(key=q + ".check", maximum=10, group="answers", answer_id=q)
+            for q in questions
+        ]
+        flat = dict(
+            marks=[
+                dict(key=c["key"], score=5, quote="测试", reason="核对结果")
+                for c in criteria
+            ],
+            review_note="",
+        )
+        client = SimpleNamespace(
+            complete=AsyncMock(
+                return_value={"choices": [{"message": {"content": json.dumps(flat)}}]}
+            )
+        )
+        exported = dict(
+            files=[],
+            content={
+                "artifact": {
+                    "evidence": dict(
+                        coding_phase_id="phase_test",
+                        sequence=0,
+                        completeness="complete",
+                    )
+                }
+            },
+        )
+        loaded = (
+            {"submission_id": "test"},
+            exported,
+            resources,
+            {},
+            questions,
+            {q: "测试" for q in questions},
+            criteria,
+            rule,
+        )
+        with (
+            patch("app.grading.four_worker.page", return_value=([], None)),
+            patch("app.admin.stage_evaluation.rule_for", return_value={"baseline": {}}),
+        ):
+            for status in ("retryable", "needs_review"):
+                result = propose(loaded, client)
+                self.assertEqual(result["status"], status)
+                self.assertEqual(result["attempts"][-1]["failure"], "EVIDENCE_REQUIRED")
+                self.assertIsNone(result["suggestion"])
 
 
 class EvidenceReviewTests(unittest.TestCase):

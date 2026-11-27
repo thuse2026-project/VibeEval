@@ -86,6 +86,9 @@ const failureLabels: Record<string, string> = {
   GRADING_BINDING_CHANGED: "评分材料或模型配置已变更",
   INPUT_EXCEEDS_BUDGET: "材料超过模型输入上限",
   MISSING_MODEL_CONTENT: "模型未返回评分内容",
+  EVIDENCE_REQUIRED: "缺少可核验的冻结文件或操作记录引用",
+  ANSWER_QUOTE_MISMATCH: "所引文字与封存答案不一致",
+  CRITERION_SET_MISMATCH: "模型返回的分项与量表不一致",
 };
 
 export default function FourStageReview({
@@ -170,7 +173,8 @@ export default function FourStageReview({
       setBusy(false);
     }
   }
-  const suggestion = data?.components.answers.suggestion;
+  const answers = data?.components.answers;
+  const suggestion = answers?.attempts?.at(-1)?.failure ? null : answers?.suggestion;
   const marks =
     suggestion?.marks ??
     suggestion?.questions?.flatMap((q) =>
