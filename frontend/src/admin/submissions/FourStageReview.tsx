@@ -182,7 +182,7 @@ export default function FourStageReview({
   const review = data?.components.examiner_review;
   const partial = data?.basis.evidence?.completeness === "partial";
   return (
-    <main className="r2-review">
+    <div className="r2-review four-stage-review">
       <a href="/admin/r2/submissions">返回答卷列表</a>
       {error && <p role="alert">{error}</p>}
       {!data ? (
@@ -394,9 +394,9 @@ export default function FourStageReview({
             <h2>考官评定</h2>
             <fieldset disabled={locked}>
               {data.rubric.map((c) => (
-                <div key={c.key} style={{ display: "block", margin: "10px 0" }}>
+                <div key={c.key} className="review-criterion">
                   <label>
-                    {c.key} · {c.label}{" "}
+                    <span>{c.label}</span>{" "}
                     <input
                       aria-label={c.key}
                       disabled={!!pending[c.key]}
@@ -525,6 +525,6 @@ export default function FourStageReview({
           </section>
         </>
       )}
-    </main>
+    </div>
   );
 }

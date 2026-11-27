@@ -19,8 +19,9 @@ def upgrade():
         if not rooms <= existing:
             raise RuntimeError("Incomplete examiner room schema")
         if "stage_evidence" not in existing:
-            from alembic.util import load_python_file
             from pathlib import Path
+
+            from alembic.util import load_python_file
 
             load_python_file(Path(__file__).parent, "0013_stage_evidence.py").upgrade()
         return
