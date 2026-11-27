@@ -6,13 +6,14 @@ import { examRequest, v2, type Attempt } from './api'
 
 type Props = {
   state: Attempt; remaining: number; busy: boolean; modelReady?: boolean
+  saveNote?: () => void; discardNote?: () => Promise<boolean>; processing?: boolean
   notes?: string; editNotes?: (value: string) => void; noteRevision?: number
   saveState: SaveState; alerts?: ReactNode
   submitLabel: string; submit: () => Promise<void>
 }
 
 export function ReadingWorkspace({ state, remaining, busy, modelReady, notes, editNotes,
-  noteRevision = 0, saveState, alerts, submitLabel, submit }: Props) {
+  saveNote, discardNote, processing, noteRevision = 0, saveState, alerts, submitLabel, submit }: Props) {
   const phase = state.current_phase.id
   const prefix = v2 + '/phases/' + phase
   const [files, setFiles] = useState<FileEntry[]>([])
@@ -53,11 +54,19 @@ export function ReadingWorkspace({ state, remaining, busy, modelReady, notes, ed
     {error && <div role="alert" className="workspace-alert">{error}
       <button onClick={() => { setError(''); setRetry(i => i + 1) }}>重新读取</button></div>}
     <WorkspaceScreen title={state.current_stage.title + ' · ' + state.current_phase.title}
-      remaining={remaining} resizable files={tree} activePath={path}
+      initialProblem={state.current_phase.key === 'inspect'} remaining={remaining} resizable files={tree} activePath={path}
       filesPane={(select, selected) => <FileTree files={tree} directories activePath={selected} onSelect={select} />}
-      problem={() => <div className="problem-pane"><h2>{state.current_phase.title}</h2>
+      problem={selectFile => <div className="problem-pane"><h2>{state.current_phase.title}</h2>
         {editNotes ? '阅读仓库源码，可在 note.md 记录探索笔记。结束探索后独立回答五问。'
-          : '审阅 repository/tinydb/table.py 的表操作，并查阅相关依赖。结束阅读后，在缺陷报告中说明判断依据。'}</div>}
+          : <><p>同事修改了 TinyDB 的表操作。请按以下公开规则审阅实现，并记录你能用代码解释的行为差异。</p>
+            <button onClick={() => selectFile('repository/tinydb/table.py')}>打开 table.py</button>
+            <h3>预期行为</h3><ul>
+              <li>各命名表相互独立。插入的文档可读，自动编号与当前表已有编号不冲突，重新打开数据库后仍可插入。</li>
+              <li>查询返回当前匹配的文档；更新或删除后再次查询须反映新状态。字段缺失不应中断普通查询。</li>
+              <li>更新只修改选定记录的指定字段，删除只移除选定记录。</li>
+              <li>JSONStorage 重新打开后保留已写入的数据；MemoryStorage 只在同一实例内保留。</li>
+            </ul><h3>阅读范围</h3><p>使用内置 Document、整数编号和可 JSON 序列化的字典。可沿 insert、search、update 或 remove 追踪输入和结果，按需查看 database.py、queries.py 和 storages.py。不要求处理事务、并发写入或外部扩展。</p>
+            <p>阅读 20 分钟后，另有 10 分钟填写位置、触发条件、实际行为、期望行为和根因；可报告未发现问题。</p></>}</div>}
       openFiles={opened.map(name => ({ path: name, readonly: name !== 'note.md' || !editNotes,
         dirty: name === 'note.md' && !!editNotes && saveState !== 'saved' }))}
       content={isNote ? notes ?? '' : documents[path ?? ''] ?? ''}
@@ -68,6 +77,7 @@ export function ReadingWorkspace({ state, remaining, busy, modelReady, notes, ed
       sessionId={null} agentScope={agentAllowed ? phase : null} agentPrefix="/api/v2/phases/"
       agentCanExecute={false} agentModelReady={modelReady} initialAgentOpen={agentAllowed}
       saveState={saveState} saveHint="自动保存 · UTF-8"
+      saveFile={editNotes ? saveNote : undefined} discardFile={discardNote} processing={processing}
       busy={busy} submitLabel={submitLabel} onSubmit={submit} directSubmit />
   </div>
 }

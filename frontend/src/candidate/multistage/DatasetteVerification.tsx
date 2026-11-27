@@ -112,13 +112,13 @@ export function DatasetteVerification({ task, phaseId, disabled, flush, openTerm
       setCopying(false)
       return
     }
-    openTerminal()
     try {
       await navigator.clipboard.writeText(command)
       setStatus(`已复制${label}命令。请在终端提示符后粘贴并执行。`)
     } catch {
       setStatus('剪贴板不可用，请展开命令并手动复制到终端。')
     } finally {
+      openTerminal()
       setCopying(false)
     }
   }

@@ -15,7 +15,7 @@ import './multistage.css'
 const PRACTICE_DEADLINE = 253402300799
 
 function CodeStage({ state, modelReady, refresh, remaining }: {
-  state: Attempt; modelReady: boolean; refresh: () => Promise<void>; remaining: number
+  state: Attempt; modelReady: boolean; refresh: (updated?: Attempt) => Promise<void>; remaining: number
 }) {
   const phase = state.current_phase.id
   const prefix = `${v2}/phases/${phase}`
@@ -164,8 +164,8 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       if (latest.current_phase.id !== phase || latest.current_phase.status !== 'active') { await refresh(); return }
       if (latest.next_action === 'finish_phase') {
         if (!submissionKey.current) submissionKey.current = { key: crypto.randomUUID(), summary: '' }
-        await command('/phases/' + phase + '/finish', latest, {}, submissionKey.current.key)
-        await refresh()
+        const updated = await command<Attempt>('/phases/' + phase + '/finish', latest, {}, submissionKey.current.key)
+        await refresh(updated)
         return
       }
       if (submissionKey.current?.summary !== text) submissionKey.current = { key: crypto.randomUUID(), summary: text }
@@ -202,6 +202,14 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       loadingPath={loadingPath}
       activeReadonly={!draft || draft.readonly || locked || !state.capabilities.includes('write_repository')}
       saveState={queue.saving ? 'saving' : openFiles.some(item => queue.drafts[item.path].error) ? 'error' : openFiles.some(item => item.dirty) ? 'idle' : 'saved'}
+      saveFile={() => handle(() => queue.save(selected))}
+      discardFile={async path => {
+        window.clearTimeout(autosave.current.get(path))
+        await queue.settle()
+        const item = queue.drafts[path]
+        if (item) { delete queue.drafts[path]; setRevision(value => value + 1) }
+        return true
+      }}
       busy={locked} onSelectFile={choose} onEdit={edit} onSubmit={submit} continuesToQuestions={continuesToQuestions}
       submitLabel={continuesToQuestions ? '结束编程，固定代码并进入问答' : '提交本阶段'}
       tabSelectionDisabled={busy || agentBusy || remaining <= 0}
@@ -226,7 +234,7 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       beforeAgentRun={() => queue.flush()} onAgentBusy={setAgentBusy} onAgentWorkspaceChange={onAgentWorkspaceChange}
       actions={<div className="r2-file-actions">
         <span aria-label="阶段进度">{state.stages.findIndex(item => item.id === state.current_stage.id) + 1}/{state.stages.length}</span>
-        <button disabled={locked || queue.saving} onClick={() => handle(() => queue.flush())}>保存代码</button>
+        <button disabled={locked || queue.saving} onClick={() => handle(() => queue.flush())}>保存全部</button>
         <button disabled={locked || !selected} onClick={() => handle(() => select(selected, true))}>重新读取文件</button>
       </div>}
       submissionFields={continuesToQuestions ? undefined : <div className="r2-summary">
@@ -255,7 +263,7 @@ export default function MultiStage() {
     setState(value)
   }
 
-  async function refresh() { accept(await current()) }
+  async function refresh(updated?: Attempt) { accept(updated ?? await current()) }
 
   useEffect(() => {
     document.title = '考生工作台 · VibeEval'

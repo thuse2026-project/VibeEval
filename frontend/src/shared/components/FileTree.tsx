@@ -39,6 +39,7 @@ function sortFiles(files: FileEntry[]): FileEntry[] {
 
 export function FileTree({ files, activePath, onSelect, directories = false }: Props) {
   const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => directories ? directoryTree(files) : null, [directories, files])
 
   const fileButton = (file: FileEntry, label: string) => (
@@ -56,8 +57,11 @@ export function FileTree({ files, activePath, onSelect, directories = false }: P
   function branch(nodes: Map<string, Node>) {
     return [...nodes.values()].sort((a, b) => Number(!!a.file) - Number(!!b.file) || a.name.localeCompare(b.name)).map(node =>
       node.file ? fileButton(node.file, node.name) : (
-        <details key={node.path} open={activePath?.startsWith(node.path + '/') || undefined}>
-          <summary title={node.path}>{node.name}</summary>
+        <details key={node.path} open={expanded[node.path] ?? node.path === 'repository'}>
+          <summary title={node.path} onClick={event => {
+            event.preventDefault()
+            setExpanded(prior => ({ ...prior, [node.path]: !(prior[node.path] ?? node.path === 'repository') }))
+          }}>{node.name}</summary>
           <div className="file-branch">{branch(node.children)}</div>
         </details>
       ))

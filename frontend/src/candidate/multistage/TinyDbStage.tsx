@@ -141,7 +141,7 @@ export function TinyDbStage({
   state: Attempt
   remaining: number
   modelReady: boolean
-  refresh: () => Promise<void>
+  refresh: (updated?: Attempt) => Promise<void>
 }) {
   const phase = state.current_phase.id
   const prefix = v2 + '/phases/' + phase
@@ -302,6 +302,10 @@ export function TinyDbStage({
           state.next_action === 'finish_phase'
             ? '/phases/' + phase + '/finish'
             : '/stages/' + state.current_stage.id + '/submit'
+        if (state.next_action === 'finish_phase') {
+          await refresh(await command<Attempt>(cmd, latest, {}, transitionKey.current))
+          return
+        }
         await command(cmd, latest, {}, transitionKey.current)
       }
       await refresh()
@@ -360,6 +364,19 @@ export function TinyDbStage({
   const locked = !loaded || busy || !!conflict
   if (explore) return <ReadingWorkspace state={state} remaining={remaining} modelReady={modelReady}
     busy={locked} saveState={conflict ? 'conflict' : error ? 'error' : status === '已保存' ? 'saved' : 'idle'}
+    processing={busy} saveNote={() => void flush().catch(e => setError(String(e)))}
+    discardNote={async () => {
+      window.clearTimeout(timer.current)
+      try {
+        await pending.current?.catch(() => undefined)
+        const note = await examRequest<Draft>(prefix + '/notes')
+        dirty.current.delete('notes')
+        revisions.current.notes = note.revision
+        setValues(old => ({ ...old, notes: note.value ?? '' }))
+        setConflict(null); setError(''); setStatus('已保存')
+        return true
+      } catch (e) { setError(String(e)); return false }
+    }}
     notes={readNotes && loaded ? String(values.notes ?? '') : undefined} noteRevision={revisions.current.notes}
     editNotes={canEditNotes ? value => update('notes', value) : undefined}
     submitLabel={canEditNotes ? '结束探索，进入独立答题' : '结束阅读，填写报告'} submit={finish} alerts={alerts} />

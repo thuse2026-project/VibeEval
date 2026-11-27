@@ -53,7 +53,7 @@ test('R2 Agent history renders safe Markdown after restoring a conversation', as
 
   await page.goto('/r2-workspace')
   await expect(page.getByRole('button', { name: 'Agent', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Agent', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Agent', exact: true })).toHaveAttribute('aria-expanded', 'true')
 
   const rendered = page.locator('.agent-message.assistant .agent-markdown')
   await expect(rendered.getByRole('heading', { name: 'Filter plan' })).toBeVisible()
@@ -65,7 +65,7 @@ test('R2 Agent history renders safe Markdown after restoring a conversation', as
   await expect(rendered).toContainText('<script>window.agentMarkdownXss = true</script>')
 
   await page.reload()
-  await page.getByRole('button', { name: 'Agent', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Agent', exact: true })).toHaveAttribute('aria-expanded', 'true')
   await expect(page.getByLabel('对话', { exact: true })).toHaveValue('conversation-markdown')
   await expect(page.locator('.agent-message.assistant .agent-markdown').getByRole('heading', { name: 'Filter plan' })).toBeVisible()
 })

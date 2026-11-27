@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import DOMPurify from 'dompurify'
-import { Marked } from 'marked'
+import { renderMarkdown } from '../../shared/markdown'
 import {
   createAgentApi,
   streamAgentEvents,
@@ -29,23 +28,6 @@ type Props = {
   onWorkspaceChange?: (change: AgentFileChange) => void
 }
 type Message = { role: 'user' | 'assistant'; text: string }
-
-const markdown = new Marked({
-  gfm: true,
-  renderer: {
-    html: token => token.text.replace(/[&<>"']/g, character => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    })[character]!),
-  },
-})
-
-function renderMarkdown(source: string) {
-  return { __html: DOMPurify.sanitize(markdown.parse(source) as string) }
-}
 
 const activeStatuses = new Set(['queued', 'running', 'waiting_approval', 'waiting_user_input', 'waiting_operation'])
 const statusLabel: Record<string, string> = {
@@ -395,12 +377,12 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
         <button type="button" disabled={busy} onClick={() => setTitleEdit(null)}>取消</button>
       </form> : <div className="agent-conversation-bar">
         <select disabled={interactionBusy} aria-label="对话" value={conversationId} onChange={event => void selectConversation(event.target.value)}>
-          <option value="">发送时自动新建对话</option>
+          <option value="">新对话</option>
           {conversations.map(item => <option key={item.conversation_id} value={item.conversation_id}>{item.title || '新对话'}</option>)}
         </select>
         <button disabled={interactionBusy || !selectedConversation} onClick={() => selectedConversation
           && setTitleEdit({ id: selectedConversation.conversation_id, value: selectedConversation.title })}>改名</button>
-        <button aria-label="新建对话" title="新建对话" onClick={() => setTitleEdit({ id: null, value: '' })} disabled={interactionBusy}>＋</button>
+        <button aria-label="新建对话" title="新建对话" onClick={() => setTitleEdit({ id: null, value: '' })} disabled={interactionBusy}>＋ 新建</button>
       </div>}
       <div className="agent-messages" aria-live="polite">
         {messages.length === 0 && <p className="agent-empty">可以让 Agent 阅读已保存的文件并给出计划。{canExecute && '切到执行模式后，修改文件和运行命令会请求批准。'}</p>}
@@ -440,11 +422,15 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
           <option value="plan">只读计划</option>
           <option value="default">执行需批准</option>
         </select>}
-        <textarea aria-label="发送给 Agent" placeholder="阅读文件、解释代码或提出修改" value={draft} onChange={event => setDraft(event.target.value)} disabled={interactionBusy || !!titleEdit} maxLength={12000} />
-        <div className="agent-run-state">
+        <textarea onKeyDown={event => {
+          if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
+          event.preventDefault()
+          if (!event.repeat && !interactionBusy && draft.trim()) event.currentTarget.form?.requestSubmit()
+        }} aria-label="发送给 Agent" placeholder="阅读文件、解释代码或提出修改" value={draft} onChange={event => setDraft(event.target.value)} disabled={interactionBusy || !!titleEdit} maxLength={12000} />
+        <div className="agent-run-state" data-state={run?.status ?? 'idle'}>
           <span role="status" title={run?.error_code ?? streamState}>{run
             ? `运行状态：${statusLabel[run.status] ?? run.status}${run.error_code ? ` · ${runErrorLabel[run.error_code] ?? run.error_code}` : ''}`
-            : streamState}</span>
+            : busy ? '正在处理…' : '就绪'}</span>
           {run && activeStatuses.has(run.status)
             ? <button type="button" disabled={busy} onClick={() => void stop()}>停止</button>
             : <button className="primary" disabled={interactionBusy || !!titleEdit || !draft.trim()}>{busy ? '处理中…' : '发送'}</button>}
