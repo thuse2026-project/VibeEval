@@ -7,6 +7,7 @@ type Criterion = {
   maximum: number;
   answer_id: string;
   group: string;
+  evidence_required?: boolean;
 };
 type Stage = {
   submission_id: string | null;
@@ -46,13 +47,26 @@ type Material = {
   };
   files: { path: string; content: string }[];
   components: {
-    objective?: { score: number | null; status: string; cap?: number };
-    answers: { status: string; suggestion?: Proposal | null };
+    objective?: {
+      score: number | null;
+      status: string;
+      cap?: number | null;
+      groups?: { name: string; core?: boolean; passed: boolean }[];
+    };
+    answers: {
+      status: string;
+      reason?: string;
+      attempts?: { failure?: string | null }[];
+      suggestion?: Proposal | null;
+    };
     examiner_review?: {
-      scores: Record<string, number>;
+      scores: Record<string, number | null>;
+      evidence_notes?: Record<string, string>;
+      evidence_refs?: Record<string, string>;
       reason: string;
       gap_reviewed: boolean;
-      final: number;
+      raw: number | null;
+      final: number | null;
     };
   };
   exam: {
@@ -66,6 +80,13 @@ type EvidencePage = { items: Evidence[]; next_cursor: number | null };
 const pretty = (v: unknown) =>
   typeof v === "string" ? v : JSON.stringify(v, null, 2);
 const base = "/api/v1/admin/r2/submissions";
+const failureLabels: Record<string, string> = {
+  MODEL_UNAVAILABLE: "模型服务不可用",
+  INVALID_RESPONSE_FORMAT: "模型回复格式未通过校验",
+  GRADING_BINDING_CHANGED: "评分材料或模型配置已变更",
+  INPUT_EXCEEDS_BUDGET: "材料超过模型输入上限",
+  MISSING_MODEL_CONTENT: "模型未返回评分内容",
+};
 
 export default function FourStageReview({
   sid,
@@ -78,12 +99,16 @@ export default function FourStageReview({
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const [scores, setScores] = useState<Record<string, string>>({}),
+    [pending, setPending] = useState<Record<string, boolean>>({}),
+    [notes, setNotes] = useState<Record<string, string>>({}),
+    [refs, setRefs] = useState<Record<string, string>>({}),
     [reason, setReason] = useState(""),
     [ack, setAck] = useState(false);
   const [items, setItems] = useState<Evidence[]>([]),
     [cursor, setCursor] = useState<number | null>(0),
     [file, setFile] = useState("");
   const [confirm, setConfirm] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const path = sid + "/four-stage";
   const fail = useCallback(
     (e: unknown) => {
@@ -102,8 +127,16 @@ export default function FourStageReview({
       ),
     );
     setReason(r?.reason ?? "");
+    setPending(
+      Object.fromEntries(
+        m.rubric.map((c) => [c.key, r?.scores[c.key] === null]),
+      ),
+    );
+    setNotes(r?.evidence_notes ?? {});
+    setRefs(r?.evidence_refs ?? {});
     setAck(r?.gap_reviewed ?? false);
     setConfirm(false);
+    setDirty(false);
   }, [path]);
   useEffect(() => {
     void reload().catch(fail);
@@ -145,6 +178,9 @@ export default function FourStageReview({
     ) ??
     [];
   const locked = !!data?.exam.publication || busy;
+  const objective = data?.components.objective;
+  const review = data?.components.examiner_review;
+  const partial = data?.basis.evidence?.completeness === "partial";
   return (
     <main className="r2-review">
       <a href="/admin/r2/submissions">返回答卷列表</a>
@@ -228,6 +264,27 @@ export default function FourStageReview({
                 </button>
               </p>
             )}
+            {objective?.cap != null && (
+              <p>
+                本题上限 {objective.cap} 分。未通过的核心测试：
+                {objective.groups
+                  ?.filter((g) => g.core && !g.passed)
+                  .map((g) => g.name)
+                  .join("、") || "核心修复验证"}
+                。
+              </p>
+            )}
+            {review && (
+              <p>
+                {review.final === null ? (
+                  "仍有分项待复核，整场暂不能发布。"
+                ) : (
+                  <>
+                    原始合计 {review.raw} 分 · 本题最终 {review.final} 分
+                  </>
+                )}
+              </p>
+            )}
             <p>
               问答建议 ·{" "}
               {(
@@ -252,6 +309,28 @@ export default function FourStageReview({
                 生成评分建议
               </button>
             </p>
+            {!!data.components.answers.attempts?.length && (
+              <details open={data.components.answers.status === "needs_review"}>
+                <summary>
+                  模型评分记录（{data.components.answers.attempts.length} 次）
+                </summary>
+                <ol>
+                  {data.components.answers.attempts.map((a, i) => (
+                    <li key={i}>
+                      {a.failure
+                        ? (failureLabels[a.failure] ?? a.failure)
+                        : "已返回分项建议"}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+            {data.components.answers.reason && (
+              <p>
+                {failureLabels[data.components.answers.reason] ??
+                  data.components.answers.reason}
+              </p>
+            )}
             {suggestion && (
               <details>
                 <summary>分项建议、理由与引用</summary>
@@ -268,7 +347,9 @@ export default function FourStageReview({
                 ))}
                 <button
                   disabled={locked}
-                  onClick={() =>
+                  onClick={() => {
+                    setDirty(true);
+                    setConfirm(false);
                     setScores((old) => ({
                       ...old,
                       ...Object.fromEntries(
@@ -276,8 +357,8 @@ export default function FourStageReview({
                           .filter((m) => m.key && m.score != null)
                           .map((m) => [m.key, String(m.score)]),
                       ),
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   将建议分填入本题草稿
                 </button>
@@ -285,12 +366,25 @@ export default function FourStageReview({
             )}
           </section>
           <form
+            onChange={() => {
+              setDirty(true);
+              setConfirm(false);
+            }}
             onSubmit={(e) => {
               e.preventDefault();
               void action(path + "/review", {
                 revision: data.revision,
                 scores: Object.fromEntries(
-                  Object.entries(scores).map(([k, v]) => [k, Number(v)]),
+                  Object.entries(scores).map(([k, v]) => [
+                    k,
+                    pending[k] || !v.trim() ? null : Number(v),
+                  ]),
+                ),
+                evidence_notes: Object.fromEntries(
+                  Object.entries(notes).filter(([, v]) => v.trim()),
+                ),
+                evidence_refs: Object.fromEntries(
+                  Object.entries(refs).filter(([k, v]) => !pending[k] && v),
                 ),
                 reason,
                 gap_reviewed: ack,
@@ -300,25 +394,82 @@ export default function FourStageReview({
             <h2>考官评定</h2>
             <fieldset disabled={locked}>
               {data.rubric.map((c) => (
-                <label
-                  key={c.key}
-                  style={{ display: "block", margin: "10px 0" }}
-                >
-                  {c.key} · {c.label}{" "}
-                  <input
-                    aria-label={c.key}
-                    required
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max={c.maximum}
-                    value={scores[c.key] ?? ""}
-                    onChange={(e) =>
-                      setScores({ ...scores, [c.key]: e.target.value })
-                    }
-                  />{" "}
-                  / {c.maximum}
-                </label>
+                <div key={c.key} style={{ display: "block", margin: "10px 0" }}>
+                  <label>
+                    {c.key} · {c.label}{" "}
+                    <input
+                      aria-label={c.key}
+                      disabled={!!pending[c.key]}
+                      required={!pending[c.key]}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max={c.maximum}
+                      value={scores[c.key] ?? ""}
+                      onChange={(e) =>
+                        setScores({ ...scores, [c.key]: e.target.value })
+                      }
+                    />{" "}
+                    / {c.maximum}
+                  </label>{" "}
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={!!pending[c.key]}
+                      onChange={(e) =>
+                        setPending({ ...pending, [c.key]: e.target.checked })
+                      }
+                    />{" "}
+                    待复核
+                  </label>
+                  {partial && c.evidence_required && !pending[c.key] && (
+                    <label>
+                      依据来源
+                      <select
+                        required
+                        value={refs[c.key] ?? ""}
+                        onChange={(e) =>
+                          setRefs({ ...refs, [c.key]: e.target.value })
+                        }
+                      >
+                        <option value="">选择冻结文件或已读取的操作记录</option>
+                        {refs[c.key]?.startsWith("event:") &&
+                          !items.some(
+                            (i) => "event:" + i.id === refs[c.key],
+                          ) && (
+                            <option value={refs[c.key]}>{refs[c.key]}</option>
+                          )}
+                        {items.map((i) => (
+                          <option key={i.id} value={"event:" + i.id}>
+                            {i.kind} · {i.id}
+                          </option>
+                        ))}
+                        {data.files.map((f) => (
+                          <option key={f.path} value={"file:" + f.path}>
+                            {f.path}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {(pending[c.key] ||
+                    (partial && c.evidence_required) ||
+                    notes[c.key]) && (
+                    <label>
+                      {pending[c.key] ? "缺少的依据" : "本项采用的依据"}
+                      <textarea
+                        required={
+                          !!pending[c.key] || !!(partial && c.evidence_required)
+                        }
+                        maxLength={2000}
+                        value={notes[c.key] ?? ""}
+                        onChange={(e) =>
+                          setNotes({ ...notes, [c.key]: e.target.value })
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
               ))}
               <label>
                 评定依据及调整原因{" "}
@@ -365,7 +516,7 @@ export default function FourStageReview({
               </>
             ) : (
               <button
-                disabled={busy || !data.exam.ready}
+                disabled={busy || dirty || !data.exam.ready}
                 onClick={() => setConfirm(true)}
               >
                 核对并发布

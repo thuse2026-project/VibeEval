@@ -1,7 +1,7 @@
 """Examiner-only four-stage marking and atomic publication of the four results."""
 
 import time
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,21 +44,43 @@ def revision(row, rubric):
     return digest({"basis": row.basis, "components": row.components, "rubric": rubric})
 
 
+def review_criteria(rubric, interview):
+    if interview is None:
+        return rubric
+    return [
+        {
+            **c,
+            "evidence_required": c["group"] == "process"
+            or interview.questions[c["answer_id"]][
+                c["key"].split(".")[-1]
+            ].evidence_required,
+        }
+        for c in rubric
+    ]
+
+
 def exam_state(db, session_id):
     attempt = db.scalar(
         select(ExamFlowAttempt).where(ExamFlowAttempt.session_id == session_id)
     )
     stages = attempt.state_json["stages"]
+    published = db.get(ExamGradePublication, session_id)
     rows = []
     for stage in stages:
         sid = (stage.get("receipt") or {}).get("id")
         job = db.get(StageGradingJob, sid) if sid else None
         review = job.components.get("examiner_review") if job else None
+        needs_gap_review = (
+            review
+            and not published
+            and job.basis.get("evidence", {}).get("completeness") == "partial"
+            and "evidence_refs" not in review
+        )
         rows.append(
             dict(
                 title=stage["definition"]["title"],
                 submission_id=sid,
-                score=review["final"] if review else None,
+                score=review["final"] if review and not needs_gap_review else None,
                 review_hash=digest(review) if review else None,
             )
         )
@@ -67,7 +89,6 @@ def exam_state(db, session_id):
         and [s["definition"]["key"] for s in stages] == STAGES
         and all(r["score"] is not None for r in rows)
     )
-    published = db.get(ExamGradePublication, session_id)
     return dict(
         stages=rows,
         ready=ready,
@@ -78,7 +99,10 @@ def exam_state(db, session_id):
 
 @router.post("/materials")
 def materials(request: Request, sid: str):
-    meta, exported, resources, _, questions, answers, rubric, _ = load(request, sid)
+    meta, exported, resources, _, questions, answers, rubric, interview = load(
+        request, sid
+    )
+    rubric = review_criteria(rubric, interview)
     with resources.factory() as db:
         job = db.get(StageGradingJob, sid)
         return dict(
@@ -118,49 +142,89 @@ class Review(BaseModel):
         extra="forbid", strict=True, allow_inf_nan=False, str_strip_whitespace=True
     )
     revision: str = Field(pattern="^[0-9a-f]{64}$")
-    scores: dict[str, float]
+    scores: dict[str, float | None]
+    evidence_notes: dict[str, Annotated[str, Field(min_length=1, max_length=2000)]] = (
+        Field(default_factory=dict)
+    )
+    evidence_refs: dict[str, str] = Field(default_factory=dict)
     reason: str = Field(min_length=1, max_length=4000)
     gap_reviewed: bool = False
 
 
+def validate_scores(body, rubric, answers, gap, sources):
+    keys = {c["key"] for c in rubric}
+    if (
+        set(body.scores) != keys
+        or (body.evidence_notes.keys() | body.evidence_refs.keys()) - keys
+    ):
+        raise HTTPException(422, "请按本题分项填写评定")
+    if gap and not body.gap_reviewed:
+        raise HTTPException(422, "请核对采集缺口及受影响的分项")
+    for c in rubric:
+        key = c["key"]
+        score = body.scores[key]
+        if (score is None or (gap and c.get("evidence_required"))) and (
+            key not in body.evidence_notes
+        ):
+            raise HTTPException(422, f"{key} 需填写采用的依据或待复核原因")
+        if score is not None and not 0 <= score <= c["maximum"]:
+            raise HTTPException(422, f"{key} 分数超出允许范围")
+        if (
+            gap
+            and c.get("evidence_required")
+            and score is not None
+            and body.evidence_refs.get(key) not in sources
+        ):
+            raise HTTPException(422, f"{key} 请选择本题的冻结文件或操作记录作为依据")
+        answer = answers.get(c["answer_id"])
+        if (
+            c["group"] == "answers"
+            and score
+            and (
+                not answer
+                or isinstance(answer, str)
+                and not answer.strip()
+                or isinstance(answer, dict)
+                and not answer.get("reports")
+            )
+        ):
+            raise HTTPException(422, "封存答案为空的分项只能记零分")
+
+
 @router.post("/review")
 def review(request: Request, sid: str, body: Review, examiner=Depends(current_session)):
-    meta, _, resources, _, _, answers, rubric, _ = load(request, sid)
+    meta, exported, resources, _, _, answers, rubric, interview = load(request, sid)
+    rubric = review_criteria(rubric, interview)
     with resources.factory.begin() as db:
         row = db.get(StageGradingJob, sid, with_for_update=True)
         if db.get(ExamGradePublication, meta["session_id"]):
             raise HTTPException(409, "这场成绩已发布")
         if revision(row, rubric) != body.revision:
             raise HTTPException(409, "分项或依据已更新，请刷新后核对")
-        if set(body.scores) != {c["key"] for c in rubric} or any(
-            not 0 <= body.scores[c["key"]] <= c["maximum"] for c in rubric
-        ):
-            raise HTTPException(422, "请填写全部分项，并检查各项上限")
-        for c in rubric:
-            answer = answers.get(c["answer_id"])
-            if (
-                c["group"] == "answers"
-                and body.scores[c["key"]]
-                and (
-                    not answer
-                    or isinstance(answer, str)
-                    and not answer.strip()
-                    or isinstance(answer, dict)
-                    and not answer.get("reports")
-                )
-            ):
-                raise HTTPException(422, "封存答案为空的分项只能记零分")
         gap = row.basis.get("evidence", {}).get("completeness") == "partial"
-        if gap and not body.gap_reviewed:
-            raise HTTPException(422, "请核对采集缺口并说明采用了哪些可验证材料")
+        sources = {"file:" + f["path"] for f in exported.get("files", [])}
+        if gap and any(ref.startswith("event:") for ref in body.evidence_refs.values()):
+            cutoff = EvidenceCutoff.model_validate(
+                exported["content"]["artifact"]["evidence"]
+            )
+            after = 0
+            while True:
+                items, after = page(db, cutoff, after=after)
+                sources.update("event:" + item["id"] for item in items)
+                if after is None:
+                    break
+        if set(body.evidence_refs.values()) - sources:
+            raise HTTPException(422, "所选依据不在本题冻结材料中")
+        validate_scores(body, rubric, answers, gap, sources)
         objective = row.components.get("objective")
         if objective is not None and (
             objective.get("status") != "completed" or objective.get("score") is None
         ):
             raise HTTPException(409, "可信客观评测尚未完成")
-        raw = round(
-            sum(body.scores.values()) + (objective["score"] if objective else 0), 2
-        )
+        values = list(body.scores.values())
+        raw = None
+        if None not in values:
+            raw = round(sum(values) + (objective["score"] if objective else 0), 2)
         cap = objective.get("cap") if objective else None
         result = dict(
             scores=body.scores,
@@ -168,12 +232,14 @@ def review(request: Request, sid: str, body: Review, examiner=Depends(current_se
             examiner=examiner.username,
             at=int(time.time()),
             gap_reviewed=body.gap_reviewed,
+            evidence_notes=body.evidence_notes,
+            evidence_refs=body.evidence_refs,
             basis=digest(row.basis),
             rubric=digest(rubric),
             objective=objective["score"] if objective else None,
             raw=raw,
             cap=cap,
-            final=min(raw, cap) if cap is not None else raw,
+            final=min(raw, cap) if raw is not None and cap is not None else raw,
         )
         previous = row.components.get("examiner_review")
         history = row.components.get("review_history", [])
