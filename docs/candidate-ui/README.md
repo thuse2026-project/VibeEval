@@ -42,4 +42,4 @@
 
 ## 合入主线
 
-功能基线为 `codex/r2-grading-jobs@5a93ea6`，对应 [四题功能 PR #12](https://github.com/thuse2026-project/VibeEval/pull/12)。界面改动从该基线独立提交，可用 `git diff 5a93ea6...HEAD` 单独审阅。先合入功能 PR，再以更新后的 `main` 审阅美化分支。若功能 PR 以 squash 方式合入，需将美化提交移到新的主线基线上，避免界面 PR 重复包含四题功能。工作台使用同一组阶段 API 和原有数据库结构。
+[四题功能 PR #12](https://github.com/thuse2026-project/VibeEval/pull/12) 已合入 `main`，合并提交为 `6065957`。美化分支已同步该提交。在美化分支上执行 `git fetch origin main` 和 `git diff origin/main...HEAD`，可单独审阅考生端界面与配套的代理、测试和使用说明。工作台继续使用四题后端的阶段 API 和数据库结构。
