@@ -83,7 +83,8 @@ export function hasDatasetteVerification(task: string) {
 
 const testCommand = 'cd /workspace && python -m unittest discover -s tests -p "test_*.py" -v'
 
-export function DatasetteVerification({ task, phaseId, disabled, flush, openTerminal, openFile, onRunningChange }: {
+export function DatasetteVerification({ task, phaseId, disabled, flush, openTerminal, openFile, onRunningChange, panel }: {
+  panel?: { open: boolean; show: () => void }
   phaseId: string
   task: string
   disabled: boolean
@@ -124,6 +125,7 @@ export function DatasetteVerification({ task, phaseId, disabled, flush, openTerm
   }
 
   async function runRecordedTest() {
+    panel?.show()
     setRunning(true)
     setResult(null)
     setStatus('测试正在沙箱执行并记录…')
@@ -148,30 +150,38 @@ ${fixture}${scenario.probe}        finally:
 asyncio.run(inspect())
 PY`
 
-  return <section className="problem-pane r2-verification">
+  const reproduction = <>
     <h2>复现业务行为</h2>
     <p>{scenario.description}</p>
     <p>{scenario.expected}</p>
     <button type="button" disabled={disabled || copying || running} onClick={() => void copy('复现', reproduce)}>复制复现命令</button>
     <details><summary>查看复现命令</summary><pre>{reproduce}</pre></details>
-
-    <h2>运行测试</h2>
-    <p>公开测试覆盖部分核心行为。可在回归测试文件中补充边界用例，然后运行同一命令。</p>
-    <button type="button" disabled={disabled || copying || running} onClick={() => void copy('测试', testCommand)}>复制测试命令</button>
-    <button type="button" disabled={disabled || copying || running} onClick={() => void runRecordedTest()}>
+  </>
+  const runButton = <button type="button" className="record-test" disabled={disabled || copying || running} onClick={() => void runRecordedTest()}>
       {running ? '测试运行中…' : '运行并记录测试'}
     </button>
-    <details><summary>查看测试命令</summary><pre>{testCommand}</pre></details>
-    {result && <section className="r2-test-run-result" aria-live="polite">
-      <p>{status} · 退出码 {result.exit_code ?? '不可用'}{result.error_code ? ` · ${result.error_code}` : ''}</p>
-      <p>运行代码版本 <code title={result.code_version}>{result.code_version.slice(0, 12)}</code>
-        {!result.evidence_recorded && ' · 阶段已关闭，结果未进入冻结证据'}</p>
-      <pre>{result.output || '无输出'}{result.output_truncated ? '\n（输出已截断）' : ''}</pre>
-    </section>}
-    <div className="r2-verification-files">
-      <button type="button" onClick={() => openFile('tests/test_public.py')}>查看公开测试</button>
-      <button type="button" onClick={() => openFile('tests/test_candidate.py')}>打开回归测试</button>
-    </div>
-    {status && <p role="status">{status}</p>}
-  </section>
+  return <>
+    {panel && <div className="test-shortcut">{runButton}</div>}
+    <section hidden={panel && !panel.open} className="problem-pane r2-verification">
+      {!panel && reproduction}
+      <h2>运行测试</h2>
+      <p>公开测试覆盖部分核心行为。可在回归测试文件中补充边界用例，然后运行同一命令。</p>
+      <button type="button" disabled={disabled || copying || running} onClick={() => void copy('测试', testCommand)}>复制测试命令</button>
+      {!panel && runButton}
+      <details><summary>查看测试命令</summary><pre>{testCommand}</pre></details>
+      {result && <section className="r2-test-run-result" aria-live="polite">
+        <p>{status} · 退出码 {result.exit_code ?? '不可用'}{result.error_code ? ` · ${result.error_code}` : ''}</p>
+        <p>运行代码版本 <code title={result.code_version}>{result.code_version.slice(0, 12)}</code>
+          {!result.evidence_recorded && ' · 阶段已关闭，结果未进入冻结证据'}</p>
+        <pre>{result.output || '无输出'}{result.output_truncated ? '\n（输出已截断）' : ''}</pre>
+      </section>}
+      <div className="r2-verification-files">
+        <button type="button" onClick={() => openFile('tests/test_public.py')}>查看公开测试</button>
+        <button type="button" onClick={() => openFile('tests/test_candidate.py')}>打开回归测试</button>
+      </div>
+      {panel && reproduction}
+
+      {status && (!panel || !result) && <p role="status">{status}</p>}
+    </section>
+  </>
 }

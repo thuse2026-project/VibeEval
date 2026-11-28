@@ -1,3 +1,5 @@
+import { AppearanceSettings } from '../../shared/components/CandidateAppearance'
+import { useCandidateTheme } from '../../shared/candidateTheme'
 import { PaneResize } from '../../shared/components/PaneResize'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { CodeEditor } from '../../shared/components/Editor'
@@ -25,7 +27,7 @@ type Props = {
   terminalPrefix?: string
   resizable?: boolean
   problem?: (selectFile: SelectFile) => ReactNode
-  verification?: (openTerminal: () => void, selectFile: SelectFile) => ReactNode
+  verification?: (openTerminal: () => void, selectFile: SelectFile, panel?: { open: boolean; show: () => void }) => ReactNode
   filesPane?: (selectFile: SelectFile, activePath: string | null) => ReactNode
   agentScope?: string | null
   agentPrefix?: string
@@ -98,6 +100,7 @@ export function WorkspaceScreen({
   onEdit,
   onSubmit,
 }: Props) {
+  const themed = useCandidateTheme() !== null
   const [leftTab, setLeftTab] = useState<'files' | 'problem' | 'verification'>(initialProblem ? 'problem' : 'files')
   const [agentOpened, setAgentOpened] = useState(initialAgentOpen)
   const [agentVisible, setAgentVisible] = useState(initialAgentOpen)
@@ -195,13 +198,14 @@ export function WorkspaceScreen({
       <div className="ide-topbar">
         <span className="brand-mark" aria-hidden="true">&lt;/&gt;</span>
         <span className="logo">VibeEval</span>
-        <span className="task">{title}</span>
+        <span className="task">{themed && '第三题 / '}{title}</span>
         <span className="timer mono">{submitting || processing ? '正在提交…' : practice ? <small>测试模式 · 本阶段不计时</small> : <><small>剩余 </small>{formatRemaining(remaining)}</>}</span>
         <span className={`save-state ${saveState}`}>
           <span className="save-dot" />
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
+        <AppearanceSettings />
         {saveFile && <button className="agent-open" title="保存当前文件 (Ctrl+S)" disabled={busy || activeReadonly || !editorPath} onClick={saveFile}>保存</button>}
         {agentScope && <button className="agent-open" aria-expanded={agentOpen} onClick={() => {
           setAgentOpened(true)
@@ -229,11 +233,12 @@ export function WorkspaceScreen({
               验证
             </button>}
           </div>
-          <div hidden={leftTab !== 'files'} className="tree-container">{filesPane?.(selectFile, editorPath) ?? <FileTree files={files} activePath={editorPath} onSelect={selectFile} />}</div>
-          {leftTab === 'verification' && verification ? verification(() => {
+          {verification && (themed || leftTab === 'verification') && verification(() => {
             setTermOpen(true)
             requestAnimationFrame(() => main.current?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')?.focus())
-          }, selectFile) : leftTab === 'problem' && (
+          }, selectFile, themed ? { open: leftTab === 'verification', show: () => setLeftTab('verification') } : undefined)}
+          <div hidden={leftTab !== 'files'} className="tree-container">{filesPane?.(selectFile, editorPath) ?? <FileTree files={files} activePath={editorPath} onSelect={selectFile} />}</div>
+          {leftTab === 'problem' && (
             problem?.(selectFile) ?? <div className="problem-pane">
               <span className="pane-caption">任务说明</span>
               <h2>会议室预约缺陷修复</h2>

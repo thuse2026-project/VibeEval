@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
+import { palettes, useCandidateTheme } from '../candidateTheme'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
 export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/sessions/', visible = true, onCollapse }: {
   sessionId: string | null; inputEnabled: boolean; apiPrefix?: string; visible?: boolean; onCollapse?: () => void
 }) {
+  const appearance = useCandidateTheme()
+  const theme = appearance?.theme
   const container = useRef<HTMLDivElement>(null)
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState('终端未连接')
@@ -108,6 +111,14 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
     })
     return () => cancelAnimationFrame(frame)
   }, [visible, sessionId])
+
+  useEffect(() => {
+    if (terminal.current && theme) {
+      const palette = palettes[theme]
+      terminal.current.options.theme = { background: palette.surface, foreground: palette.ink,
+        cursor: palette.accent, selectionBackground: palette.selection }
+    }
+  }, [theme, sessionId, attempt, apiPrefix])
 
   return <div className="terminal-pane">
     <div className="terminal-head">

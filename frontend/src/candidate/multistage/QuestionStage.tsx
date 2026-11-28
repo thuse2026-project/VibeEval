@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCandidateTheme } from '../../shared/candidateTheme'
 import { AnswerWorkspace } from './AnswerWorkspace'
 import { ReadonlyFiles } from './ReadonlyFiles'
 import { command, current, examRequest, RequestError, type Attempt, type Receipt, v2 } from './api'
@@ -20,6 +21,7 @@ function display(value: unknown) {
 }
 
 function EvidenceView({ phase, frozen }: { phase: string; frozen: FrozenCode }) {
+  const themed = useCandidateTheme() !== null
   const [page, setPage] = useState<EvidencePage | null>(null)
   const [items, setItems] = useState<EvidenceItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -43,19 +45,29 @@ function EvidenceView({ phase, frozen }: { phase: string; frozen: FrozenCode }) 
   const reason = page?.reason === 'COLLECTION_NOT_CONNECTED' ? '操作记录采集尚未接通，请考官复核。'
     : page?.reason === 'CAPTURE_GAP' ? '平台检测到部分操作记录缺失，请考官复核。' : page?.reason
   return <section className="r2-evidence" aria-label="本题操作记录">
-    <div className="r2-section-heading"><h2>操作记录</h2><span>{items.length} 条</span></div>
+    <div className="r2-section-heading">{themed ? <span>编程阶段 · {items.length} 条记录</span> : <><h2>操作记录</h2><span>{items.length} 条</span></>}</div>
     {page?.completeness === 'partial' && <p className="r2-evidence-warning" role="status">记录不完整：{reason ?? '原因未知，请考官复核。'}</p>}
     {error && <p role="alert">{error} <button onClick={() => void load()}>重试</button></p>}
     {!loading && !error && items.length === 0 && <p className="r2-muted">本题没有已收录的操作记录。</p>}
     <ol className="r2-evidence-list">{items.map(item => {
       const unfinished = page && !page.next_cursor && item.kind === 'test_run' && item.data.status === 'started' && !completedRuns.has(item.data.run_id)
+      const showSummary = themed && (item.kind === 'edit' || item.kind === 'test_run')
       return <li key={item.id}><header><strong>{actorName[item.actor]} · {kindName[item.kind]}</strong><time>{new Date(item.at * 1000).toLocaleString()}</time></header>
         {unfinished && <p className="r2-unfinished">截止时未完成</p>}
-        <dl>{Object.entries(item.data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd><pre>{display(value)}</pre></dd></div>)}</dl>
+        {showSummary && <div className="evidence-summary">
+          {['path', 'command', 'output'].map(key => item.data[key] != null && <pre key={key}>{display(item.data[key])}</pre>)}
+        </div>}
+        {showSummary
+          ? <details><summary>记录详情</summary><EvidenceFields data={item.data} /></details>
+          : <EvidenceFields data={item.data} />}
       </li>
     })}</ol>
     {page?.next_cursor && <button disabled={loading} onClick={() => void load(page.next_cursor ?? undefined)}>{loading ? '正在读取…' : '加载更多记录'}</button>}
   </section>
+}
+
+function EvidenceFields({ data }: { data: Record<string, unknown> }) {
+  return <dl>{Object.entries(data).map(([key, value]) => <div key={key}><dt>{key}</dt><dd><pre>{display(value)}</pre></dd></div>)}</dl>
 }
 
 export function QuestionStage({ state, remaining, refresh }: { state: Attempt; remaining: number; refresh: () => Promise<void> }) {
@@ -172,7 +184,7 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
   return <AnswerWorkspace state={state} remaining={remaining} status={Object.values(drafts).some(d => d.status !== 'saved') ? '有未保存的回答' : '已保存'}
     busy={busy || !questions.length} submit={submit} questions={questions} active={active} select={setActive}
     answered={id => Boolean(drafts[id]?.value.trim())} alerts={error && <p className="r2-page-alert" role="alert">{error}</p>}
-    files={<ReadonlyFiles phase={phase} notes={notes} sha={frozen?.sha256} />}
+    notes={notes} files={<ReadonlyFiles phase={phase} notes={state.current_stage.key === 'column-statistics' ? undefined : notes} sha={frozen?.sha256} />}
     evidence={frozen && <EvidenceView phase={phase} frozen={frozen} />}>
       <section className="r2-answer-panel">
         {selected ? <><h1>{selected.title}</h1><p className="r2-question-body">{selected.body}</p>

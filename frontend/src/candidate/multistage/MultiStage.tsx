@@ -10,6 +10,8 @@ import type { AgentFileChange } from '../workspace/AgentPanelV2'
 import { command, current, examRequest, type Attempt, type Receipt, v2 } from './api'
 import { QuestionStage } from './QuestionStage'
 import './multistage.css'
+import { CandidateAppearance } from '../../shared/components/CandidateAppearance'
+import './candidateAppearance.css'
 
 // The private preview can extend a manually selected attempt to the last supported date.
 const PRACTICE_DEADLINE = 253402300799
@@ -224,8 +226,8 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
         </section>}
         <pre>{question || '正在读取题目…'}</pre>
       </div>}
-      verification={hasDatasetteVerification(state.current_stage.key) ? (openTerminal, selectFile) =>
-        <DatasetteVerification phaseId={phase} task={state.current_stage.key} disabled={locked || !terminalAvailable}
+      verification={hasDatasetteVerification(state.current_stage.key) ? (openTerminal, selectFile, panel) =>
+        <DatasetteVerification panel={panel} phaseId={phase} task={state.current_stage.key} disabled={locked || !terminalAvailable}
           flush={() => queue.flush()} openTerminal={openTerminal} openFile={selectFile} onRunningChange={setTestRunning} /> : undefined}
       agentScope={remaining > 0 && state.capabilities.includes('use_agent') ? phase : null}
       initialAgentOpen={state.capabilities.includes('use_agent')}
@@ -308,10 +310,11 @@ export default function MultiStage() {
     if (state.current_stage.key.startsWith('tinydb-')) {
       return <TinyDbStage key={state.current_phase.id} state={state} remaining={remaining} refresh={refresh} modelReady={modelReady} />
     }
-    if (state.current_phase.key === 'answer' || state.current_phase.key === 'interview' || state.capabilities.includes('read_frozen_code')) {
-      return <QuestionStage key={state.current_phase.id} state={state} refresh={refresh} remaining={remaining} />
-    }
-    return <CodeStage key={state.current_phase.id} state={state} modelReady={modelReady} refresh={refresh} remaining={remaining} />
+    const answering = state.current_phase.key === 'answer' || state.current_phase.key === 'interview' || state.capabilities.includes('read_frozen_code')
+    const screen = answering
+      ? <QuestionStage key={state.current_phase.id} state={state} refresh={refresh} remaining={remaining} />
+      : <CodeStage key={state.current_phase.id} state={state} modelReady={modelReady} refresh={refresh} remaining={remaining} />
+    return state.current_stage.key === 'column-statistics' ? <CandidateAppearance>{screen}</CandidateAppearance> : screen
   }
   if (state?.status === 'completed' && state.stages.length === 4 && state.current_stage.key === 'facet-pagination') {
     return <main className="r2-page"><section className="r2-flow-card"><h1>答卷已提交</h1><p>感谢作答，可以离场。</p></section></main>

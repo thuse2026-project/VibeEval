@@ -3,6 +3,7 @@ import * as monaco from 'monaco-editor/editor/editor.api.js'
 import 'monaco-editor/languages/definitions/python/register.js'
 import 'monaco-editor/languages/definitions/markdown/register.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
+import { palettes, useCandidateTheme } from '../candidateTheme'
 import { languageFromPath } from '../format'
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
@@ -22,6 +23,8 @@ type Props = {
 }
 
 export function CodeEditor(props: Props) {
+  const appearance = useCandidateTheme()
+  const theme = appearance?.theme
   const latest = useRef(props)
   latest.current = props
   const host = useRef<HTMLDivElement>(null)
@@ -91,12 +94,25 @@ export function CodeEditor(props: Props) {
     editor.current?.updateOptions({ readOnly: props.readOnly, wordWrap: props.wrapLines ? 'on' : 'off' })
   }, [props.readOnly, props.wrapLines])
 
+  useLayoutEffect(() => {
+    if (!theme) return
+    const palette = palettes[theme]
+    const name = 'candidate-' + theme
+    monaco.editor.defineTheme(name, {
+      base: theme === 'graphite' ? 'vs-dark' : 'vs', inherit: true, rules: [],
+      colors: { 'editor.background': palette.surface, 'editor.foreground': palette.ink,
+        'editorLineNumber.foreground': palette.muted, 'editor.selectionBackground': palette.selection,
+        'editor.lineHighlightBorder': '#00000000' },
+    })
+    monaco.editor.setTheme(name)
+  }, [theme])
+
   return <div className="editor-area">
     <nav className="editor-tabs" aria-label="已打开文件">
       {props.tabs.map(tab => <div key={tab.path} className={`editor-tab${tab.path === props.path ? ' active' : ''}`}>
         <button type="button" className="etab" aria-pressed={tab.path === props.path} title={tab.path}
           disabled={props.selectDisabled} onClick={() => props.onSelect(tab.path)}>
-          <span className="editor-tab-name">{tab.path}</span>
+          <span className="editor-tab-name">{theme ? tab.path.split('/').pop() : tab.path}</span>
           {tab.dirty && <span aria-label="未保存修改">●</span>}
           {tab.readonly && <span className="tag gray">只读</span>}
         </button>
@@ -104,6 +120,7 @@ export function CodeEditor(props: Props) {
           disabled={props.closeDisabled} onClick={() => props.onClose(tab.path)}>×</button>
       </div>)}
     </nav>
+    {theme && props.path && <div className="editor-path" title={props.path}>{props.path}</div>}
     <div className="editor-host" ref={host} hidden={!props.path} />
     {!props.path && <div className="editor-empty">从文件列表打开文件</div>}
   </div>

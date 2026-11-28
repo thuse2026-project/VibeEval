@@ -1,3 +1,4 @@
+import { useCandidateTheme } from '../../shared/candidateTheme'
 import { useMemo } from 'react'
 import { renderMarkdown } from '../../shared/markdown'
 import { useEffect, useState } from 'react'
@@ -9,6 +10,7 @@ export function ReadonlyFiles({ phase, sha, notes }: { phase: string; sha?: stri
   const [selected, setSelected] = useState('')
   const [content, setContent] = useState('')
   const [error, setError] = useState('')
+  const themed = useCandidateTheme() !== null
   const hasNote = notes != null
   const isNote = hasNote && selected === 'note.md'
 
@@ -31,7 +33,7 @@ export function ReadonlyFiles({ phase, sha, notes }: { phase: string; sha?: stri
   }, [phase, selected, isNote])
   const markdown = useMemo(() => /\.md$/i.test(selected) ? renderMarkdown(isNote ? notes || '笔记为空' : content, true) : null, [selected, isNote, notes, content])
   return <section className="r2-frozen-files" aria-label={sha ? '冻结代码' : '只读源码'}>
-    <div className="r2-section-heading"><h2>{sha ? '冻结代码' : '只读源码'}</h2>{sha && <code title={sha}>{sha.slice(0, 12)}</code>}</div>
+    <div className="r2-section-heading">{themed ? <span>{sha ? '编程结束时封存 · 只读' : '只读源码'}</span> : <h2>{sha ? '冻结代码' : '只读源码'}</h2>}{sha && <code title={sha}>{sha.slice(0, 12)}</code>}</div>
     {error && <p role="alert">{error}</p>}
     <label className="reference-file">文件<select value={selected} onChange={e => setSelected(e.target.value)}>
       {notes != null && <option>note.md</option>}
