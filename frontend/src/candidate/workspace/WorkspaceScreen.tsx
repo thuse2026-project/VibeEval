@@ -142,13 +142,14 @@ export function WorkspaceScreen({
 
   async function closeFile(path: string) {
     if (discardFile && tabs.find(tab => tab.path === path)?.dirty) {
-      if (!window.confirm('当前修改尚未保存。放弃未保存的修改并关闭文件？') || !await discardFile(path)) return
+      if (!window.confirm('当前修改尚未保存。放弃未保存的修改并关闭文件？') || !await discardFile(path)) return false
     }
     setClosedPaths(previous => new Set(previous).add(path))
     if (path === editorPath) {
       const index = tabs.findIndex(tab => tab.path === path)
       onSelectFile(tabs[index + 1]?.path ?? tabs[index - 1]?.path ?? null)
     }
+    return true
   }
 
   function divider(side: 'files' | 'agent') {

@@ -70,7 +70,7 @@
   & :is(.editor-tabs .editor-tab.active,.tabs .tab.active,.reference-tabs button[aria-pressed=true]) {
     color: var(--accent); background: var(--surface); border-radius: 0; box-shadow: inset 0 -2px var(--accent);
   }
-  & .editor-path { flex: none; padding: 5px 16px; border-bottom: 1px solid var(--line); font: 12px/18px Consolas,monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  & .editor-path { flex: none; border-bottom: 1px solid var(--line); font: 12px/18px var(--type-mono); }
   & :is(.pane-divider,.resize-column) { background: linear-gradient(to right, transparent calc(50% - .5px), var(--line) 50%, transparent calc(50% + 1px)); }
   & .resize-row { background: linear-gradient(to bottom, transparent 2px, var(--line) 3px, transparent 4px); }
   & :is(.pane-divider,.resize-row,.resize-column):is(:hover,:focus-visible) { background: var(--selection); }
@@ -112,7 +112,48 @@
   & .agent-panel .agent-conversation-bar:not(form) button, & .appearance-settings > button {
     display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; color: var(--muted);
   }
-  & .terminal-head { padding: 3px 10px 3px 14px; }
+  & .editor-path { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; padding: 2px 12px 2px 16px; }
+  & .editor-path > span { min-width: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  & .markdown-view-switch { display: inline-flex; align-items: center; flex: none; gap: 5px; margin: 0; color: var(--muted); }
+  & .markdown-view-switch svg { width: 14px; height: 14px; }
+  & .markdown-view-switch select { padding: 3px 1px; background: var(--surface); color: var(--ink); border: 0; border-radius: 3px; font: 12px/1.5 "Segoe UI","Noto Sans SC",sans-serif; cursor: pointer; }
+  & .markdown-reader { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+  & .markdown-reader article {
+    max-width: 82ch; margin: 0 auto; padding: 20px clamp(18px,2.2vw,38px) 32px;
+    font-size: 15px; line-height: 1.85; color: var(--ink); overflow-wrap: anywhere;
+  }
+  & .markdown-reader :is(h1,h2,h3,h4) { margin: 1.45em 0 .55em; color: var(--ink); line-height: 1.45; font-weight: 650; }
+  & .markdown-reader :is(h1,h2) { border-bottom: 1px solid var(--line); padding-bottom: .33em; }
+  & .markdown-reader h1 { font-size: 24px; }
+  & .markdown-reader h2 { font-size: 19px; }
+  & .markdown-reader h3 { font-size: 16px; }
+  & .markdown-reader article > :first-child { margin-top: 0; }
+  & .markdown-reader p { margin: 0 0 .85em; line-height: inherit; }
+  & .markdown-reader :is(ol,ul) { padding-left: 1.5em; margin: .65em 0 1em; }
+  & .markdown-reader li { padding-inline-start: .15em; margin: .45em 0; }
+  & .markdown-reader li::marker { color: var(--muted); }
+  & .markdown-reader code { font: .92em/1.65 var(--type-mono); }
+  & .markdown-reader :not(pre) > code { padding: .08em .3em; border-radius: 3px; background: var(--soft); color: var(--accent); }
+  & .markdown-reader pre { padding: 12px 14px; overflow-x: auto; background: var(--chrome); border-radius: 4px; }
+  & .markdown-reader blockquote { border-left: 3px solid var(--line); padding: 0 0 0 14px; margin: 1em 0; color: var(--muted); }
+  & .markdown-reader table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 14px; }
+  & .markdown-reader :is(td,th) { text-align: start; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+  & .markdown-reader th { background: var(--chrome); }
+  & .markdown-reader a { color: var(--accent); }
+  & .terminal-title { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-size: 13px; font-weight: 600; }
+  & .terminal-head { justify-content: flex-start; gap: 14px; padding: 4px 9px 4px 15px; border-bottom: 1px solid var(--line); }
+  & .terminal-connection { min-width: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  & .terminal-connection[data-connected=true] { font: 12px/1.5 var(--type-mono); }
+  & .terminal-connection[data-connected=true]::before { content: ''; display: inline-block; vertical-align: middle; width: 5px; height: 5px; margin-right: 7px; border-radius: 50%; background: var(--success); }
+  & .terminal-actions { margin-left: auto; flex: none; }
+  & .terminal-body { padding: 9px 14px 4px; }
+  & .terminal-context-menu {
+    position: fixed; inset: auto; margin: 0; min-width: 158px; padding: 4px;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 5px 18px #0002;
+  }
+  & .terminal-context-menu button { display: flex; justify-content: space-between; align-items: baseline; gap: 24px; width: 100%; padding: 6px 8px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); font-weight: 400; }
+  & .terminal-context-menu kbd { color: var(--muted); font: 11px/1.5 var(--type-mono); }
+
   & .terminal-head .terminal-actions button { width: 27px; height: 27px; }
   & .task-document, & .verification-guide, & .reference-markdown, & .agent-markdown { overflow-wrap: anywhere; line-break: strict; }
   & .sidebar .problem-pane { padding: 22px clamp(14px,1.4vw,25px) 28px; }

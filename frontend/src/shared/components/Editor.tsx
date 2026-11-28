@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as monaco from 'monaco-editor/editor/editor.api.js'
 import 'monaco-editor/languages/definitions/python/register.js'
 import 'monaco-editor/languages/definitions/markdown/register.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import { palettes, useCandidateTheme } from '../candidateTheme'
 import { WorkspaceIcon } from './WorkspaceIcon'
+import { renderMarkdown } from '../markdown'
 import { languageFromPath } from '../format'
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
@@ -12,7 +13,7 @@ self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
 type Props = {
   tabs: {path:string;readonly:boolean;dirty:boolean}[]
   onSelect: (path:string)=>void
-  onClose: (path:string)=>void
+  onClose: (path: string) => Promise<boolean>
   selectDisabled: boolean
   closeDisabled: boolean
   loadRevision: number
@@ -26,6 +27,12 @@ type Props = {
 export function CodeEditor(props: Props) {
   const appearance = useCandidateTheme()
   const theme = appearance?.theme
+  const [markdownModes, setMarkdownModes] = useState<Record<string, 'source' | 'preview'>>({})
+  const path = props.path
+  const markdown = Boolean(theme && path && /\.(md|markdown)$/i.test(path))
+  const mode = (path && markdownModes[path]) || 'source'
+  const preview = markdown && mode === 'preview'
+  const rendered = useMemo(() => preview ? renderMarkdown(props.value, true) : null, [preview, props.value])
   const latest = useRef(props)
   latest.current = props
   const host = useRef<HTMLDivElement>(null)
@@ -115,6 +122,17 @@ export function CodeEditor(props: Props) {
     monaco.editor.setTheme(name)
   }, [theme])
 
+  async function closeTab(tabPath: string) {
+    if (await props.onClose(tabPath)) {
+      setMarkdownModes(previous => {
+        if (!Object.hasOwn(previous, tabPath)) return previous
+        const next = { ...previous }
+        delete next[tabPath]
+        return next
+      })
+    }
+  }
+
   return <div className="editor-area">
     <nav className="editor-tabs" aria-label="已打开文件">
       {props.tabs.map(tab => <div key={tab.path} className={`editor-tab${tab.path === props.path ? ' active' : ''}`}>
@@ -125,11 +143,26 @@ export function CodeEditor(props: Props) {
           {tab.readonly && <span className="tag gray" title="只读" aria-label="只读">{theme ? <WorkspaceIcon name="lock" /> : '只读'}</span>}
         </button>
         <button type="button" className="editor-tab-close" aria-label={`关闭 ${tab.path}`} title={`关闭 ${tab.path}`}
-          disabled={props.closeDisabled} onClick={() => props.onClose(tab.path)}>×</button>
+          disabled={props.closeDisabled} onClick={() => void closeTab(tab.path)}>×</button>
       </div>)}
     </nav>
-    {theme && props.path && <div className="editor-path" title={props.path}>{props.path}</div>}
-    <div className="editor-host" ref={host} hidden={!props.path} />
+    {theme && path && <div className="editor-path">
+      <span title={path}>{path}</span>
+      {markdown && <label className="markdown-view-switch">
+        <WorkspaceIcon name={preview ? 'book' : 'code'} />
+        <select aria-label="Markdown 视图" value={mode} onChange={event => {
+          const next = event.target.value === 'preview' ? 'preview' : 'source'
+          setMarkdownModes(previous => ({ ...previous, [path]: next }))
+        }}>
+          <option value="source">文本编辑器</option>
+          <option value="preview">Markdown 预览</option>
+        </select>
+      </label>}
+    </div>}
+    <div className="editor-host" ref={host} hidden={!props.path || preview} />
+    {rendered && <div key={path} className="markdown-reader" role="region" aria-label={path + ' 预览'} tabIndex={0}>
+      <article dangerouslySetInnerHTML={rendered} />
+    </div>}
     {!props.path && <div className="editor-empty">从文件列表打开文件</div>}
   </div>
 }

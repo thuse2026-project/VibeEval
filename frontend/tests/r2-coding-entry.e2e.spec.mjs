@@ -15,7 +15,7 @@ test('coding before an interview opens without access to the final submission su
     ['/api/v2/attempts/current', attempt],
     ['/api/v2/phases/coding3/files', { files: [{ path: 'README.md', readonly: true }] }],
     ['/api/v2/phases/coding3/questions', { items: [{ body: '编程任务说明' }] }],
-    ['/api/v2/phases/coding3/file', { path: 'README.md', content: '编程任务说明', version: 1 }],
+    ['/api/v2/phases/coding3/file', { path: 'README.md', content: '# 编程任务说明', version: 1 }],
     ['/r2-preview/model', { configured: false }],
   ])
   const summaryReads = []
@@ -28,6 +28,14 @@ test('coding before an interview opens without access to the final submission su
   })
   await page.goto('/r2-workspace')
   await expect(page.locator('.editor-file-status')).toContainText('README.md')
+  const view = page.getByRole('combobox', { name: 'Markdown 视图' })
+  await expect(view).toHaveValue('source')
+  await expect(page.locator('.view-lines')).toContainText('# 编程任务说明')
+  await view.selectOption('preview')
+  await expect(page.getByRole('heading', { name: '编程任务说明' })).toBeVisible()
+  await expect(page.locator('.editor-host')).toBeHidden()
+  await page.reload()
+  await expect(view).toHaveValue('source')
   expect(summaryReads).toEqual([])
   await page.getByRole('button', { name: '结束编程，固定代码并进入问答' }).click()
   await expect(page.getByRole('dialog')).toContainText('开始 10 分钟独立问答')

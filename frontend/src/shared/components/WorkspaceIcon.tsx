@@ -14,6 +14,7 @@ const paths = {
   test: 'M7 2h6m-5 0v6l-5 7a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-7V2m-6 11h8',
   clipboard: 'M7 4H4v13h12V4h-3M7 2h6v4H7z',
   check: 'm3 10 4 4L17 4',
+  terminal: 'm3 5 4 4-4 4m6 1h7',
   settings: 'M3 5h5m4 0h5M3 15h9m4 0h1M8 2v6m4 4v6',
   collapse: 'm5 8 5 5 5-5',
   refresh: 'M16.5 8a6.5 6.5 0 1 0 0 5m.5-10v5h-5',
