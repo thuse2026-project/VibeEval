@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { renderMarkdown } from '../../shared/markdown'
 import { useCandidateTheme } from '../../shared/candidateTheme'
 import { AnswerWorkspace } from './AnswerWorkspace'
+import { isReviewTestSample } from './testRun'
 import { ReadonlyFiles } from './ReadonlyFiles'
 import { command, current, examRequest, RequestError, type Attempt, type Receipt, v2 } from './api'
 
@@ -51,6 +52,10 @@ function EvidenceView({ phase, frozen }: { phase: string; frozen: FrozenCode }) 
     {error && <p role="alert">{error} <button onClick={() => void load()}>重试</button></p>}
     {!loading && !error && items.length === 0 && <p className="r2-muted">本题没有已收录的操作记录。</p>}
     <ol className="r2-evidence-list">{items.map(item => {
+      if (item.kind === 'test_run' && isReviewTestSample(item.data)) return <li key={item.id}>
+        <header><strong>预览示例 · 测试未执行</strong><time>{new Date(item.at * 1000).toLocaleString()}</time></header>
+        <p className="r2-muted">当时的预览服务只返回了示例输出。</p>
+      </li>
       const unfinished = page && !page.next_cursor && item.kind === 'test_run' && item.data.status === 'started' && !completedRuns.has(item.data.run_id)
       const showSummary = themed && (item.kind === 'edit' || item.kind === 'test_run')
       return <li key={item.id}><header><strong>{actorName[item.actor]} · {kindName[item.kind]}</strong><time>{new Date(item.at * 1000).toLocaleString()}</time></header>

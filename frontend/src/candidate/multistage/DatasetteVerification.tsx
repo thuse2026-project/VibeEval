@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { WorkspaceIcon } from '../../shared/components/WorkspaceIcon'
-import { examRequest } from './api'
+import { examRequest, RequestError } from './api'
+import { isReviewTestSample, testUnavailable } from './testRun'
 
 const fixture = `import asyncio
 import sqlite3
@@ -98,7 +99,7 @@ export function DatasetteVerification({ task, phaseId, disabled, flush, openTerm
   const [copying, setCopying] = useState(false)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<{
-    status: string; exit_code: number | null; output: string; output_truncated: boolean;
+    run_id?: string; status: string; exit_code: number | null; output: string; output_truncated: boolean;
     code_version: string; evidence_recorded: boolean; error_code: string | null
   } | null>(null)
   const scenario = scenarios[task]
@@ -129,15 +130,22 @@ export function DatasetteVerification({ task, phaseId, disabled, flush, openTerm
     panel?.show()
     setRunning(true)
     setResult(null)
-    setStatus('测试正在沙箱执行并记录…')
+    setStatus('正在请求运行测试…')
     onRunningChange(true)
     try {
       await flush()
       const value = await examRequest<NonNullable<typeof result>>(`/api/v2/phases/${phaseId}/test-run`, 'POST', { command: testCommand })
-      setResult(value)
-      setStatus('')
+      if (isReviewTestSample(value)) {
+        setStatus(testUnavailable)
+      } else if (!value.run_id) {
+        setStatus('无法确认测试结果。服务端未返回运行编号。')
+      } else {
+        setResult(value)
+        setStatus('')
+      }
     } catch (failure) {
-      setStatus((failure as Error).message)
+      setStatus(failure instanceof RequestError && failure.code === 'TEST_RUN_UNAVAILABLE'
+        ? testUnavailable : (failure as Error).message)
     } finally {
       setRunning(false)
       onRunningChange(false)
@@ -162,7 +170,8 @@ PY`
       {panel && <WorkspaceIcon name="play" />}
       {running ? '测试运行中…' : '运行并记录测试'}
     </button>
-  const outcome = result?.status === 'completed' ? '测试通过' : result?.status === 'timed_out' ? '测试超时' : '测试未通过'
+  const passed = result?.status === 'completed' && result.exit_code === 0
+  const outcome = passed ? '测试通过' : result?.status === 'timed_out' ? '测试超时' : '测试未通过'
   if (panel) {
     const commandDetails = (label: string, script: string) => <details className="command-details">
       <summary>查看{label}命令</summary>
@@ -176,8 +185,8 @@ PY`
       <section className="problem-pane r2-verification verification-guide" hidden={!panel.open}>
         <h2>测试与验证</h2>
         {result && <section className="r2-test-run-result" aria-live="polite">
-          <header data-passed={result.status === 'completed'}>
-            <strong>{result.status === 'completed' && <WorkspaceIcon name="check" />}{outcome}</strong>
+          <header data-passed={passed}>
+            <strong>{passed && <WorkspaceIcon name="check" />}{outcome}</strong>
             <span>退出码 {result.exit_code ?? '不可用'}</span>
           </header>
           <pre tabIndex={0}>{result.output || '无输出'}{result.output_truncated && '\n（输出已截断）'}</pre>
