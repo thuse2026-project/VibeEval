@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-async function openCoding(page, { terminal = false } = {}) {
+async function openCoding(page, { terminal = false, modelHintMissing = false } = {}) {
   const stage = { id: 'stage3', key: 'column-statistics', title: '列统计', status: 'active' }
   const now = Math.floor(Date.now() / 1000)
   const attempt = {
@@ -22,6 +22,7 @@ async function openCoding(page, { terminal = false } = {}) {
   const summaryReads = []
   await page.route(/\/(api\/v[12]\/|r2-preview\/model)/, route => {
     const path = new URL(route.request().url()).pathname
+    if (path === '/r2-preview/model' && modelHintMissing) return route.fulfill({ status: 404 })
     if (path.endsWith('/test-run')) return route.fallback()
     if (path.endsWith('/summary')) summaryReads.push(path)
     return responses.has(path)
@@ -34,7 +35,7 @@ async function openCoding(page, { terminal = false } = {}) {
 }
 
 test('coding before an interview opens without access to the final submission summary', async ({ page }) => {
-  const summaryReads = await openCoding(page)
+  const summaryReads = await openCoding(page, { modelHintMissing: true })
   const view = page.getByRole('combobox', { name: 'Markdown 视图' })
   await expect(view).toHaveValue('source')
   await expect(page.locator('.view-lines')).toContainText('# 编程任务说明')

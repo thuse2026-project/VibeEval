@@ -277,8 +277,13 @@ export default function MultiStage() {
     async function start() {
       const entry = await examRequest<{ session_id: string }>('/api/v1/sessions/current', 'GET', undefined, abort.signal)
       const result = await examRequest<Attempt>(`/api/v1/sessions/${entry.session_id}/exam-access`, 'POST', {}, abort.signal)
-      const model = await examRequest<{ configured: boolean }>('/r2-preview/model', 'GET', undefined, abort.signal)
-      if (!abort.signal.aborted) { setModelReady(model.configured); accept(result) }
+      if (abort.signal.aborted) return
+      accept(result)
+      // Older API-only installations omit this optional model configuration hint.
+      // Phase capabilities and the Agent API still enforce access on those installations.
+      const ready = await examRequest<{ configured: boolean }>('/r2-preview/model', 'GET', undefined, abort.signal)
+        .then(model => model.configured !== false, () => true)
+      if (!abort.signal.aborted) setModelReady(ready)
     }
     void start().catch(failure => { if (!abort.signal.aborted) setError((failure as Error).message) })
     const clockTimer = window.setInterval(() => setClock(performance.now()), 300)
