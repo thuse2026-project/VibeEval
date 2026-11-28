@@ -1,20 +1,3 @@
-/* One palette for both phases, including the Monaco and xterm canvases. */
-[data-candidate-theme] {
-  color-scheme: light;
-  --chrome: color-mix(in srgb, var(--surface) 96%, var(--ink));
-  --line: color-mix(in srgb, var(--surface) 80%, var(--muted));
-  --success: #27714b;
-  --warning: #975a0b;
-  --danger: #aa363a;
-  color: var(--ink);
-  background: var(--surface);
-}
-[data-candidate-theme="graphite"] {
-  color-scheme: dark;
-  --success: #8ad5a6;
-  --warning: #edbc78;
-  --danger: #ffa5a7;
-}
 [data-candidate-theme] :is(.r2-workspace,.answer-studio) {
   font-family: "Segoe UI","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
   background: var(--surface);
@@ -90,8 +73,6 @@
   & .r2-evidence-list dl div { grid-template-columns: minmax(68px,27%) minmax(0,1fr); }
   & .r2-evidence-list :is(dt,pre) { overflow-wrap: anywhere; font-size: 12px; }
   & .source-preview { font-size: 13px; padding: 8px 0; }
-  --soft: color-mix(in srgb, var(--selection) 47%, var(--surface));
-  --type-mono: "Cascadia Code", Consolas, "Noto Sans SC", monospace;
   & .workspace-icon { flex: none; vertical-align: middle; }
   & .ide-topbar .brand-mark, & .answer-bar i {
     background: var(--ink); color: var(--surface); border-radius: 7px;
@@ -236,11 +217,49 @@
   & .answer-paper .r2-question-body p { margin: 0 0 .75em; white-space: pre-line; }
   & .answer-paper .r2-question-body :last-child { margin-bottom: 0; }
   & .answer-paper textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-  & .appearance-menu { position: fixed; inset: auto; top: 50px; right: 16px; margin: 0; width: 210px; padding: 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px #0002; }
-  & .appearance-menu label { margin: 0; font-size: 13px; }
-  & .appearance-menu select { display: block; margin-top: 8px; width: 100%; padding: 6px; }
+  & .reading-task h3 { margin: 20px 0 7px; font-size: 14px; }
+  & .reading-task .note-link, & .reading-task .source-link { color: var(--accent); padding: 1px 2px; font: inherit; text-align: start; }
+  & .note-link { text-decoration: underline; text-underline-offset: 3px; }
+  & .reading-answer > .task-document { font-size: 15px; line-height: 1.85; }
+  & .reading-answer > .task-document p { white-space: normal; }
+  & .reading-answer textarea { font-weight: 400; }
+  & .report-index-link { display: block; padding: 9px 10px; color: var(--ink); border-radius: 4px; font-size: 13px; text-decoration: none; }
+  & .report-index-link:is(:hover,:focus-visible) { background: var(--selection); }
+  & .report-index-link small { display: block; margin: 3px 0 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/1.5 var(--type-mono); }
+  & .report-editor fieldset:target { border-color: var(--accent); }
+  & .reference-view { display: flex; justify-content: flex-end; padding: 4px 0; }
+  & .reference-view .markdown-view-switch { margin: 0; }
+  & .reading-answer > label { gap: 5px; }
+  & .answer-save-status { display: flex; justify-content: space-between; gap: 12px; margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+  & .report-rules { margin: 0 0 20px; font-size: 13px; }
+  & .report-rules summary { color: var(--accent); width: fit-content; cursor: pointer; }
+  & .report-rules article { margin: 14px 0; }
+  & .report-editor { border-top: 1px solid var(--line); padding: 16px 0 10px; }
+  & .report-editor .report-conclusion { display: flex; align-items: center; gap: 14px; margin: 0; }
+  & .report-conclusion select { width: auto; margin: 0; padding: 5px 22px 5px 8px; color: var(--ink); background: var(--surface); border-color: var(--line); font-size: 14px; }
+  & .report-editor fieldset { margin: 16px 0 0; border-top-color: var(--line); padding-top: 10px; }
+  & .report-editor legend { color: var(--ink); padding: 0 10px 0 0; font-weight: 600; font-size: 14px; }
+  & .report-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  & .report-fields label { min-width: 0; margin: 0; color: var(--muted); font-size: 13px; }
+  & .report-fields label:first-child { grid-column: 1 / -1; }
+  & .report-fields textarea { width: 100%; height: 5.5em; min-height: 4em; padding: 7px 10px; font-family: inherit; font-size: 14px; line-height: 1.65; }
+  & .report-fields label:first-child textarea { height: 3.1em; min-height: 3.1em; font-family: var(--type-mono); }
+  & .report-row-actions { display: flex; justify-content: space-between; align-items: center; margin: 4px 0 10px; }
+  & .report-row-actions small { font-size: 12px; color: var(--muted); }
+  & .report-editor button { background: transparent; color: var(--muted); border: 1px solid transparent; padding: 5px 8px; }
+  & .report-editor .report-add { border-color: var(--line); color: var(--accent); margin-top: 8px; }
+  & .answer-reference > div > .r2-frozen-files:first-child { padding-top: 14px; }
+  & .reference-tabs ~ div > .r2-frozen-files:first-child { padding-top: 0; }
+  & .r2-page-alert, & .workspace-alert { background: var(--soft); border-color: var(--warning); color: var(--ink); }
+  & .answer-paper [role="alert"] button { color: var(--ink); background: var(--chrome); border-color: var(--line); }
+  & .r2-evidence-warning, & .r2-unfinished { background: var(--chrome); color: var(--warning); border-color: var(--warning); }
+
 }
 [data-candidate-theme="warm"] .answer-paper h1 { font-family: "Noto Serif SC","Songti SC","SimSun",serif; }
 @media (min-width: 801px) {
   [data-candidate-theme] .answer-layout { grid-template-columns: clamp(144px,14%,216px) minmax(0,1fr) 6px minmax(270px,var(--reference-width)); }
+}
+
+@media (max-width: 600px) {
+  [data-candidate-theme] .answer-studio .report-fields { grid-template-columns: minmax(0,1fr); }
 }

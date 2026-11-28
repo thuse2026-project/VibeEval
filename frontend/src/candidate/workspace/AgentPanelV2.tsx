@@ -452,7 +452,7 @@ export function AgentPanel({ sessionId, prefix, modelReady, canExecute = true, h
           if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
           event.preventDefault()
           if (!event.repeat && !interactionBusy && draft.trim()) event.currentTarget.form?.requestSubmit()
-        }} aria-label="发送给 Agent" placeholder="阅读文件、解释代码或提出修改" value={draft} onChange={event => setDraft(event.target.value)} disabled={interactionBusy || !!titleEdit} maxLength={12000} />
+        }} aria-label="发送给 Agent" placeholder={canExecute ? '阅读文件、解释代码或提出修改' : '询问仓库结构或代码的执行过程'} value={draft} onChange={event => setDraft(event.target.value)} disabled={interactionBusy || !!titleEdit} maxLength={12000} />
         <div className={themed ? 'agent-compose-tools' : 'agent-run-state'} data-state={run?.status ?? 'idle'}>
           {themed ? modeSelector : <span role="status" title={run?.error_code ?? streamState}>{run ? '运行状态：' : ''}{stateText}</span>}
           {run && activeStatuses.has(run.status)

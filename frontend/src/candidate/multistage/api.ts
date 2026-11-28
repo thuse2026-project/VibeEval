@@ -9,6 +9,11 @@ export type Attempt = {
   capabilities: string[]; stages: Stage[]
 }
 
+export function stageTitle(state: Attempt) {
+  const ordinal = state.current_stage.ordinal ?? state.stages.findIndex(item => item.id === state.current_stage.id) + 1
+  return ordinal > 0 ? `第 ${ordinal} 题 / ${state.current_stage.title}` : state.current_stage.title
+}
+
 export class RequestError extends Error {
   constructor(public status: number, public code: string) { super(code) }
 }

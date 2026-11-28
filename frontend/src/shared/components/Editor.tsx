@@ -4,6 +4,7 @@ import 'monaco-editor/languages/definitions/python/register.js'
 import 'monaco-editor/languages/definitions/markdown/register.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import { palettes, useCandidateTheme } from '../candidateTheme'
+import { MarkdownViewSwitch } from './MarkdownViewSwitch'
 import { WorkspaceIcon } from './WorkspaceIcon'
 import { renderMarkdown } from '../markdown'
 import { languageFromPath } from '../format'
@@ -148,16 +149,8 @@ export function CodeEditor(props: Props) {
     </nav>
     {theme && path && <div className="editor-path">
       <span title={path}>{path}</span>
-      {markdown && <label className="markdown-view-switch">
-        <WorkspaceIcon name={preview ? 'book' : 'code'} />
-        <select aria-label="Markdown 视图" value={mode} onChange={event => {
-          const next = event.target.value === 'preview' ? 'preview' : 'source'
-          setMarkdownModes(previous => ({ ...previous, [path]: next }))
-        }}>
-          <option value="source">文本编辑器</option>
-          <option value="preview">Markdown 预览</option>
-        </select>
-      </label>}
+      {markdown && <MarkdownViewSwitch preview={preview} change={show =>
+        setMarkdownModes(previous => ({ ...previous, [path]: show ? 'preview' : 'source' }))} />}
     </div>}
     <div className="editor-host" ref={host} hidden={!props.path || preview} />
     {rendered && <div key={path} className="markdown-reader" role="region" aria-label={path + ' 预览'} tabIndex={0}>

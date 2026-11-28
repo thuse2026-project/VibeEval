@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { CandidateFrame } from '../../shared/components/CandidateFrame';
 import { api, ApiError } from '../../shared/api';
 import { statusLabels, formatTime } from '../../admin/submissions/types';
 
@@ -50,15 +51,14 @@ export default function Entry() {
     finally { setBusy(false); }
   }
 
-  return <div className="shell">
-    <header className="topbar"><a className="brand" href="/entry">VibeEval<span className="brand-separator">/</span><span className="brand-context">考生入场</span></a></header>
-    <main>{loading ? <div className="status-panel" role="status">正在检查并恢复入场会话…</div>
-      : connectionError ? <section className="status-panel"><h1>无法恢复会话</h1><p className="error" role="alert">{connectionError}</p><button className="primary" onClick={() => void restore()}>重新检查</button></section>
-      : session ? <section className="home-panel" aria-labelledby="entry-success">
-        <div className="section-label">入场确认</div>
+  return <CandidateFrame entryHref={workspace === '/r2-workspace' ? '/entry?mode=r2' : '/entry'}>
+    {loading ? <p role="status">正在检查并恢复入场会话…</p>
+      : connectionError ? <section className="entry-form"><h1>无法恢复会话</h1>
+        <p className="flow-error" role="alert">{connectionError}</p><button className="flow-primary" onClick={() => void restore()}>重新检查</button>
+      </section> : session ? <section className="entry-form" aria-labelledby="entry-success">
         <h1 id="entry-success">已入场，{session.candidate.name}</h1>
-        <p className="notice" role="status">{statusLabels[session.status]}</p>
-        <dl>
+        <p className="entry-state" role="status">{statusLabels[session.status]}</p>
+        <dl className="entry-facts">
           <div><dt>考核名称</dt><dd>{session.exam_info.title}</dd></div>
           <div><dt>考生编号</dt><dd>{session.candidate.id}</dd></div>
           <div><dt>作答时长</dt><dd>{session.exam_info.duration_minutes} 分钟</dd></div>
@@ -66,24 +66,22 @@ export default function Entry() {
           <div><dt>考试计时</dt><dd>{session.started_at === null ? '尚未开始计时' : `开始于 ${formatTime(session.started_at)}`}</dd></div>
           {session.deadline_at !== null && <div><dt>截止时间</dt><dd>{formatTime(session.deadline_at)}</dd></div>}
         </dl>
-        <p className="login-note">请保留当前浏览器的本站数据。刷新或重新打开本页可恢复原会话，无需再次输入凭证。</p>
-        <p className="login-note">状态来自共享会话；刷新此页不会重新计时。</p>
-        <p><a href={workspace}>进入工作台 / 恢复答卷</a></p>
-        <button className="secondary" onClick={() => void restore()}>检查并恢复会话</button>
-      </section> : <section className="login-panel" aria-labelledby="entry-title">
-        <div className="section-label">考核接入</div>
+        <div className="flow-actions"><a className="flow-primary" href={workspace}>进入工作台 / 恢复答卷</a>
+          <button className="flow-link" onClick={() => void restore()}>检查并恢复会话</button></div>
+        <p className="flow-note">用当前浏览器重新打开即可恢复原会话，计时会继续。</p>
+      </section> : <section className="entry-form" aria-labelledby="entry-title">
         <h1 id="entry-title">考生入场</h1>
-        <p className="description">请输入考官分配给你的入场凭证。</p>
+        <p className="flow-intro">使用考官分配的凭证进入考试工作台。</p>
         <form onSubmit={admit}>
           <label htmlFor="entry-token">入场凭证</label>
           <input id="entry-token" name="token" type="password" autoComplete="off" spellCheck={false} required maxLength={256}
             placeholder="粘贴以 tok_ 开头的凭证" value={token} disabled={busy}
-            onChange={event => setToken(event.target.value)} aria-describedby="entry-help" />
-          {error && <p className="error" role="alert">{error}</p>}
-          <button className="primary" disabled={busy}>{busy ? '正在校验…' : '校验并入场'}</button>
+            onChange={event => setToken(event.target.value)} aria-describedby="entry-help" aria-invalid={Boolean(error)} />
+          {error && <p className="flow-error" role="alert">{error}</p>}
+          <button className="flow-primary" disabled={busy}>{busy ? '正在校验…' : '校验并入场'}</button>
         </form>
-        <p className="login-note" id="entry-help">凭证只用于首次入场。请使用准备作答的浏览器；换设备或清除本站数据后，请联系考官。</p>
-      </section>}</main>
-    <footer>VibeEval · 入场验证</footer>
-  </div>;
+        <aside id="entry-help" className="entry-help"><h2>关于会话恢复</h2>
+          <p>凭证只需在首次入场时使用。请保留当前浏览器的本站数据。如需更换设备，或已清除数据，请联系考官。</p></aside>
+      </section>}
+  </CandidateFrame>;
 }

@@ -25,6 +25,7 @@ type Props = {
   activeReadonly: boolean
   saveState: SaveState
   sessionId: string | null
+  showTerminal?: boolean
   terminalPrefix?: string
   resizable?: boolean
   problem?: (selectFile: SelectFile) => ReactNode
@@ -78,6 +79,7 @@ export function WorkspaceScreen({
   saveState,
   sessionId,
   terminalPrefix,
+  showTerminal = true,
   resizable = false,
   problem,
   verification,
@@ -200,7 +202,7 @@ export function WorkspaceScreen({
       <div className="ide-topbar">
         <span className="brand-mark" aria-hidden="true">&lt;/&gt;</span>
         <span className="logo">VibeEval</span>
-        <span className="task">{themed && '第三题 / '}{title}</span>
+        <span className="task">{title}</span>
         {themed && <span className="spacer" />}
         <span className="timer mono">{submitting || processing ? '正在提交…' : practice ? <small>测试模式 · 本阶段不计时</small> : <><small>剩余 </small>{formatRemaining(remaining)}</>}</span>
         <span className={`save-state ${saveState}`}>
@@ -268,16 +270,18 @@ export function WorkspaceScreen({
             onClose={closeFile}
             onChange={onEdit}
           />
-          {resizable && termOpen && <PaneResize horizontal label="调整终端高度" min={14} max={65} value={terminalHeight} change={setTerminalHeight} />}
-          <div className="ide-terminal" hidden={!termOpen} style={resizable ? { height: terminalHeight + '%' } : undefined}>
-            <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
-              visible={termOpen} onCollapse={() => setTermOpen(false)} />
-          </div>
-          {!termOpen && (
-            <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
-              展开终端
-            </button>
-          )}
+          {showTerminal && <>
+            {resizable && termOpen && <PaneResize horizontal label="调整终端高度" min={14} max={65} value={terminalHeight} change={setTerminalHeight} />}
+            <div className="ide-terminal" hidden={!termOpen} style={resizable ? { height: terminalHeight + '%' } : undefined}>
+              <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
+                visible={termOpen} onCollapse={() => setTermOpen(false)} />
+            </div>
+            {!termOpen && (
+              <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
+                展开终端
+              </button>
+            )}
+          </>}
         </div>
         {resizable && agentOpen && divider('agent')}
         {agentScope && agentOpened && <AgentPanel key={agentScope} sessionId={agentScope}

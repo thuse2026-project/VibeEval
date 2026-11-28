@@ -185,10 +185,10 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
   const questionBody = selected?.body
   const document = useMemo(() => themed && questionBody ? renderMarkdown(questionBody, true) : null, [themed, questionBody])
   const draft = active ? drafts[active] : undefined
-  return <AnswerWorkspace state={state} remaining={remaining} status={Object.values(drafts).some(d => d.status !== 'saved') ? '有未保存的回答' : '已保存'}
+  return <AnswerWorkspace state={state} remaining={remaining}
     busy={busy || !questions.length} submit={submit} questions={questions} active={active} select={setActive}
     answered={id => Boolean(drafts[id]?.value.trim())} alerts={error && <p className="r2-page-alert" role="alert">{error}</p>}
-    notes={notes} files={<ReadonlyFiles phase={phase} notes={state.current_stage.key === 'column-statistics' ? undefined : notes} sha={frozen?.sha256} />}
+    notes={notes} files={<ReadonlyFiles phase={phase} sha={frozen?.sha256} />}
     evidence={frozen && <EvidenceView phase={phase} frozen={frozen} />}>
       <section className="r2-answer-panel">
         {selected ? <><h1>{selected.title}</h1>{
