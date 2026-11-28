@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { FileTree } from '../../shared/components/FileTree'
 import type { FileEntry, SaveState } from '../../shared/types'
 import { WorkspaceScreen } from '../workspace/WorkspaceScreen'
-import { examRequest, v2, type Attempt } from './api'
+import { examRequest, stageTitle, v2, type Attempt } from './api'
 
 type Props = {
   state: Attempt; remaining: number; busy: boolean; modelReady?: boolean
@@ -53,13 +53,13 @@ export function ReadingWorkspace({ state, remaining, busy, modelReady, notes, ed
     {alerts}
     {error && <div role="alert" className="workspace-alert">{error}
       <button onClick={() => { setError(''); setRetry(i => i + 1) }}>重新读取</button></div>}
-    <WorkspaceScreen title={state.current_stage.title + ' · ' + state.current_phase.title}
+    <WorkspaceScreen showTerminal={false} title={stageTitle(state) + ' · ' + state.current_phase.title}
       initialProblem={state.current_phase.key === 'inspect'} remaining={remaining} resizable files={tree} activePath={path}
       filesPane={(select, selected) => <FileTree files={tree} directories activePath={selected} onSelect={select} />}
-      problem={selectFile => <div className="problem-pane"><h2>{state.current_phase.title}</h2>
-        {editNotes ? '阅读仓库源码，可在 note.md 记录探索笔记。结束探索后独立回答五问。'
+      problem={selectFile => <div className="problem-pane task-document reading-task"><h2>{state.current_phase.title}</h2>
+        {editNotes ? <p>阅读仓库源码，可在 <button className="note-link" onClick={() => selectFile('note.md')}>note.md</button> 记录探索笔记。结束探索后独立回答五问。</p>
           : <><p>同事修改了 TinyDB 的表操作。请按以下公开规则审阅实现，并记录你能用代码解释的行为差异。</p>
-            <button onClick={() => selectFile('repository/tinydb/table.py')}>打开 table.py</button>
+            <button className="source-link" onClick={() => selectFile('repository/tinydb/table.py')}>打开 table.py</button>
             <h3>预期行为</h3><ul>
               <li>各命名表相互独立。插入的文档可读，自动编号与当前表已有编号不冲突，重新打开数据库后仍可插入。</li>
               <li>查询返回当前匹配的文档；更新或删除后再次查询须反映新状态。字段缺失不应中断普通查询。</li>

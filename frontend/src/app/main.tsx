@@ -9,6 +9,9 @@ import StageReview from '../admin/submissions/StageReview';
 import ExaminerRooms from '../admin/submissions/ExaminerRooms';
 import { api, ApiError, type Examiner } from '../shared/api';
 import './style.css';
+import { CandidateAppearance } from '../shared/components/CandidateAppearance';
+import { CandidateFrame } from '../shared/components/CandidateFrame';
+import '../candidate/entry/candidateFlow.css';
 
 const CandidateWorkspace = lazy(() => import('../candidate/workspace/CandidateWorkspace'));
 const MultiStage = lazy(() => import('../candidate/multistage/MultiStage'));
@@ -130,4 +133,9 @@ function App() {
 const candidateEntry = window.location.pathname === '/' || window.location.pathname === '/entry' || window.location.pathname === '/entry/';
 const workspace = window.location.pathname === '/workspace' || window.location.pathname === '/workspace/';
 const multiStage = window.location.pathname === '/r2-workspace';
-createRoot(document.getElementById('root')!).render(workspace || multiStage ? <Suspense fallback={<p role="status">正在加载工作台…</p>}>{multiStage ? <MultiStage /> : <CandidateWorkspace />}</Suspense> : candidateEntry ? <Entry /> : <StrictMode><App /></StrictMode>);
+const loadingWorkspace = <p role="status">正在加载工作台…</p>;
+createRoot(document.getElementById('root')!).render(
+  candidateEntry || multiStage ? <CandidateAppearance>
+    {candidateEntry ? <Entry /> : <Suspense fallback={<CandidateFrame>{loadingWorkspace}</CandidateFrame>}><MultiStage /></Suspense>}
+  </CandidateAppearance> : workspace ? <Suspense fallback={loadingWorkspace}><CandidateWorkspace /></Suspense> : <StrictMode><App /></StrictMode>
+);

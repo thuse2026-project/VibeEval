@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { renderMarkdown } from '../../shared/markdown'
 import { ReadonlyFiles } from './ReadonlyFiles'
 import { AnswerWorkspace } from './AnswerWorkspace'
 import { ReadingWorkspace } from './ReadingWorkspace'
@@ -54,10 +55,10 @@ export function ReportEditor({
   change: (value: Report) => void
 }) {
   return (
-    <section>
-      <label>
+    <section className="report-editor">
+      <label className="report-conclusion">
         审阅结论{' '}
-        <select
+        <select id="report-conclusion"
           value={value.conclusion}
           onChange={(e) => {
             const conclusion = e.target.value as Report['conclusion']
@@ -79,9 +80,9 @@ export function ReportEditor({
         </select>
       </label>
       {value.reports.map((item, i) => (
-        <fieldset key={i}>
+        <fieldset key={i} id={`finding-${i+1}`} tabIndex={-1}>
           <legend>报告 {i + 1}</legend>
-          {fields.map((k) => (
+          <div className="report-fields">{fields.map((k) => (
             <label key={k}>
               {labels[k]}
               <textarea
@@ -98,8 +99,8 @@ export function ReportEditor({
                 }}
               />
             </label>
-          ))}
-          <small>
+          ))}</div>
+          <div className="report-row-actions"><small>
             {fields.reduce((a, k) => a + count(item[k]), 0)} / 1200 字符
           </small>
           <button
@@ -112,10 +113,10 @@ export function ReportEditor({
             }
           >
             移除此条
-          </button>
+          </button></div>
         </fieldset>
       ))}
-      <button
+      <button className="report-add"
         type="button"
         disabled={value.reports.length >= 5}
         onClick={() =>
@@ -362,6 +363,8 @@ export function TinyDbStage({
       )}
     </>
   const locked = !loaded || busy || !!conflict
+  const q = problems[questionIndex]
+  const document = useMemo(() => q ? renderMarkdown(q.body, true) : null, [q])
   if (explore) return <ReadingWorkspace state={state} remaining={remaining} modelReady={modelReady}
     busy={locked} saveState={conflict ? 'conflict' : error ? 'error' : status === '已保存' ? 'saved' : 'idle'}
     processing={busy} saveNote={() => void flush().catch(e => setError(String(e)))}
@@ -380,21 +383,28 @@ export function TinyDbStage({
     notes={readNotes && loaded ? String(values.notes ?? '') : undefined} noteRevision={revisions.current.notes}
     editNotes={canEditNotes ? value => update('notes', value) : undefined}
     submitLabel={canEditNotes ? '结束探索，进入独立答题' : '结束阅读，填写报告'} submit={finish} alerts={alerts} />
-  const q = problems[questionIndex]
-  return <AnswerWorkspace state={state} remaining={remaining} status={status} busy={locked} submit={finish}
+  const findings = q?.id === 'findings' ? (values.findings as Report | undefined) ?? blankReport : null
+  const navigation = findings && problems.length === 1 ? <>
+    <h2>审阅报告</h2>
+    <a className="report-index-link" href="#report-conclusion">审阅结论</a>
+    {findings.reports.map((row, i) => <a key={i} className="report-index-link" href={`#finding-${i+1}`}>
+      报告 {i+1}{row.location && <small title={row.location}>{row.location}</small>}
+    </a>)}
+  </> : undefined
+  return <AnswerWorkspace navigation={navigation} state={state} remaining={remaining} busy={locked} submit={finish}
     questions={problems} active={q?.id ?? ''} select={id => selectQuestion(problems.findIndex(p => p.id === id))}
     answered={id => { const v = values[id]; return typeof v === 'string' ? !!v.trim() : !!v && v.conclusion !== 'undecided' }}
-    alerts={alerts} files={<ReadonlyFiles phase={phase} notes={readNotes ? String(values.notes ?? '') : undefined} />}>
+    alerts={alerts} initialNotes={readNotes} notes={readNotes ? String(values.notes ?? '') : undefined} files={<ReadonlyFiles phase={phase} initialPath={state.current_stage.key === 'tinydb-review' ? 'repository/tinydb/table.py' : undefined} />}>
     <fieldset disabled={!loaded || busy || remaining <= 0}>{q && (
-            <section key={q.id}>
-              <h2>{q.title}</h2>
+            <section key={q.id} className="reading-answer">
+              <h1>{q.title}</h1>
               {q.id === 'findings' ? <>
-                <p>{q.body.trim().split(/\n\s*\n/)[1]}</p>
-                <details><summary>查看完整审阅任务和适用规则</summary><pre>{q.body}</pre></details>
-              </> : <pre>{q.body}</pre>}
+                <div className="task-document report-brief" dangerouslySetInnerHTML={renderMarkdown(q.body.trim().split(/\n\s*\n/)[1] || q.body, true)} />
+                <details className="report-rules"><summary>查看完整审阅任务和适用规则</summary>{document && <article className="task-document" dangerouslySetInnerHTML={document} />}</details>
+              </> : document && <div className="task-document" dangerouslySetInnerHTML={document} />}
               {q.id === 'findings' ? (
                 <ReportEditor
-                  value={(values[q.id] as Report) ?? blankReport}
+                  value={findings ?? blankReport}
                   change={(v) => update(q.id, v)}
                 />
               ) : (
@@ -406,6 +416,7 @@ export function TinyDbStage({
                   />
                 </label>
               )}
+              <div className="answer-save-status"><span>{q.id === 'findings' ? `已添加 ${findings?.reports.length ?? 0} / 5 条报告` : `${count(String(values[q.id] ?? ''))} / 1500`}</span><span role="status">{conflict ? '版本冲突' : status}</span></div>
             </section>
           )}</fieldset>
   </AnswerWorkspace>

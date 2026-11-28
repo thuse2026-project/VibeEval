@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { renderMarkdown } from '../../shared/markdown'
+import { WorkspaceIcon } from '../../shared/components/WorkspaceIcon'
 import { FileTree } from '../../shared/components/FileTree'
 import type { FileContentResponse, FileEntry, SaveFileResponse } from '../../shared/types'
 import { SaveQueue } from '../workspace/SaveQueue'
@@ -7,9 +9,11 @@ import { WorkspaceScreen } from '../workspace/WorkspaceScreen'
 import { DatasetteVerification, hasDatasetteVerification } from './DatasetteVerification'
 import '../workspace/workspace.css'
 import type { AgentFileChange } from '../workspace/AgentPanelV2'
-import { command, current, examRequest, type Attempt, type Receipt, v2 } from './api'
+import { command, current, examRequest, type Attempt, type Receipt, stageTitle, v2 } from './api'
 import { QuestionStage } from './QuestionStage'
 import './multistage.css'
+import { CandidateFrame } from '../../shared/components/CandidateFrame'
+import './candidateAppearance.css'
 
 // The private preview can extend a manually selected attempt to the last supported date.
 const PRACTICE_DEADLINE = 253402300799
@@ -27,6 +31,7 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
   const [text, setText] = useState('')
   const [summaryRevision, setSummaryRevision] = useState(0)
   const [question, setQuestion] = useState('')
+  const taskDocument = useMemo(() => question ? renderMarkdown(question, true) : null, [question])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [testRunning, setTestRunning] = useState(false)
@@ -196,7 +201,7 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       <button disabled={locked} onClick={() => handle(() => resolveAgentConflict(false))}>使用服务器版本</button>
       <button disabled={locked} onClick={() => handle(() => resolveAgentConflict(true))}>保存我的草稿</button>
     </div>}
-    <WorkspaceScreen title={state.current_stage.title} remaining={remaining}
+    <WorkspaceScreen title={stageTitle(state)} remaining={remaining}
       practice={state.current_phase.deadline_at === PRACTICE_DEADLINE} files={files} openFiles={openFiles}
       activePath={selected || null} content={draft?.content ?? ''} editorRevision={revision}
       loadingPath={loadingPath}
@@ -217,15 +222,16 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       terminalPrefix="/api/v2/phases/" resizable
       filesPane={(selectFile, activePath) => <FileTree files={files} activePath={activePath} onSelect={selectFile} directories />}
       problem={selectFile => <div className="problem-pane r2-problem">
+        {taskDocument && <article className="task-document" dangerouslySetInnerHTML={taskDocument} />}
         {files.some(file => !file.readonly) && <section className="r2-editable-files">
           <h2>可编辑文件</h2>
           {files.filter(file => !file.readonly).map(file => <button key={file.path} title={file.path}
-            onClick={() => selectFile(file.path)}>{file.path}</button>)}
+            onClick={() => selectFile(file.path)}><WorkspaceIcon name="code" />{file.path}</button>)}
         </section>}
-        <pre>{question || '正在读取题目…'}</pre>
+        {!taskDocument && <pre>{question || '正在读取题目…'}</pre>}
       </div>}
-      verification={hasDatasetteVerification(state.current_stage.key) ? (openTerminal, selectFile) =>
-        <DatasetteVerification phaseId={phase} task={state.current_stage.key} disabled={locked || !terminalAvailable}
+      verification={hasDatasetteVerification(state.current_stage.key) ? (openTerminal, selectFile, panel) =>
+        <DatasetteVerification panel={panel} phaseId={phase} task={state.current_stage.key} disabled={locked || !terminalAvailable}
           flush={() => queue.flush()} openTerminal={openTerminal} openFile={selectFile} onRunningChange={setTestRunning} /> : undefined}
       agentScope={remaining > 0 && state.capabilities.includes('use_agent') ? phase : null}
       initialAgentOpen={state.capabilities.includes('use_agent')}
@@ -271,8 +277,13 @@ export default function MultiStage() {
     async function start() {
       const entry = await examRequest<{ session_id: string }>('/api/v1/sessions/current', 'GET', undefined, abort.signal)
       const result = await examRequest<Attempt>(`/api/v1/sessions/${entry.session_id}/exam-access`, 'POST', {}, abort.signal)
-      const model = await examRequest<{ configured: boolean }>('/r2-preview/model', 'GET', undefined, abort.signal)
-      if (!abort.signal.aborted) { setModelReady(model.configured); accept(result) }
+      if (abort.signal.aborted) return
+      accept(result)
+      // Older API-only installations omit this optional model configuration hint.
+      // Phase capabilities and the Agent API still enforce access on those installations.
+      const ready = await examRequest<{ configured: boolean }>('/r2-preview/model', 'GET', undefined, abort.signal)
+        .then(model => model.configured !== false, () => true)
+      if (!abort.signal.aborted) setModelReady(ready)
     }
     void start().catch(failure => { if (!abort.signal.aborted) setError((failure as Error).message) })
     const clockTimer = window.setInterval(() => setClock(performance.now()), 300)
@@ -308,40 +319,39 @@ export default function MultiStage() {
     if (state.current_stage.key.startsWith('tinydb-')) {
       return <TinyDbStage key={state.current_phase.id} state={state} remaining={remaining} refresh={refresh} modelReady={modelReady} />
     }
-    if (state.current_phase.key === 'answer' || state.current_phase.key === 'interview' || state.capabilities.includes('read_frozen_code')) {
-      return <QuestionStage key={state.current_phase.id} state={state} refresh={refresh} remaining={remaining} />
-    }
-    return <CodeStage key={state.current_phase.id} state={state} modelReady={modelReady} refresh={refresh} remaining={remaining} />
+    const answering = state.current_phase.key === 'answer' || state.current_phase.key === 'interview' || state.capabilities.includes('read_frozen_code')
+    return answering
+      ? <QuestionStage key={state.current_phase.id} state={state} refresh={refresh} remaining={remaining} />
+      : <CodeStage key={state.current_phase.id} state={state} modelReady={modelReady} refresh={refresh} remaining={remaining} />
   }
-  if (state?.status === 'completed' && state.stages.length === 4 && state.current_stage.key === 'facet-pagination') {
-    return <main className="r2-page"><section className="r2-flow-card"><h1>答卷已提交</h1><p>感谢作答，可以离场。</p></section></main>
-  }
-  return <div className="r2-page">
-    <header className="topbar"><a className="brand" href="/entry?mode=r2">VibeEval</a><span>{state?.stages.length === 4 ? '四题考试' : 'Datasette 两题联测'}</span></header>
-    <main>
-      <section className="r2-flow-card">
-        <h1>{state?.status === 'completed' ? '答卷已提交' : state?.current_stage.title ?? '正在进入工作台'}</h1>
-        {state?.stages.length === 4 && state.stages[0].id === state.current_stage.id && (
-          <section aria-label="考试须知">
-            <h2>考试须知</h2>
-            <p>第三、四题各有主观题。每题编程结束后显示完整题干，另有 10 分钟独立作答。</p>
-          </section>
-        )}
-        {state?.status === 'completed' && <p>感谢作答，可以离场。</p>}
-        {error && <p role="alert">{error} <a href="/entry?mode=r2">返回入场</a></p>}
-        {state?.error_code && <p role="alert">环境处理中：{state.error_code}</p>}
-        {state && state.status !== 'completed' && <ol className="r2-progress">{state.stages.map(item => <li key={item.id}
-          aria-current={item.id === state.current_stage.id && !item.receipt ? 'step' : undefined}>
-          <strong>{item.title}</strong>
-          <span>{item.receipt ? '已提交' : item.id === state.current_stage.id ? '当前阶段' : '待开始'}</span>
-          {item.receipt && <small>回执 <code>{item.receipt.id}</code>{item.receipt.close_reason === 'expired' && ' · 到时提交'}</small>}
-        </li>)}</ol>}
-        {deadline != null && <p>下一阶段将在 {Math.floor(remaining / 60)} 分 {String(remaining % 60).padStart(2, '0')} 秒后自动开始。</p>}
-        {state?.status === 'admitted' && <button className="primary" disabled={busy} onClick={() => void transition(`/attempts/${state.attempt_id}/prepare`)}>准备环境</button>}
-        {state?.status !== 'completed' && state?.current_stage.status === 'ready' && <button className="primary" disabled={busy}
-          onClick={() => void transition(state.status === 'ready' ? `/attempts/${state.attempt_id}/start` : `/stages/${state.current_stage.id}/start`)}>开始作答</button>}
-        {state && (state.status === 'preparing' || ['preparing', 'sealing'].includes(state.current_stage.status) || state.current_phase.status === 'closing') && <p role="status">正在准备环境或固定答卷…</p>}
-      </section>
-    </main>
-  </div>
+  if (state?.status === 'completed') return <CandidateFrame>
+    <section className="exam-departure"><span className="departure-mark"><WorkspaceIcon name="check" /></span>
+      <h1>答卷已提交</h1><p className="flow-intro">感谢作答，可以离场。</p>
+    </section>
+  </CandidateFrame>
+  const firstStage = state && state.stages[0]?.id === state.current_stage.id
+  const ready = state?.current_stage.status === 'ready'
+  const waiting = state && (state.status === 'preparing' || ['preparing', 'sealing'].includes(state.current_stage.status) || state.current_phase.status === 'closing')
+  return <CandidateFrame>
+    <div className="exam-overview"><section className="exam-next">
+      <h1>{state ? firstStage && state.status === 'admitted' ? '考前准备' : stageTitle(state) : error ? '无法进入工作台' : '正在进入工作台'}</h1>
+      {state?.stages.length === 4 && firstStage && <section className="exam-notice" aria-label="考试须知">
+        <h2>考试须知</h2><p>第三、四题各有主观题。每题编程结束后显示完整题干，另有 10 分钟独立作答。</p>
+      </section>}
+      {error && <p className="flow-error" role="alert">{error} <a href="/entry?mode=r2">返回入场</a></p>}
+      {state?.error_code && <p className="flow-error" role="alert">环境处理中：{state.error_code}</p>}
+      {waiting && <p role="status">正在准备环境或固定答卷…</p>}
+      {deadline != null && <p className="transition-time">下一阶段将在 <b>{Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}</b> 后自动开始。</p>}
+      {state?.status === 'admitted' && <button className="flow-primary" disabled={busy} onClick={() => void transition(`/attempts/${state.attempt_id}/prepare`)}>准备环境</button>}
+      {state && ready && <button className="flow-primary" disabled={busy}
+        onClick={() => void transition(state.status === 'ready' ? `/attempts/${state.attempt_id}/start` : `/stages/${state.current_stage.id}/start`)}>开始作答</button>}
+    </section>
+    {state && <aside className="exam-outline"><h2>考试进度</h2><ol>{state.stages.map((item, index) =>
+      <li key={item.id} aria-current={item.id === state.current_stage.id && !item.receipt ? 'step' : undefined}>
+        <span className="stage-number">{item.receipt ? <WorkspaceIcon name="check" /> : String(index+1).padStart(2,'0')}</span>
+        <div><strong>{item.title}</strong>{item.receipt && <small>回执 <code>{item.receipt.id}</code>{item.receipt.close_reason === 'expired' && ' · 到时提交'}</small>}</div>
+        <span>{item.receipt ? '已提交' : item.id === state.current_stage.id ? '当前阶段' : '待开始'}</span>
+      </li>)}</ol></aside>}
+    </div>
+  </CandidateFrame>
 }

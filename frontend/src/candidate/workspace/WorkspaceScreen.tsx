@@ -1,3 +1,6 @@
+import { WorkspaceIcon } from '../../shared/components/WorkspaceIcon'
+import { AppearanceSettings } from '../../shared/components/CandidateAppearance'
+import { useCandidateTheme } from '../../shared/candidateTheme'
 import { PaneResize } from '../../shared/components/PaneResize'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { CodeEditor } from '../../shared/components/Editor'
@@ -22,10 +25,11 @@ type Props = {
   activeReadonly: boolean
   saveState: SaveState
   sessionId: string | null
+  showTerminal?: boolean
   terminalPrefix?: string
   resizable?: boolean
   problem?: (selectFile: SelectFile) => ReactNode
-  verification?: (openTerminal: () => void, selectFile: SelectFile) => ReactNode
+  verification?: (openTerminal: () => void, selectFile: SelectFile, panel?: { open: boolean; show: () => void }) => ReactNode
   filesPane?: (selectFile: SelectFile, activePath: string | null) => ReactNode
   agentScope?: string | null
   agentPrefix?: string
@@ -75,6 +79,7 @@ export function WorkspaceScreen({
   saveState,
   sessionId,
   terminalPrefix,
+  showTerminal = true,
   resizable = false,
   problem,
   verification,
@@ -98,12 +103,13 @@ export function WorkspaceScreen({
   onEdit,
   onSubmit,
 }: Props) {
+  const themed = useCandidateTheme() !== null
   const [leftTab, setLeftTab] = useState<'files' | 'problem' | 'verification'>(initialProblem ? 'problem' : 'files')
   const [agentOpened, setAgentOpened] = useState(initialAgentOpen)
   const [agentVisible, setAgentVisible] = useState(initialAgentOpen)
   const agentOpen = Boolean(agentScope && agentVisible)
   const main = useRef<HTMLDivElement>(null)
-  const [fileWidth, setFileWidth] = useState(19)
+  const [fileWidth, setFileWidth] = useState(themed ? 22 : 19)
   const [agentWidth, setAgentWidth] = useState(27)
   const [termOpen, setTermOpen] = useState(true)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
@@ -138,13 +144,14 @@ export function WorkspaceScreen({
 
   async function closeFile(path: string) {
     if (discardFile && tabs.find(tab => tab.path === path)?.dirty) {
-      if (!window.confirm('当前修改尚未保存。放弃未保存的修改并关闭文件？') || !await discardFile(path)) return
+      if (!window.confirm('当前修改尚未保存。放弃未保存的修改并关闭文件？') || !await discardFile(path)) return false
     }
     setClosedPaths(previous => new Set(previous).add(path))
     if (path === editorPath) {
       const index = tabs.findIndex(tab => tab.path === path)
       onSelectFile(tabs[index + 1]?.path ?? tabs[index - 1]?.path ?? null)
     }
+    return true
   }
 
   function divider(side: 'files' | 'agent') {
@@ -196,22 +203,24 @@ export function WorkspaceScreen({
         <span className="brand-mark" aria-hidden="true">&lt;/&gt;</span>
         <span className="logo">VibeEval</span>
         <span className="task">{title}</span>
+        {themed && <span className="spacer" />}
         <span className="timer mono">{submitting || processing ? '正在提交…' : practice ? <small>测试模式 · 本阶段不计时</small> : <><small>剩余 </small>{formatRemaining(remaining)}</>}</span>
         <span className={`save-state ${saveState}`}>
           <span className="save-dot" />
           {saveLabel[saveState]}
         </span>
-        <span className="spacer" />
+        {!themed && <span className="spacer" />}
+        <AppearanceSettings />
         {saveFile && <button className="agent-open" title="保存当前文件 (Ctrl+S)" disabled={busy || activeReadonly || !editorPath} onClick={saveFile}>保存</button>}
         {agentScope && <button className="agent-open" aria-expanded={agentOpen} onClick={() => {
           setAgentOpened(true)
           setAgentVisible(!agentOpen)
         }}>Agent</button>}
-        <button className="submit" disabled={busy || remaining<=0} onClick={() => {
+        <button className="submit" aria-label={submitLabel} title={submitLabel} disabled={busy || remaining<=0} onClick={() => {
           if (directSubmit) { void onSubmit(); return }
           setSubmitError(null); setConfirmSubmit(true)
         }}>
-          {submitLabel}
+          {themed && continuesToQuestions ? '结束编程' : submitLabel}
         </button>
       </div>
 
@@ -219,21 +228,22 @@ export function WorkspaceScreen({
         style={resizable ? { '--file-width': `${fileWidth}%`, '--agent-width': `${agentWidth}%` } as CSSProperties : undefined}>
         <aside className="sidebar">
           <div className="tabs">
-            <button className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>
-              文件
+            <button aria-pressed={leftTab === 'files'} className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>
+              {themed && <WorkspaceIcon name="files" />}文件
             </button>
-            <button className={`tab ${leftTab === 'problem' ? 'active' : ''}`} onClick={() => setLeftTab('problem')}>
-              题目
+            <button aria-pressed={leftTab === 'problem'} className={`tab ${leftTab === 'problem' ? 'active' : ''}`} onClick={() => setLeftTab('problem')}>
+              {themed && <WorkspaceIcon name="book" />}题目
             </button>
-            {verification && <button className={`tab ${leftTab === 'verification' ? 'active' : ''}`} onClick={() => setLeftTab('verification')}>
-              验证
+            {verification && <button aria-pressed={leftTab === 'verification'} className={`tab ${leftTab === 'verification' ? 'active' : ''}`} onClick={() => setLeftTab('verification')}>
+              {themed && <WorkspaceIcon name="test" />}验证
             </button>}
           </div>
-          <div hidden={leftTab !== 'files'} className="tree-container">{filesPane?.(selectFile, editorPath) ?? <FileTree files={files} activePath={editorPath} onSelect={selectFile} />}</div>
-          {leftTab === 'verification' && verification ? verification(() => {
+          {verification && (themed || leftTab === 'verification') && verification(() => {
             setTermOpen(true)
             requestAnimationFrame(() => main.current?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')?.focus())
-          }, selectFile) : leftTab === 'problem' && (
+          }, selectFile, themed ? { open: leftTab === 'verification', show: () => setLeftTab('verification') } : undefined)}
+          <div hidden={leftTab !== 'files'} className="tree-container">{filesPane?.(selectFile, editorPath) ?? <FileTree files={files} activePath={editorPath} onSelect={selectFile} />}</div>
+          {leftTab === 'problem' && (
             problem?.(selectFile) ?? <div className="problem-pane">
               <span className="pane-caption">任务说明</span>
               <h2>会议室预约缺陷修复</h2>
@@ -260,16 +270,18 @@ export function WorkspaceScreen({
             onClose={closeFile}
             onChange={onEdit}
           />
-          {resizable && termOpen && <PaneResize horizontal label="调整终端高度" min={14} max={65} value={terminalHeight} change={setTerminalHeight} />}
-          <div className="ide-terminal" hidden={!termOpen} style={resizable ? { height: terminalHeight + '%' } : undefined}>
-            <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
-              visible={termOpen} onCollapse={() => setTermOpen(false)} />
-          </div>
-          {!termOpen && (
-            <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
-              展开终端
-            </button>
-          )}
+          {showTerminal && <>
+            {resizable && termOpen && <PaneResize horizontal label="调整终端高度" min={14} max={65} value={terminalHeight} change={setTerminalHeight} />}
+            <div className="ide-terminal" hidden={!termOpen} style={resizable ? { height: terminalHeight + '%' } : undefined}>
+              <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
+                visible={termOpen} onCollapse={() => setTermOpen(false)} />
+            </div>
+            {!termOpen && (
+              <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
+                展开终端
+              </button>
+            )}
+          </>}
         </div>
         {resizable && agentOpen && divider('agent')}
         {agentScope && agentOpened && <AgentPanel key={agentScope} sessionId={agentScope}

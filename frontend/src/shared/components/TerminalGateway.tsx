@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
+import { WorkspaceIcon } from './WorkspaceIcon'
+import { palettes, useCandidateTheme } from '../candidateTheme'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
 export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/sessions/', visible = true, onCollapse }: {
   sessionId: string | null; inputEnabled: boolean; apiPrefix?: string; visible?: boolean; onCollapse?: () => void
 }) {
+  const appearance = useCandidateTheme()
+  const theme = appearance?.theme
+  const polished = Boolean(theme)
+  const menu = useRef<HTMLDivElement>(null)
+  const [hasSelection, setHasSelection] = useState(false)
   const container = useRef<HTMLDivElement>(null)
   const [attempt, setAttempt] = useState(0)
   const [status, setStatus] = useState('终端未连接')
@@ -18,7 +25,13 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
   useEffect(() => {
     if (!container.current) return
     const term = new XTerm({
-      cursorBlink: true, fontSize: 13,
+      cursorBlink: true,
+      fontSize: polished ? 14 : 13,
+      ...(polished && {
+        fontFamily: '"Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", monospace',
+        lineHeight: 1.28, fontWeight: 400, fontWeightBold: 600,
+        cursorStyle: 'bar', cursorWidth: 2, cursorInactiveStyle: 'outline',
+      }),
       theme: { background: '#111827', foreground: '#d1d5db' },
     })
     const fit = new FitAddon()
@@ -31,6 +44,8 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
     term.attachCustomKeyEventHandler(event => {
       if (!(event.ctrlKey || event.metaKey)) return true
       if (event.key.toLowerCase() === 'v') {
+        // A native paste event is delivered to xterm's textarea, including multiline paste.
+        if (polished) return false
         if (!navigator.clipboard?.readText) return false
         event.preventDefault()
         if (event.type === 'keydown' && !event.repeat && allowInput.current && socket?.readyState === WebSocket.OPEN) {
@@ -99,7 +114,7 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
       observer.disconnect()
       term.dispose()
     }
-  }, [sessionId, attempt, apiPrefix])
+  }, [sessionId, attempt, apiPrefix, polished])
 
   useEffect(() => {
     if (!visible || !sessionId) return
@@ -109,29 +124,84 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
     return () => cancelAnimationFrame(frame)
   }, [visible, sessionId])
 
+  useEffect(() => {
+    if (terminal.current && theme) {
+      const palette = palettes[theme]
+      terminal.current.options.theme = { background: palette.surface, foreground: palette.ink,
+        cursor: palette.accent, selectionBackground: palette.selection }
+    }
+  }, [theme, sessionId, attempt, apiPrefix])
+
+  async function copySelection() {
+    const text = terminal.current?.getSelection()
+    if (!text) { setClipboardError('请先选中终端输出。'); return }
+    try {
+      await navigator.clipboard.writeText(text)
+      setClipboardError('')
+    } catch { setClipboardError('请使用 Ctrl+C 复制选区。') }
+  }
+
+  async function pasteClipboard() {
+    const target = terminal.current
+    try {
+      const text = await navigator.clipboard.readText()
+      if (target && target === terminal.current && allowInput.current) { target.focus(); target.paste(text) }
+      setClipboardError('')
+    } catch { setClipboardError('请在终端内按 Ctrl+V 粘贴。') }
+  }
+
+  function closeMenu() {
+    menu.current?.hidePopover()
+    terminal.current?.focus()
+  }
+
   return <div className="terminal-pane">
     <div className="terminal-head">
-      <span role="status">{sessionId ? status : '终端已禁用：当前不能写入'}</span>
+      {polished && <strong className="terminal-title"><WorkspaceIcon name="terminal" />终端</strong>}
+      <span className="terminal-connection" role="status" title={sessionId ? status : undefined} data-connected={Boolean(sessionId && status.startsWith('终端已连接'))}>
+        {sessionId ? (polished && status.startsWith('终端已连接') ? '/workspace' : status) : '终端已禁用：当前不能写入'}
+      </span>
       <div className="terminal-actions">
-        {sessionId && <><button disabled={!inputEnabled} onClick={async () => {
-          const target = terminal.current
-          try {
-            const text = await navigator.clipboard.readText()
-            if (target && target === terminal.current && allowInput.current) { target.focus(); target.paste(text) }
-            setClipboardError('')
-          } catch { focusTerminal.current?.(); setClipboardError('请在终端内按 Ctrl+V 粘贴。') }
-        }}>粘贴</button>
-        <button onClick={async () => {
-          const text = terminal.current?.getSelection()
-          if (!text) { setClipboardError('请先选中终端输出。'); return }
-          try { await navigator.clipboard.writeText(text); setClipboardError('') }
-          catch { setClipboardError('请使用系统复制快捷键。') }
-        }}>复制</button></>}
-        <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>
-        {onCollapse && <button onClick={onCollapse} title="折叠终端">折叠</button>}
+        {sessionId && !polished && <>
+          <button disabled={!inputEnabled} onClick={() => void pasteClipboard()}>粘贴</button>
+          <button onClick={() => void copySelection()}>复制</button>
+        </>}
+        <button aria-label="重新连接" title="重新连接" disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>{theme ? <WorkspaceIcon name="refresh" /> : '重新连接'}</button>
+        {onCollapse && <button aria-label="折叠" onClick={onCollapse} title="折叠终端">{theme ? <WorkspaceIcon name="collapse" /> : '折叠'}</button>}
       </div>
     </div>
     {clipboardError && <small role="status">{clipboardError}</small>}
-    <div ref={container} className="terminal-body" />
+    <div ref={container} className="terminal-body" onContextMenuCapture={event => {
+      const element = menu.current
+      if (!element || !navigator.clipboard || !terminal.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      setHasSelection(terminal.current.hasSelection())
+      element.showPopover()
+      const bounds = event.currentTarget.getBoundingClientRect()
+      const x = event.clientX || bounds.left + 12
+      const y = event.clientY || bounds.top + 8
+      element.style.left = Math.max(4, Math.min(x, window.innerWidth - element.offsetWidth - 4)) + 'px'
+      element.style.top = Math.max(4, Math.min(y, window.innerHeight - element.offsetHeight - 4)) + 'px'
+      element.focus()
+    }} />
+    {polished && <div ref={menu} popover="auto" role="menu" aria-label="终端操作" tabIndex={-1}
+      className="terminal-context-menu" onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); closeMenu(); return }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+        event.preventDefault()
+        const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:enabled')]
+        const index = items.findIndex(item => item === document.activeElement)
+        const step = event.key === 'ArrowDown' ? 1 : -1
+        const next = index < 0 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length
+        items[next]?.focus()
+      }}>
+      <button role="menuitem" aria-label="复制" disabled={!hasSelection} onClick={() => {
+        void copySelection(); closeMenu()
+      }}>复制<kbd>Ctrl+C</kbd></button>
+      <button role="menuitem" aria-label="粘贴" disabled={!inputEnabled || !sessionId} onClick={() => {
+        void pasteClipboard(); closeMenu()
+      }}>粘贴<kbd>Ctrl+V</kbd></button>
+    </div>}
   </div>
 }
