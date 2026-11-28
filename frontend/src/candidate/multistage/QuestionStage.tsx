@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { renderMarkdown } from '../../shared/markdown'
 import { useCandidateTheme } from '../../shared/candidateTheme'
 import { AnswerWorkspace } from './AnswerWorkspace'
 import { ReadonlyFiles } from './ReadonlyFiles'
@@ -73,6 +74,7 @@ function EvidenceFields({ data }: { data: Record<string, unknown> }) {
 export function QuestionStage({ state, remaining, refresh }: { state: Attempt; remaining: number; refresh: () => Promise<void> }) {
   const phase = state.current_phase.id
   const prefix = `${v2}/phases/${phase}`
+  const themed = useCandidateTheme() !== null
   const [questions, setQuestions] = useState<Question[]>([])
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const draftsRef = useRef<Record<string, Draft>>({})
@@ -180,6 +182,8 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
   }
 
   const selected = questions.find(question => question.id === active)
+  const questionBody = selected?.body
+  const document = useMemo(() => themed && questionBody ? renderMarkdown(questionBody, true) : null, [themed, questionBody])
   const draft = active ? drafts[active] : undefined
   return <AnswerWorkspace state={state} remaining={remaining} status={Object.values(drafts).some(d => d.status !== 'saved') ? '有未保存的回答' : '已保存'}
     busy={busy || !questions.length} submit={submit} questions={questions} active={active} select={setActive}
@@ -187,7 +191,9 @@ export function QuestionStage({ state, remaining, refresh }: { state: Attempt; r
     notes={notes} files={<ReadonlyFiles phase={phase} notes={state.current_stage.key === 'column-statistics' ? undefined : notes} sha={frozen?.sha256} />}
     evidence={frozen && <EvidenceView phase={phase} frozen={frozen} />}>
       <section className="r2-answer-panel">
-        {selected ? <><h1>{selected.title}</h1><p className="r2-question-body">{selected.body}</p>
+        {selected ? <><h1>{selected.title}</h1>{
+          document ? <div className="r2-question-body task-document" dangerouslySetInnerHTML={document} />
+            : <p className="r2-question-body">{selected.body}</p>}
           <label htmlFor="r2-answer">你的回答</label><textarea id="r2-answer" rows={14} maxLength={selected.answer_schema?.maxLength ?? 1500} disabled={busy || remaining <= 0} value={draft?.value ?? ''} onChange={event => edit(selected.id, event.target.value)} />
           <div className="r2-answer-status"><span>{draft?.value.length ?? 0} / {selected.answer_schema?.maxLength ?? 1500}</span><span>{draft?.status === 'saving' ? '正在保存…' : draft?.status === 'saved' ? '已保存' : draft?.status === 'conflict' ? '版本冲突，草稿已保留' : '尚未保存'}</span></div>
           {draft?.message && <div role="alert">{draft.message}

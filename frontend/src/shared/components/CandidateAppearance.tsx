@@ -1,3 +1,4 @@
+import { WorkspaceIcon } from './WorkspaceIcon'
 import { useId, useState, type CSSProperties, type ReactNode } from 'react'
 import { CandidateThemeContext, palettes, useCandidateTheme, type CandidateTheme } from '../candidateTheme'
 
@@ -27,7 +28,7 @@ export function AppearanceSettings() {
   const id = useId()
   if (!appearance) return null
   return <div className="appearance-settings">
-    <button type="button" popoverTarget={id}>设置</button>
+    <button type="button" popoverTarget={id} aria-label="设置" title="设置"><WorkspaceIcon name="settings" /></button>
     <div id={id} popover="auto" className="appearance-menu">
       <label>界面主题<select value={appearance.theme} onChange={event => appearance.select(event.target.value as CandidateTheme)}>
         {Object.entries(palettes).map(([key, palette]) => <option key={key} value={key}>{palette.label}</option>)}

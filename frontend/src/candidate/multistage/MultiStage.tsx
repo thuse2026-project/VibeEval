@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { renderMarkdown } from '../../shared/markdown'
+import { WorkspaceIcon } from '../../shared/components/WorkspaceIcon'
 import { FileTree } from '../../shared/components/FileTree'
 import type { FileContentResponse, FileEntry, SaveFileResponse } from '../../shared/types'
 import { SaveQueue } from '../workspace/SaveQueue'
@@ -29,6 +31,8 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
   const [text, setText] = useState('')
   const [summaryRevision, setSummaryRevision] = useState(0)
   const [question, setQuestion] = useState('')
+  const polish = state.current_stage.key === 'column-statistics'
+  const taskDocument = useMemo(() => polish ? renderMarkdown(question, true) : null, [polish, question])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [testRunning, setTestRunning] = useState(false)
@@ -219,12 +223,13 @@ function CodeStage({ state, modelReady, refresh, remaining }: {
       terminalPrefix="/api/v2/phases/" resizable
       filesPane={(selectFile, activePath) => <FileTree files={files} activePath={activePath} onSelect={selectFile} directories />}
       problem={selectFile => <div className="problem-pane r2-problem">
+        {taskDocument && <article className="task-document" dangerouslySetInnerHTML={taskDocument} />}
         {files.some(file => !file.readonly) && <section className="r2-editable-files">
           <h2>可编辑文件</h2>
           {files.filter(file => !file.readonly).map(file => <button key={file.path} title={file.path}
-            onClick={() => selectFile(file.path)}>{file.path}</button>)}
+            onClick={() => selectFile(file.path)}>{polish && <WorkspaceIcon name="code" />}{file.path}</button>)}
         </section>}
-        <pre>{question || '正在读取题目…'}</pre>
+        {(!taskDocument || !question) && <pre>{question || '正在读取题目…'}</pre>}
       </div>}
       verification={hasDatasetteVerification(state.current_stage.key) ? (openTerminal, selectFile, panel) =>
         <DatasetteVerification panel={panel} phaseId={phase} task={state.current_stage.key} disabled={locked || !terminalAvailable}

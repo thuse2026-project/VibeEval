@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
+import { WorkspaceIcon } from './WorkspaceIcon'
 import { palettes, useCandidateTheme } from '../candidateTheme'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -124,22 +125,22 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
     <div className="terminal-head">
       <span role="status">{sessionId ? status : '终端已禁用：当前不能写入'}</span>
       <div className="terminal-actions">
-        {sessionId && <><button disabled={!inputEnabled} onClick={async () => {
+        {sessionId && <><button aria-label="粘贴" title="粘贴" disabled={!inputEnabled} onClick={async () => {
           const target = terminal.current
           try {
             const text = await navigator.clipboard.readText()
             if (target && target === terminal.current && allowInput.current) { target.focus(); target.paste(text) }
             setClipboardError('')
           } catch { focusTerminal.current?.(); setClipboardError('请在终端内按 Ctrl+V 粘贴。') }
-        }}>粘贴</button>
-        <button onClick={async () => {
+        }}>{theme ? <WorkspaceIcon name="clipboard" /> : '粘贴'}</button>
+        <button aria-label="复制" title="复制选区" onClick={async () => {
           const text = terminal.current?.getSelection()
           if (!text) { setClipboardError('请先选中终端输出。'); return }
           try { await navigator.clipboard.writeText(text); setClipboardError('') }
           catch { setClipboardError('请使用系统复制快捷键。') }
-        }}>复制</button></>}
-        <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>
-        {onCollapse && <button onClick={onCollapse} title="折叠终端">折叠</button>}
+        }}>{theme ? <WorkspaceIcon name="copy" /> : '复制'}</button></>}
+        <button aria-label="重新连接" title="重新连接" disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>{theme ? <WorkspaceIcon name="refresh" /> : '重新连接'}</button>
+        {onCollapse && <button aria-label="折叠" onClick={onCollapse} title="折叠终端">{theme ? <WorkspaceIcon name="collapse" /> : '折叠'}</button>}
       </div>
     </div>
     {clipboardError && <small role="status">{clipboardError}</small>}

@@ -4,6 +4,7 @@ import 'monaco-editor/languages/definitions/python/register.js'
 import 'monaco-editor/languages/definitions/markdown/register.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import { palettes, useCandidateTheme } from '../candidateTheme'
+import { WorkspaceIcon } from './WorkspaceIcon'
 import { languageFromPath } from '../format'
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
@@ -98,8 +99,15 @@ export function CodeEditor(props: Props) {
     if (!theme) return
     const palette = palettes[theme]
     const name = 'candidate-' + theme
+    editor.current?.updateOptions({ fontSize: 14, lineHeight: 22, padding: { top: 9, bottom: 10 },
+      fontFamily: '"Cascadia Code", Consolas, "Noto Sans SC", monospace' })
     monaco.editor.defineTheme(name, {
-      base: theme === 'graphite' ? 'vs-dark' : 'vs', inherit: true, rules: [],
+      base: theme === 'graphite' ? 'vs-dark' : 'vs', inherit: true,
+      rules: [
+        { token: 'keyword', foreground: palette.accent.slice(1) },
+        { token: 'comment', foreground: palette.muted.slice(1) },
+        { token: 'string', foreground: theme === 'graphite' ? 'c7d4a3' : '47683c' },
+      ],
       colors: { 'editor.background': palette.surface, 'editor.foreground': palette.ink,
         'editorLineNumber.foreground': palette.muted, 'editor.selectionBackground': palette.selection,
         'editor.lineHighlightBorder': '#00000000' },
@@ -114,7 +122,7 @@ export function CodeEditor(props: Props) {
           disabled={props.selectDisabled} onClick={() => props.onSelect(tab.path)}>
           <span className="editor-tab-name">{theme ? tab.path.split('/').pop() : tab.path}</span>
           {tab.dirty && <span aria-label="未保存修改">●</span>}
-          {tab.readonly && <span className="tag gray">只读</span>}
+          {tab.readonly && <span className="tag gray" title="只读" aria-label="只读">{theme ? <WorkspaceIcon name="lock" /> : '只读'}</span>}
         </button>
         <button type="button" className="editor-tab-close" aria-label={`关闭 ${tab.path}`} title={`关闭 ${tab.path}`}
           disabled={props.closeDisabled} onClick={() => props.onClose(tab.path)}>×</button>

@@ -1,3 +1,4 @@
+import { WorkspaceIcon } from '../../shared/components/WorkspaceIcon'
 import { AppearanceSettings } from '../../shared/components/CandidateAppearance'
 import { useCandidateTheme } from '../../shared/candidateTheme'
 import { PaneResize } from '../../shared/components/PaneResize'
@@ -106,7 +107,7 @@ export function WorkspaceScreen({
   const [agentVisible, setAgentVisible] = useState(initialAgentOpen)
   const agentOpen = Boolean(agentScope && agentVisible)
   const main = useRef<HTMLDivElement>(null)
-  const [fileWidth, setFileWidth] = useState(19)
+  const [fileWidth, setFileWidth] = useState(themed ? 22 : 19)
   const [agentWidth, setAgentWidth] = useState(27)
   const [termOpen, setTermOpen] = useState(true)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
@@ -199,23 +200,24 @@ export function WorkspaceScreen({
         <span className="brand-mark" aria-hidden="true">&lt;/&gt;</span>
         <span className="logo">VibeEval</span>
         <span className="task">{themed && '第三题 / '}{title}</span>
+        {themed && <span className="spacer" />}
         <span className="timer mono">{submitting || processing ? '正在提交…' : practice ? <small>测试模式 · 本阶段不计时</small> : <><small>剩余 </small>{formatRemaining(remaining)}</>}</span>
         <span className={`save-state ${saveState}`}>
           <span className="save-dot" />
           {saveLabel[saveState]}
         </span>
-        <span className="spacer" />
+        {!themed && <span className="spacer" />}
         <AppearanceSettings />
         {saveFile && <button className="agent-open" title="保存当前文件 (Ctrl+S)" disabled={busy || activeReadonly || !editorPath} onClick={saveFile}>保存</button>}
         {agentScope && <button className="agent-open" aria-expanded={agentOpen} onClick={() => {
           setAgentOpened(true)
           setAgentVisible(!agentOpen)
         }}>Agent</button>}
-        <button className="submit" disabled={busy || remaining<=0} onClick={() => {
+        <button className="submit" aria-label={submitLabel} title={submitLabel} disabled={busy || remaining<=0} onClick={() => {
           if (directSubmit) { void onSubmit(); return }
           setSubmitError(null); setConfirmSubmit(true)
         }}>
-          {submitLabel}
+          {themed && continuesToQuestions ? '结束编程' : submitLabel}
         </button>
       </div>
 
@@ -223,14 +225,14 @@ export function WorkspaceScreen({
         style={resizable ? { '--file-width': `${fileWidth}%`, '--agent-width': `${agentWidth}%` } as CSSProperties : undefined}>
         <aside className="sidebar">
           <div className="tabs">
-            <button className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>
-              文件
+            <button aria-pressed={leftTab === 'files'} className={`tab ${leftTab === 'files' ? 'active' : ''}`} onClick={() => setLeftTab('files')}>
+              {themed && <WorkspaceIcon name="files" />}文件
             </button>
-            <button className={`tab ${leftTab === 'problem' ? 'active' : ''}`} onClick={() => setLeftTab('problem')}>
-              题目
+            <button aria-pressed={leftTab === 'problem'} className={`tab ${leftTab === 'problem' ? 'active' : ''}`} onClick={() => setLeftTab('problem')}>
+              {themed && <WorkspaceIcon name="book" />}题目
             </button>
-            {verification && <button className={`tab ${leftTab === 'verification' ? 'active' : ''}`} onClick={() => setLeftTab('verification')}>
-              验证
+            {verification && <button aria-pressed={leftTab === 'verification'} className={`tab ${leftTab === 'verification' ? 'active' : ''}`} onClick={() => setLeftTab('verification')}>
+              {themed && <WorkspaceIcon name="test" />}验证
             </button>}
           </div>
           {verification && (themed || leftTab === 'verification') && verification(() => {

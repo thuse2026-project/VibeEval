@@ -1,3 +1,5 @@
+import { WorkspaceIcon } from './WorkspaceIcon'
+import { useCandidateTheme } from '../candidateTheme'
 import { useMemo, useState } from 'react'
 import type { FileEntry } from '../types'
 
@@ -38,6 +40,7 @@ function sortFiles(files: FileEntry[]): FileEntry[] {
 }
 
 export function FileTree({ files, activePath, onSelect, directories = false }: Props) {
+  const themed = useCandidateTheme() !== null
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => directories ? directoryTree(files) : null, [directories, files])
@@ -48,7 +51,7 @@ export function FileTree({ files, activePath, onSelect, directories = false }: P
       onClick={() => !file.is_dir && onSelect(file.path)}
       aria-current={file.path === activePath ? 'true' : undefined}
       title={file.readonly ? `${file.path}（只读）` : file.path}>
-      <span className="file-icon" aria-hidden="true">{file.is_dir ? '📁' : '📄'}</span>
+      <span className="file-icon" aria-hidden="true">{themed ? <WorkspaceIcon name={file.is_dir ? 'files' : file.path.endsWith('.md') ? 'book' : 'code'} /> : file.is_dir ? '📁' : '📄'}</span>
       <span className="file-name">{label}</span>
       {file.readonly && <span className="lock">只读</span>}
     </button>
