@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../shared/api';
 import { formatTime } from './types';
 
-type Row = { submission_id: string; submitted_at: number; close_reason: string; title: string; candidate_id: string; candidate_name: string; exam_title: string };
+type Row = { definition?:string; submission_id: string; submitted_at: number; close_reason: string; title: string; candidate_id: string; candidate_name: string; exam_title: string };
 type Criterion = { key: string; name: string; max: number; category?: string; full?: string; partial?: string; zero?: string };
 type Objective = { status: string; score: number | null; cap: number | null; groups: (Criterion & { passed: boolean; score: number })[]; output: string; message?: string };
 type Review = { revision: number; scores: Record<string, number>; note: string; reviewer: string; reviewed_at: number; evidence?: Record<string, string>; novel_tests_confirmed?: boolean };
@@ -28,7 +28,7 @@ export default function StageReview({ submissionId, search, onNavigate, onExpire
   const generation = useRef(0);
   const draftOwner = useRef<string | null>(null);
   const draftRevision = useRef(0);
-  const endpoint = submissionId ? `submissions/${encodeURIComponent(submissionId)}` : `submissions?page=${page}`;
+  const endpoint = submissionId ? `submissions/${encodeURIComponent(submissionId)}` : `submissions?kind=all&page=${page}`;
 
   useEffect(() => {
     const current = ++generation.current;
@@ -78,6 +78,7 @@ export default function StageReview({ submissionId, search, onNavigate, onExpire
   const observation = detail?.candidate_tests ?? detail?.candidate_tests_last_attempt;
   const needsNovel = detail?.manual_criteria.some(c => c.category === 'tests' && Number(scores[c.key]) > 0);
   return <section className="r2-review">
+    {!submissionId && <a href="/admin/r2/rooms">考试房间与入场凭证</a>}
     <div className="records-title"><div><p className="eyebrow">考官评阅 · 多阶段答卷</p><h1>{detail ? detail.title : '多阶段已交卷答卷'}</h1></div>
       <button className="secondary" onClick={() => onNavigate(submissionId ? '/admin/r2' : '/admin')}>{submissionId ? '返回多阶段列表' : '返回一期管理'}</button>
     </div>
@@ -86,10 +87,10 @@ export default function StageReview({ submissionId, search, onNavigate, onExpire
     {list && <>
       <p>共 {list.total} 份阶段答卷；每道题独立评阅。</p>
       <div className="r2-review-table"><table><thead><tr><th>考生</th><th>题目 / 场次</th><th>交卷时间</th><th>评阅</th></tr></thead><tbody>
-        {list.items.map(row => <tr key={row.submission_id}><td>{row.candidate_name}<small>{row.candidate_id}</small></td><td>{row.title}<small>{row.exam_title}</small></td><td>{formatTime(row.submitted_at)}<small>{row.close_reason === 'manual' ? '手动交卷' : '到时交卷'}</small></td><td><button className="secondary" onClick={() => onNavigate(`/admin/r2/submissions/${encodeURIComponent(row.submission_id)}`)}>查看与评分</button></td></tr>)}
+        {list.items.map(row => <tr key={row.submission_id}><td>{row.candidate_name}<small>{row.candidate_id}</small></td><td>{row.title}<small>{row.exam_title}</small></td><td>{formatTime(row.submitted_at)}<small>{row.close_reason === 'manual' ? '手动交卷' : '到时交卷'}</small></td><td><button className="secondary" onClick={() => onNavigate(`/admin/r2/${row.definition === "r2-four-stage" ? "four" : "submissions"}/${encodeURIComponent(row.submission_id)}`)}>查看与评分</button></td></tr>)}
       </tbody></table></div>
-      {list.total === 0 && <p>暂无已交卷的多阶段代码答卷。</p>}
-      <div className="r2-review-actions"><button className="secondary" disabled={page <= 1} onClick={() => onNavigate(`/admin/r2?page=${page - 1}`)}>上一页</button><span>第 {page} 页</span><button className="secondary" disabled={page * list.page_size >= list.total} onClick={() => onNavigate(`/admin/r2?page=${page + 1}`)}>下一页</button></div>
+      {list.total === 0 && <p>暂无已交卷的多阶段答卷。</p>}
+      <div className="r2-review-actions"><button className="secondary" disabled={page <= 1} onClick={() => onNavigate(`/admin/r2/submissions?page=${page - 1}`)}>上一页</button><span>第 {page} 页</span><button className="secondary" disabled={page * list.page_size >= list.total} onClick={() => onNavigate(`/admin/r2/submissions?page=${page + 1}`)}>下一页</button></div>
     </>}
     {detail && <>
       <p>{detail.candidate_name} · {detail.candidate_id} · {detail.exam_title}</p>

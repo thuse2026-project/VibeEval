@@ -1,4 +1,4 @@
-"""Assemble a two-stage review exam using the existing v2 backend."""
+"""Assemble and maintain the Datasette pilot or the four-stage R2 exam."""
 
 import argparse
 import json
@@ -83,14 +83,63 @@ def create_app():
         "column-statistics": os.environ["VIBEEVAL_DATASETTE_COLUMN_IMAGE"],
         "facet-pagination": os.environ["VIBEEVAL_DATASETTE_FACET_IMAGE"],
     }
-    questions, specs, definition = load_exam(root, images)
+    interview_path = os.environ.get("VIBEEVAL_R2_INTERVIEW_FILE")
+    if interview_path:
+        from examples.r2_exam import assemble
+
+        images["tinydb-understanding"] = os.environ["VIBEEVAL_TINYDB_CORRECT_IMAGE"]
+        images["tinydb-review"] = os.environ["VIBEEVAL_TINYDB_REVIEW_IMAGE"]
+        questions, specs, definition = assemble(root, images, Path(interview_path))
+        release = os.environ.get("VIBEEVAL_R2_RELEASE")
+        if release:
+            # Older invitations and open attempts keep their pinned provider and resources.
+            directory = Path(release)
+            current_images = {
+                **images,
+                **json.loads((directory / "images.json").read_bytes()),
+            }
+            current, revised, definition = assemble(
+                directory / "contexts", current_images, Path(interview_path)
+            )
+            stages = []
+            for stage in definition.stages:
+                if stage.submission_kind == "code":
+                    spec = revised[stage.resource_ref]
+                    specs[spec.task_version] = spec
+                    stage = stage.model_copy(update={"resource_ref": spec.task_version})
+                stages.append(stage)
+            from app.exam_flow.types import digest
+
+            definition = definition.model_copy(
+                update={
+                    "stages": tuple(stages),
+                    "version": digest([s.model_dump(mode="json") for s in stages]),
+                }
+            )
+            questions.items.update(current.items)
+            questions.code_questions.items.update(current.code_questions.items)
+
+    else:
+        questions, specs, definition = load_exam(root, images)
     app = build_stage_app(questions, specs)
     app.state.datasette_definition = definition
     return app
 
 
-def export_code_submission(flow, session_id, stage_id):
+def export_stage_submission(flow, session_id, stage_id):
     result = flow.export_submission(session_id, stage_id)
+    if result["receipt"]["kind"] == "text":
+        return result
+    return _include_code_files(flow, session_id, stage_id, result)
+
+
+def export_code_submission(flow, session_id, stage_id):
+    return _include_code_files(
+        flow, session_id, stage_id, flow.export_submission(session_id, stage_id)
+    )
+
+
+def _include_code_files(flow, session_id, stage_id, result):
     artifact = result["content"]["artifact"]
     resources = flow.resources
     with resources.factory() as db:
@@ -133,7 +182,7 @@ def main():
         result = flow.attach(args.session_id, app.state.datasette_definition)
         print(json.dumps(result))
     else:
-        result = export_code_submission(flow, args.session_id, args.stage_id)
+        result = export_stage_submission(flow, args.session_id, args.stage_id)
         print(json.dumps(result))
 
 

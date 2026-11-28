@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,7 +18,14 @@ from sqlalchemy import select
 from app.admin.evaluation import changes
 from app.admin.router import current_session
 from app.core.security import require_browser_header
-from app.db.models import ExamFlowAttempt, ExamSession, Invitation, StageWorkspace
+from app.db.models import (
+    ExamFlowAttempt,
+    ExamSession,
+    Invitation,
+    StageGradingJob,
+    StageWorkspace,
+)
+from app.grading import stage_jobs
 from app.grading.candidate_tests import compare_tests
 from app.grading.datasette import evaluate, load_rule
 from app.grading.rubrics import POLICIES
@@ -27,7 +35,7 @@ GRADE_GATE = threading.Lock()
 REVIEW_GATE = threading.Lock()
 
 
-def context(request, submission_id):
+def context(request, submission_id, *, answer_sheet_only=False, allow_text=False):
     if not re.fullmatch(r"submission_[a-f0-9]{32}", submission_id):
         raise HTTPException(404, "未找到多阶段答卷")
     flow = request.app.state.exam_flow
@@ -63,6 +71,9 @@ def context(request, submission_id):
                 "submission_id": submission_id,
                 "session_id": attempt.session_id,
                 "stage_id": stage["id"],
+                "stage_key": stage["definition"]["key"],
+                "definition": attempt.state_json["definition"]["key"],
+                "kind": stage["receipt"]["kind"],
                 "title": stage["definition"]["title"],
                 "candidate_id": invitation.candidate_id,
                 "candidate_name": invitation.candidate_name,
@@ -71,11 +82,18 @@ def context(request, submission_id):
                 "task_version": workspace.spec_json["task_version"],
                 "image": workspace.sandbox_image_ref,
             }
-        from examples.datasette_exam import export_code_submission
+        if answer_sheet_only or (allow_text and metadata["kind"] == "text"):
+            exported = flow.export_submission(
+                metadata["session_id"], metadata["stage_id"]
+            )
+        else:
+            if metadata["kind"] != "code":
+                raise HTTPException(409, "文字答卷请从答卷读取接口查看")
+            from examples.datasette_exam import export_code_submission
 
-        exported = export_code_submission(
-            flow, metadata["session_id"], metadata["stage_id"]
-        )
+            exported = export_code_submission(
+                flow, metadata["session_id"], metadata["stage_id"]
+            )
         return metadata, exported, resources
     except HTTPException:
         raise
@@ -133,45 +151,61 @@ def total_score(objective, review):
     )
 
 
+def validate_objective(objective, exported, metadata, rule):
+    if objective is None:
+        return
+    try:
+        groups = {c["key"]: c for c in objective["groups"]}
+        if (
+            objective["status"] != "completed"
+            or objective["submission_id"] != metadata["submission_id"]
+            or objective["snapshot_sha256"] != exported["content"]["artifact"]["sha256"]
+            or objective["rule_sha256"] != rule["fingerprint"]
+            or len(groups) != len(objective["groups"])
+            or type(objective["score"]) is not int
+            or set(groups) != {c["key"] for c in rule["criteria"]}
+            or objective["score"] != sum(c["score"] for c in groups.values())
+            or (
+                "max" in objective
+                and objective["max"] != sum(c["max"] for c in rule["criteria"])
+            )
+        ):
+            raise ValueError
+        for c in rule["criteria"]:
+            actual = groups[c["key"]]
+            if (
+                type(actual["passed"]) is not bool
+                or type(actual["score"]) is not int
+                or type(actual["max"]) is not int
+                or actual["score"] != (c["max"] if actual["passed"] else 0)
+                or actual["max"] != c["max"]
+            ):
+                raise ValueError
+        expected_cap = (
+            rule.get("failure_cap")
+            if any(
+                c.get("core") and not groups[c["key"]]["passed"]
+                for c in rule["criteria"]
+            )
+            else None
+        )
+        if objective.get("cap") != expected_cap:
+            raise ValueError
+    except (ValueError, KeyError, TypeError) as error:
+        raise HTTPException(503, "客观评测结果与封存答卷或规则不一致") from error
+
+
 def records(root, exported, metadata, rule):
     objective = read_record(root / "objective.json")
+    validate_objective(objective, exported, metadata, rule)
     review = read_record(root / "review.json")
-    expected = exported["content"]["artifact"]["sha256"]
     try:
-        for value in (objective, review):
-            if value is not None and (
-                value["snapshot_sha256"] != expected
-                or value["rule_sha256"] != rule["fingerprint"]
-            ):
-                raise ValueError
-        if objective is not None:
-            groups = {c["key"]: c for c in objective["groups"]}
-            if (
-                objective["status"] != "completed"
-                or objective["submission_id"] != metadata["submission_id"]
-                or set(groups) != {c["key"] for c in rule["criteria"]}
-                or objective["score"] != sum(c["score"] for c in groups.values())
-            ):
-                raise ValueError
-            for c in rule["criteria"]:
-                actual = groups[c["key"]]
-                if (
-                    type(actual["passed"]) is not bool
-                    or actual["score"] != (c["max"] if actual["passed"] else 0)
-                    or actual["max"] != c["max"]
-                ):
-                    raise ValueError
-            expected_cap = (
-                rule.get("failure_cap")
-                if any(
-                    c.get("core") and not groups[c["key"]]["passed"]
-                    for c in rule["criteria"]
-                )
-                else None
-            )
-            if objective.get("cap") != expected_cap:
-                raise ValueError
         if review is not None:
+            if (
+                review["snapshot_sha256"] != exported["content"]["artifact"]["sha256"]
+                or review["rule_sha256"] != rule["fingerprint"]
+            ):
+                raise ValueError
             maxima = {c["key"]: c["max"] for c in rule["manual"]}
             if (
                 type(review["revision"]) is not int
@@ -258,7 +292,10 @@ def prior_scores(root, exported):
 
 @router.get("/submissions")
 def submissions(
-    request: Request, page: int = Query(default=1, ge=1), exam_id: str = ""
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    exam_id: str = "",
+    kind: Literal["all", "text", "code"] = "code",
 ):
     resources = request.app.state.stage_resources
     if resources is None:
@@ -280,11 +317,13 @@ def submissions(
             for attempt, invitation in rows:
                 for stage in attempt.state_json["stages"]:
                     receipt = stage.get("receipt")
-                    if receipt and receipt["kind"] == "code":
+                    if receipt and (kind == "all" or receipt["kind"] == kind):
                         items.append(
                             {
                                 "submission_id": receipt["id"],
+                                "kind": receipt["kind"],
                                 "submitted_at": receipt["submitted_at"],
+                                "definition": attempt.state_json["definition"]["key"],
                                 "close_reason": receipt["close_reason"],
                                 "title": stage["definition"]["title"],
                                 "candidate_id": invitation.candidate_id,
@@ -305,6 +344,31 @@ def submissions(
             }
     except Exception:
         raise HTTPException(503, "多阶段答卷列表暂不可读") from None
+
+
+@router.post(
+    "/submissions/{submission_id}/grading-job",
+    dependencies=[Depends(require_browser_header)],
+)
+def create_grading_job(request: Request, submission_id: str):
+    metadata, exported, resources = context(request, submission_id, allow_text=True)
+    return stage_jobs.create_job(metadata, exported, resources)
+
+
+@router.get("/submissions/{submission_id}/grading-job")
+def grading_job(request: Request, submission_id: str):
+    _, _, resources = context(request, submission_id, answer_sheet_only=True)
+    with resources.factory() as db:
+        row = db.get(StageGradingJob, submission_id)
+        if row is None:
+            raise HTTPException(404, "该答卷尚未创建评分任务")
+        return stage_jobs.view(row)
+
+
+@router.get("/submissions/{submission_id}/answer-sheet")
+def answer_sheet(request: Request, submission_id: str):
+    metadata, exported, _ = context(request, submission_id, answer_sheet_only=True)
+    return {"metadata": metadata, **exported}
 
 
 @router.get("/submissions/{submission_id}")
@@ -342,6 +406,50 @@ def detail(request: Request, submission_id: str):
     }
 
 
+def grade_job_objective(resources, metadata, exported, rule, root):
+    stage_jobs.create_job(metadata, exported, resources)
+    with resources.factory.begin() as db:
+        row = db.get(StageGradingJob, metadata["submission_id"], with_for_update=True)
+        previous = row.components["objective"]
+        if previous.get("rule_sha256", rule["fingerprint"]) != rule["fingerprint"]:
+            raise HTTPException(409, "客观评分规则版本已变更，需要显式重评")
+        if previous["status"] == "completed":
+            validate_objective(previous, exported, metadata, rule)
+            return previous
+        # Recover a verified result even if the previous request stopped after
+        # writing the grading record but before committing the database row.
+        report = read_record(root / "objective.json")
+        validate_objective(report, exported, metadata, rule)
+        if report is None:
+            report = evaluate_and_record(exported, metadata, rule, root)
+
+        row.components = {**row.components, "objective": report}
+        return report
+
+
+def evaluate_and_record(exported, metadata, rule, root):
+    report = evaluate(
+        exported["files"],
+        rule,
+        metadata["image"],
+        os.environ.get("SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"),
+    )
+    report.update(
+        run_id=uuid.uuid4().hex,
+        evaluated_at=int(time.time()),
+        submission_id=metadata["submission_id"],
+        snapshot_sha256=exported["content"]["artifact"]["sha256"],
+        rule_version=rule["rule_version"],
+        rule_sha256=rule["fingerprint"],
+    )
+    if report["status"] == "completed":
+        validate_objective(report, exported, metadata, rule)
+    atomic_record(root / "last-attempt.json", report)
+    if report["status"] == "completed":
+        atomic_record(root / "objective.json", report)
+    return report
+
+
 @router.post(
     "/submissions/{submission_id}/evaluate",
     dependencies=[Depends(require_browser_header)],
@@ -353,24 +461,12 @@ def grade(request: Request, submission_id: str):
     if not GRADE_GATE.acquire(blocking=False):
         raise HTTPException(409, "已有客观评测进行中，请稍后读取结果")
     try:
-        report = evaluate(
-            exported["files"],
-            rule,
-            metadata["image"],
-            os.environ.get("SANDBOX_DOCKER_URL", "unix:///var/run/docker.sock"),
-        )
-        report.update(
-            run_id=uuid.uuid4().hex,
-            evaluated_at=int(time.time()),
-            submission_id=submission_id,
-            snapshot_sha256=exported["content"]["artifact"]["sha256"],
-            rule_version=rule["rule_version"],
-            rule_sha256=rule["fingerprint"],
-        )
-        atomic_record(root / "last-attempt.json", report)
-        if report["status"] == "completed":
-            atomic_record(root / "objective.json", report)
-        return report
+        if metadata.get("definition") == "r2-four-stage":
+            return grade_job_objective(resources, metadata, exported, rule, root)
+        from app.admin.rooms import grade_write
+
+        with grade_write(resources, metadata.get("exam_id", ""), submission_id):
+            return evaluate_and_record(exported, metadata, rule, root)
     except OSError:
         raise HTTPException(503, "评测记录未能保存，本次不发布分数") from None
     finally:
@@ -397,6 +493,8 @@ def save_review(
     examiner=Depends(current_session),
 ):
     metadata, exported, resources = context(request, submission_id)
+    if metadata.get("definition") == "r2-four-stage":
+        raise HTTPException(409, "四题考试须按独立问答及过程分项评分")
     rule = rule_for(metadata)
     maxima = {item["key"]: item["max"] for item in rule["manual"]}
     if (
@@ -424,7 +522,12 @@ def save_review(
             422, "请逐项填写代码/测试依据；测试项非零时须确认存在非复制的新增验证。"
         )
     root = location(resources, metadata, rule)
-    with REVIEW_GATE:
+    from app.admin.rooms import grade_write
+
+    with (
+        REVIEW_GATE,
+        grade_write(resources, metadata.get("exam_id", ""), submission_id),
+    ):
         _, prior = records(root, exported, metadata, rule)
         revision = prior["revision"] if prior else 0
         if revision != body.expected_revision:

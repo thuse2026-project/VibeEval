@@ -58,6 +58,28 @@ class Invitation(Base):
     session: Mapped[ExamSession | None] = relationship(back_populates="invitation")
 
 
+class ExaminerRoom(Base):
+    __tablename__ = "examiner_rooms"
+    __table_args__ = (UniqueConstraint("creator", "request_key"),)
+
+    room_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    invitation_hash: Mapped[str] = mapped_column(
+        ForeignKey("invitations.token_hash"), unique=True
+    )
+    creator: Mapped[str] = mapped_column(String(64))
+    request_key: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    definition: Mapped[dict] = mapped_column(JSONB)
+
+
+class ExaminerRoomReview(Base):
+    __tablename__ = "examiner_room_reviews"
+
+    submission_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    room_id: Mapped[str] = mapped_column(ForeignKey("examiner_rooms.room_id"))
+    decision: Mapped[dict] = mapped_column(JSONB)
+
+
 class ExamSession(Base):
     __tablename__ = "exam_sessions"
     __table_args__ = (
@@ -153,6 +175,15 @@ class ExamFlowAttempt(Base):
     state_json: Mapped[dict] = mapped_column(JSONB)
 
 
+class StageGradingJob(Base):
+    __tablename__ = "stage_grading_jobs"
+
+    submission_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    created_at: Mapped[int] = mapped_column(BigInteger)
+    basis: Mapped[dict] = mapped_column(JSONB)
+    components: Mapped[dict] = mapped_column(JSONB)
+
+
 class StageWorkspace(Base):
     __tablename__ = "stage_workspaces"
     workspace_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -173,6 +204,39 @@ class StageWorkspace(Base):
     current_phase_id: Mapped[str | None] = mapped_column(String(128))
     permission_epoch: Mapped[int] = mapped_column(BigInteger)
     artifact_json: Mapped[dict | None] = mapped_column(JSONB)
+    evidence_status: Mapped[str | None] = mapped_column(String(16))
+
+
+class StageEvidence(Base):
+    __tablename__ = "stage_evidence"
+    __table_args__ = (UniqueConstraint("phase_id", "event_id"),)
+    phase_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_scopes.scope_id", ondelete="CASCADE"), primary_key=True
+    )
+    sequence: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False
+    )
+    event_id: Mapped[str] = mapped_column(String(128))
+    payload: Mapped[dict] = mapped_column(JSONB)
+
+
+class ExamGradePublication(Base):
+    __tablename__ = "exam_grade_publications"
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_sessions.session_id"), primary_key=True
+    )
+    record: Mapped[dict] = mapped_column(JSONB)
+
+
+class StageTerminal(Base):
+    __tablename__ = "stage_terminals"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    phase_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_scopes.scope_id", ondelete="CASCADE"), index=True
+    )
+    opened_at: Mapped[int] = mapped_column(BigInteger)
+    transcript: Mapped[str] = mapped_column(Text)
+    truncated: Mapped[bool] = mapped_column(Boolean)
 
 
 class StageFileRevision(Base):

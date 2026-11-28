@@ -130,6 +130,112 @@ class StageResourceTests(unittest.TestCase):
         self.submit("submit2")
         return self.start("start3")
 
+    def test_examiner_reads_sealed_text_answers_without_code_snapshot(self):
+        from app.admin.accounts import hash_password
+        from examples.datasette_exam import export_stage_submission
+
+        active = self.begin()
+        phase_id = active["current_phase"]["id"]
+        self.flow.save_notes(self.sid, phase_id, 0, "exploration note")
+        answering = self.flow.finish_phase(
+            self.sid, phase_id, self.current()["state_version"], "finish"
+        )
+        self.flow.save_answer(
+            self.sid, answering["current_phase"]["id"], "item", 0, "saved answer"
+        )
+        self.submit("submit1")
+        exported = export_stage_submission(
+            self.flow, self.sid, active["current_stage"]["id"]
+        )
+        self.assertIsNone(exported["content"]["artifact"])
+        self.assertEqual(exported["content"]["notes"]["value"], "exploration note")
+        self.assertEqual(
+            exported["content"]["phases"][1]["answers"]["item"]["value"], "saved answer"
+        )
+        app = create_app(
+            {
+                "teacher": {
+                    "name": "Teacher",
+                    "password_hash": hash_password("fixture-password"),
+                }
+            },
+            entry_store=SimpleNamespace(factory=self.factory),
+            exam_flow=self.flow,
+        )
+        base = "/api/v1/admin/r2/submissions"
+        endpoint = f"{base}/{exported['receipt']['id']}/answer-sheet"
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as client:
+            self.assertEqual(client.get(endpoint).status_code, 401)
+            login = client.post(
+                "/api/v1/admin/login",
+                json={"username": "teacher", "password": "fixture-password"},
+            )
+            self.assertEqual(login.status_code, 200)
+            listing = client.get(base, params={"kind": "text", "exam_id": "external"})
+            self.assertIn(
+                exported["receipt"]["id"],
+                [item["submission_id"] for item in listing.json()["items"]],
+            )
+            response = client.get(endpoint)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["content"], exported["content"])
+            self.assertEqual(response.json()["receipt"], exported["receipt"])
+
+    def test_sealed_answer_creates_one_examiner_job_on_concurrent_retries(self):
+        from copy import deepcopy
+
+        from app.admin.router import current_session
+        from app.db.models import ExamFlowAttempt, StageGradingJob
+
+        with self.factory.begin() as db:
+            row = db.get(ExamFlowAttempt, self.sid)
+            state = deepcopy(row.state_json)
+            state["definition"]["key"] = "r2-four-stage"
+            row.state_json = state
+        active = self.begin()
+        answering = self.flow.finish_phase(
+            self.sid, active["current_phase"]["id"], active["state_version"], "finish"
+        )
+        self.flow.save_answer(
+            self.sid, answering["current_phase"]["id"], "item", 0, "my answer"
+        )
+        receipt = self.submit("submit1")
+        app = create_app(
+            {}, entry_store=SimpleNamespace(factory=self.factory), exam_flow=self.flow
+        )
+        endpoint = "/api/v1/admin/r2/submissions/" + receipt["id"] + "/grading-job"
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as client:
+            self.assertEqual(client.get(endpoint).status_code, 401)
+            self.assertEqual(client.post(endpoint).status_code, 401)
+            app.dependency_overrides[current_session] = lambda: SimpleNamespace(
+                username="examiner"
+            )
+            self.assertEqual(client.get(endpoint).status_code, 404)
+            with ThreadPoolExecutor(2) as pool:
+                responses = list(pool.map(lambda _: client.post(endpoint), range(2)))
+            for response in responses:
+                self.assertEqual(response.status_code, 200, response.text)
+            job = client.get(endpoint).json()
+            self.assertEqual(job, responses[0].json())
+            self.assertEqual(job, responses[1].json())
+            self.assertEqual(
+                job["basis"]["answers"],
+                [
+                    {
+                        "phase_id": answering["current_phase"]["id"],
+                        "question_id": "item",
+                        "revision": 1,
+                    }
+                ],
+            )
+            with self.factory.begin() as db:
+                db.get(StageGradingJob, receipt["id"]).components = {
+                    "answers": {"status": "reviewed", "score": 5}
+                }
+            self.assertEqual(
+                client.post(endpoint).json()["components"]["answers"]["score"], 5
+            )
+
     def test_live_terminal_and_file_api_revoked_on_submit(self):
         active = self.coding()
         phase = active["current_phase"]["id"]
@@ -313,6 +419,310 @@ class StageResourceTests(unittest.TestCase):
             ]["sha256"],
             artifact["sha256"],
         )
+
+    def test_interview_and_export_share_frozen_evidence_after_retry(self):
+        # Extend only this fresh fixture's third stage before its first start.
+        from copy import deepcopy
+
+        from app.db.models import ExamFlowAttempt
+        from app.exam_flow.types import EvidenceCutoff, PhaseDefinition, PhaseState
+        from app.stage_resources.evidence import page
+
+        phase = PhaseDefinition(
+            key="interview",
+            title="独立问答",
+            duration_seconds=600,
+            question_ref="questions",
+            capabilities={"read_repository", "read_frozen_code", "edit_answers"},
+        )
+        with self.factory.begin() as db:
+            row = db.get(ExamFlowAttempt, self.sid)
+            data = deepcopy(row.state_json)
+            data["definition"]["key"] = "r2-four-stage"
+            for definition in (
+                data["definition"]["stages"][2],
+                data["stages"][2]["definition"],
+            ):
+                definition["phases"].append(phase.model_dump(mode="json"))
+            data["stages"][2]["phases"].append(
+                PhaseState(id="phase_interview", definition=phase).model_dump(
+                    mode="json"
+                )
+            )
+            row.state_json = data
+        active = self.coding()
+        coding, stage = active["current_phase"]["id"], active["current_stage"]["id"]
+        self.gateway.save(self.sid, coding, "solution.py", 1, "changed\n")
+        from app.db.models import StageEvidence
+
+        with self.factory() as db:
+            edited = db.scalar(
+                select(StageEvidence).where(
+                    StageEvidence.phase_id == coding, StageEvidence.sequence == 1
+                )
+            ).payload
+        started = dict(
+            id="run1-start",
+            actor="candidate",
+            kind="test_run",
+            at=self.now,
+            data={
+                "run_id": "run1",
+                "command": "python -m unittest",
+                "status": "started",
+                "exit_code": None,
+                "code_version": "v2",
+            },
+        )
+        self.assertEqual(self.gateway.append_evidence(self.sid, coding, started), 2)
+        self.assertEqual(self.gateway.append_evidence(self.sid, coding, started), 2)
+        finished = dict(
+            started,
+            id="run1-end",
+            data={**started["data"], "status": "completed", "exit_code": 0},
+        )
+        with self.assertRaisesRegex(FlowError, "EVIDENCE_ID_CONFLICT"):
+            self.gateway.append_evidence(
+                self.sid, coding, {**finished, "id": started["id"]}
+            )
+        self.sandbox.fail_export = True
+        failed = self.flow.finish_phase(
+            self.sid, coding, self.current()["state_version"], "finish-coding"
+        )
+        self.assertEqual(failed["error_code"], "RESOURCE_CLOSE_FAILED")
+        self.assertEqual(failed["current_phase"]["status"], "closing")
+        with self.assertRaisesRegex(FlowError, "PHASE_CLOSED"):
+            self.gateway.append_evidence(self.sid, coding, finished)
+        self.sandbox.fail_export = False
+        self.now = failed["retry_at"]
+        self.flow = self.new_service()
+        active = self.current()
+        interview = active["current_phase"]["id"]
+        self.assertEqual(active["current_phase"]["deadline_at"], self.now + 600)
+        frozen = self.gateway.frozen_code(self.sid, interview)
+        with self.assertRaisesRegex(FlowError, "PHASE_CLOSED"):
+            self.gateway.evidence_page(self.sid, coding, None, 50)
+        with self.assertRaisesRegex(FlowError, "EVIDENCE_CURSOR_INVALID"):
+            self.gateway.evidence_page(self.sid, interview, "another:1", 1)
+        browser = "c" * 43
+        entry = SimpleNamespace(
+            factory=self.factory,
+            current=lambda token: (
+                {"session_id": self.sid} if token == browser else None
+            ),
+        )
+        app = create_app({}, entry_store=entry, exam_flow=self.flow)
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as client:
+            endpoint = f"/api/v2/phases/{interview}/evidence"
+            self.assertEqual(client.get(endpoint).status_code, 401)
+            client.cookies.set("vibeeval_exam_flow", browser, path="/api/v2")
+            self.assertEqual(
+                client.get(f"/api/v2/phases/{interview}/frozen-code").json(), frozen
+            )
+            first_response = client.get(endpoint, params={"limit": 1})
+            self.assertEqual(first_response.status_code, 200, first_response.text)
+            view = first_response.json()
+            second = client.get(
+                endpoint, params={"limit": 1, "cursor": view["next_cursor"]}
+            ).json()
+        self.assertEqual(
+            (view["items"], second["items"], second["next_cursor"]),
+            ([edited], [started], None),
+        )
+        self.assertEqual(second["sha256"], frozen["sha256"])
+        self.assertEqual(second["completeness"], "complete")
+        self.assertIsNone(second["reason"])
+        self.sandbox.volumes[frozen["workspace_id"]][
+            "solution.py"
+        ] = "different after freeze"
+        self.assertEqual(
+            self.gateway.read(self.sid, interview, "solution.py")["content"],
+            "changed\n",
+        )
+        self.flow.save_answer(self.sid, interview, "item", 0, "a saved answer")
+        receipt = self.submit("submit3")
+        artifact = self.flow.export_submission(self.sid, stage)["content"]["artifact"]
+        self.assertEqual(artifact["sha256"], frozen["sha256"])
+        with self.factory() as db:
+            items, following = page(
+                db, EvidenceCutoff.model_validate(artifact["evidence"])
+            )
+        self.assertEqual((items, following), ([edited, started], None))
+        with self.assertRaisesRegex(FlowError, "PHASE_CLOSED"):
+            self.gateway.evidence_page(self.sid, interview, None, 50)
+        from app.admin.router import current_session
+
+        app.dependency_overrides[current_session] = lambda: SimpleNamespace(
+            username="reviewer"
+        )
+        url = "/api/v1/admin/r2/submissions/" + receipt["id"] + "/grading-job"
+        with TestClient(app, headers={"X-VibeEval-Request": "1"}) as examiner:
+            response = examiner.post(url)
+            self.assertEqual(response.status_code, 200, response.text)
+            job = response.json()
+            self.assertEqual(job["basis"]["code_sha256"], frozen["sha256"])
+            self.assertEqual(
+                job["basis"]["evidence"]["event_counts"], {"edit": 1, "test_run": 1}
+            )
+            self.assertIsNone(job["components"]["process"]["score"])
+            with self.factory.begin() as db:
+                db.delete(db.get(StageEvidence, (coding, 2)))
+            self.assertEqual(examiner.post(url).status_code, 503)
+            self.assertEqual(examiner.get(url).json(), job)
+        # Even an internally consistent receipt cannot turn a known saved answer
+        # into a normally unanswered question.
+        from app.exam_flow.types import digest as content_digest
+        from examples.r2_interview_grading import export_interview_submission
+
+        with self.factory.begin() as db:
+            attempt = db.get(ExamFlowAttempt, self.sid)
+            data = deepcopy(attempt.state_json)
+            closed = data["stages"][2]
+            closed["submission"]["phases"][-1]["answers"].clear()
+            closed["receipt"]["content_sha256"] = content_digest(closed["submission"])
+            attempt.state_json = data
+        with self.assertRaisesRegex(FlowError, "SEALED_ANSWERS_MISMATCH"):
+            export_interview_submission(self.flow, self.sid, stage)
+
+    def test_four_stage_objective_recovers_and_preserves_other_components(self):
+        from app.admin.stage_evaluation import grade_job_objective
+        from app.db.models import StageGradingJob
+        from app.exam_flow.types import digest as content_digest
+
+        stage = "stage_objective"
+        sid = "submission_" + "a" * 32
+        content = {
+            "definition": "r2-four-stage",
+            "definition_version": "v1",
+            "stage_id": stage,
+            "task_version": "bug-v1",
+            "phases": [
+                {
+                    "id": "phase_test_job",
+                    "definition": {"key": "coding", "capabilities": []},
+                }
+            ],
+            "artifact": {
+                "sha256": "1" * 64,
+                "evidence": {
+                    "coding_phase_id": "phase_test_job",
+                    "sequence": 0,
+                    "completeness": "partial",
+                    "reason": "CAPTURE_GAP",
+                },
+            },
+        }
+        exported = {
+            "content": content,
+            "files": [],
+            "receipt": {
+                "id": sid,
+                "kind": "code",
+                "content_sha256": content_digest(content),
+            },
+        }
+        metadata = {"stage_id": stage, "submission_id": sid, "image": "test"}
+        rule = {
+            "fingerprint": "rules",
+            "rule_version": "v1",
+            "failure_cap": 50,
+            "criteria": [{"key": "core", "max": 70, "core": True}],
+        }
+        failure = {"status": "infrastructure_failed", "score": None}
+        completed = {
+            "status": "completed",
+            "score": 0,
+            "max": 70,
+            "cap": 50,
+            "groups": [
+                {"key": "core", "max": 70, "core": True, "passed": False, "score": 0}
+            ],
+        }
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch(
+                "app.admin.stage_evaluation.evaluate", side_effect=[failure, completed]
+            ) as runner,
+        ):
+
+            def grade():
+                return grade_job_objective(
+                    self.gateway, metadata, exported, rule, Path(temp)
+                )
+
+            self.assertIsNone(grade()["score"])
+            with self.factory.begin() as db:
+                job = db.get(StageGradingJob, sid)
+                job.components = {
+                    **job.components,
+                    "answers": {"status": "reviewed", "score": 15},
+                }
+            report = grade()
+            self.assertEqual((report["score"], report["cap"]), (0, 50))
+            self.assertEqual(grade(), report)
+            # Simulate a restart between the atomic file write and DB commit.
+            with self.factory.begin() as db:
+                job = db.get(StageGradingJob, sid)
+                job.components = {
+                    **job.components,
+                    "objective": {"status": "pending", "score": None},
+                }
+            self.assertEqual(grade(), report)
+            self.assertEqual(runner.call_count, 2)
+            with self.factory() as db:
+                components = db.get(StageGradingJob, sid).components
+                self.assertEqual(components["objective"], report)
+                self.assertEqual(components["answers"]["score"], 15)
+                self.assertEqual(components["process"]["status"], "needs_review")
+            from fastapi import HTTPException
+
+            with (
+                patch.dict(rule, fingerprint="modified-rule"),
+                self.assertRaises(HTTPException) as conflict,
+            ):
+                grade()
+            self.assertEqual(conflict.exception.status_code, 409)
+            with self.factory.begin() as db:
+                job = db.get(StageGradingJob, sid)
+                job.components = {
+                    **job.components,
+                    "objective": {**report, "score": 70},
+                }
+            with self.assertRaises(HTTPException) as corrupt:
+                grade()
+            self.assertEqual(corrupt.exception.status_code, 503)
+            self.assertEqual(runner.call_count, 2)
+
+    def test_candidate_test_runs_record_server_command_output_and_code_version(self):
+        active = self.coding()
+        phase = active["current_phase"]["id"]
+        self.gateway.save(self.sid, phase, "solution.py", 1, "changed\n")
+
+        result = self.gateway.run_test(self.sid, phase, "python -m unittest")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertTrue(result["evidence_recorded"])
+        self.assertEqual(len(result["code_version"]), 64)
+
+        from app.db.models import StageEvidence
+
+        with self.factory() as db:
+            items = db.scalars(
+                select(StageEvidence)
+                .where(StageEvidence.phase_id == phase)
+                .order_by(StageEvidence.sequence)
+            ).all()
+        start, finish = (
+            item.payload for item in items if item.payload["kind"] == "test_run"
+        )
+        self.assertNotEqual(start["id"], finish["id"])
+        self.assertEqual(start["data"]["run_id"], finish["data"]["run_id"])
+        self.assertEqual(start["data"]["command"], "python -m unittest")
+        self.assertEqual(start["data"]["status"], "started")
+        self.assertEqual(finish["data"]["status"], "completed")
+        self.assertEqual(finish["data"]["exit_code"], 0)
+        self.assertEqual(finish["data"]["output"], "Ran: python -m unittest")
+        self.assertEqual(finish["data"]["code_version"], result["code_version"])
 
     def test_native_agent_can_edit_registered_non_sample_file(self):
         active = self.coding()

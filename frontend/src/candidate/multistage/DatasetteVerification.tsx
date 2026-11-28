@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { examRequest } from './api'
 
 const fixture = `import asyncio
 import sqlite3
@@ -82,15 +83,22 @@ export function hasDatasetteVerification(task: string) {
 
 const testCommand = 'cd /workspace && python -m unittest discover -s tests -p "test_*.py" -v'
 
-export function DatasetteVerification({ task, disabled, flush, openTerminal, openFile }: {
+export function DatasetteVerification({ task, phaseId, disabled, flush, openTerminal, openFile, onRunningChange }: {
+  phaseId: string
   task: string
   disabled: boolean
   flush: () => Promise<void>
   openTerminal: () => void
   openFile: (path: string) => void
+  onRunningChange: (running: boolean) => void
 }) {
   const [status, setStatus] = useState('')
   const [copying, setCopying] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<{
+    status: string; exit_code: number | null; output: string; output_truncated: boolean;
+    code_version: string; evidence_recorded: boolean; error_code: string | null
+  } | null>(null)
   const scenario = scenarios[task]
   if (!scenario) return null
 
@@ -104,14 +112,32 @@ export function DatasetteVerification({ task, disabled, flush, openTerminal, ope
       setCopying(false)
       return
     }
-    openTerminal()
     try {
       await navigator.clipboard.writeText(command)
       setStatus(`已复制${label}命令。请在终端提示符后粘贴并执行。`)
     } catch {
       setStatus('剪贴板不可用，请展开命令并手动复制到终端。')
     } finally {
+      openTerminal()
       setCopying(false)
+    }
+  }
+
+  async function runRecordedTest() {
+    setRunning(true)
+    setResult(null)
+    setStatus('测试正在沙箱执行并记录…')
+    onRunningChange(true)
+    try {
+      await flush()
+      const value = await examRequest<NonNullable<typeof result>>(`/api/v2/phases/${phaseId}/test-run`, 'POST', { command: testCommand })
+      setResult(value)
+      setStatus(value.status === 'completed' ? '测试通过。' : value.status === 'timed_out' ? '测试超时。' : '测试未通过。')
+    } catch (failure) {
+      setStatus((failure as Error).message)
+    } finally {
+      setRunning(false)
+      onRunningChange(false)
     }
   }
 
@@ -126,13 +152,22 @@ PY`
     <h2>复现业务行为</h2>
     <p>{scenario.description}</p>
     <p>{scenario.expected}</p>
-    <button type="button" disabled={disabled || copying} onClick={() => void copy('复现', reproduce)}>复制复现命令</button>
+    <button type="button" disabled={disabled || copying || running} onClick={() => void copy('复现', reproduce)}>复制复现命令</button>
     <details><summary>查看复现命令</summary><pre>{reproduce}</pre></details>
 
     <h2>运行测试</h2>
     <p>公开测试覆盖部分核心行为。可在回归测试文件中补充边界用例，然后运行同一命令。</p>
-    <button type="button" disabled={disabled || copying} onClick={() => void copy('测试', testCommand)}>复制测试命令</button>
+    <button type="button" disabled={disabled || copying || running} onClick={() => void copy('测试', testCommand)}>复制测试命令</button>
+    <button type="button" disabled={disabled || copying || running} onClick={() => void runRecordedTest()}>
+      {running ? '测试运行中…' : '运行并记录测试'}
+    </button>
     <details><summary>查看测试命令</summary><pre>{testCommand}</pre></details>
+    {result && <section className="r2-test-run-result" aria-live="polite">
+      <p>{status} · 退出码 {result.exit_code ?? '不可用'}{result.error_code ? ` · ${result.error_code}` : ''}</p>
+      <p>运行代码版本 <code title={result.code_version}>{result.code_version.slice(0, 12)}</code>
+        {!result.evidence_recorded && ' · 阶段已关闭，结果未进入冻结证据'}</p>
+      <pre>{result.output || '无输出'}{result.output_truncated ? '\n（输出已截断）' : ''}</pre>
+    </section>}
     <div className="r2-verification-files">
       <button type="button" onClick={() => openFile('tests/test_public.py')}>查看公开测试</button>
       <button type="button" onClick={() => openFile('tests/test_candidate.py')}>打开回归测试</button>

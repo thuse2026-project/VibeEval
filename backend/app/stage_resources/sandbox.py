@@ -1,5 +1,6 @@
 """Bounded runsc operations for published manifests; no candidate code on host."""
 
+import base64
 import io
 import json
 import tarfile
@@ -49,7 +50,7 @@ finally: os.close(directory)
 """
 
 HEALTH_SCRIPT = r"""
-import json,os,stat,sys
+import hashlib,json,os,stat,sys
 from pathlib import Path
 config=json.loads(sys.argv[1]); root=Path('/workspace')
 assert os.getuid()==1000
@@ -62,9 +63,50 @@ for path in root.rglob('*'):
   name=str(path.relative_to(root)); actual.add(name)
   assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=1048576
   assert os.access(path,os.R_OK)
+  if name in config['file_sha256']:
+   assert hashlib.sha256(path.read_bytes()).hexdigest()==config['file_sha256'][name]
   if not config['readonly']: assert os.access(path,os.W_OK)==(name in config['writable'])
 assert actual==set(config['files'])
 assert root.stat().st_uid==0 and not root.stat().st_mode & 0o022
+"""
+
+TEST_RUN_SCRIPT = r"""
+import base64,json,os,select,signal,subprocess,sys,time
+command=sys.argv[1]
+limit=30
+cap=65536
+output=bytearray()
+truncated=False
+timed_out=False
+process=subprocess.Popen(command,shell=True,executable='/bin/bash',cwd='/workspace',stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,start_new_session=True)
+fd=process.stdout.fileno()
+os.set_blocking(fd,False)
+deadline=time.monotonic()+limit
+eof=False
+while not eof:
+ if not timed_out and time.monotonic()>=deadline:
+  timed_out=True
+  try: os.killpg(process.pid,signal.SIGTERM)
+  except ProcessLookupError: pass
+  try: process.wait(timeout=1)
+  except subprocess.TimeoutExpired:
+   try: os.killpg(process.pid,signal.SIGKILL)
+   except ProcessLookupError: pass
+   process.wait()
+ ready,_,_=select.select([fd],[],[],0.1)
+ if ready:
+  chunk=os.read(fd,8192)
+  if not chunk:
+   eof=True
+  elif len(output)<cap:
+   remaining=cap-len(output)
+   output.extend(chunk[:remaining])
+   truncated=truncated or len(chunk)>remaining
+  else:
+   truncated=True
+process.wait()
+result={'exit_code':124 if timed_out else process.returncode,'timed_out':timed_out,'truncated':truncated,'output_b64':base64.b64encode(output).decode('ascii')}
+sys.stderr.write(json.dumps(result,separators=(',',':'))+'\n')
 """
 
 
@@ -173,6 +215,7 @@ class StageSandboxAdapter(BoundSandboxAdapter):
             "files": view.allowed_files,
             "writable": view.writable_files,
             "readonly": view.read_only,
+            "file_sha256": view.file_sha256,
         }
         result = obj.exec_run(
             ["python", "-I", "-c", HEALTH_SCRIPT, json.dumps(config)], user="1000:1000"
@@ -180,6 +223,33 @@ class StageSandboxAdapter(BoundSandboxAdapter):
         if result.exit_code:
             raise ValueError("published manifest health check failed")
         return True
+
+    def run_command(self, view, command):
+        self.view = view
+        obj = self._container(view)
+        request_timeout = self.client.api.timeout
+        self.client.api.timeout = 40
+        try:
+            result = obj.exec_run(
+                ["python", "-I", "-c", TEST_RUN_SCRIPT, command],
+                user="1000:1000",
+                workdir="/workspace",
+                demux=True,
+            )
+        finally:
+            self.client.api.timeout = request_timeout
+        if result.exit_code:
+            raise ValueError("sandbox test runner failed")
+        _, metadata = result.output
+        if not metadata:
+            raise ValueError("sandbox test result unavailable")
+        value = json.loads(metadata.decode("utf-8"))
+        return {
+            "exit_code": value["exit_code"],
+            "timed_out": value["timed_out"],
+            "truncated": value["truncated"],
+            "output": base64.b64decode(value["output_b64"]).decode("utf-8", "replace"),
+        }
 
     def read_file(self, view, path):
         validate_file(view, path)
@@ -360,6 +430,9 @@ class StageSandboxRuntime(SandboxRuntime):
 
     def read_paths(self, view, paths):
         return self._call("read_files", view, tuple(paths))
+
+    def run_command(self, view, command):
+        return self._call("run_command", view, command)
 
     def save_file(self, view, path, expected_digest, content):
         validate_file(view, path, write=True)

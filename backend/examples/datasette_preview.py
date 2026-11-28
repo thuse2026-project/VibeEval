@@ -1,5 +1,6 @@
 """Serve the existing R2 API and built preview on a single private origin."""
 
+import os
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -8,6 +9,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.agent_integration.window import WindowPolicy
+from app.exam_flow.types import digest
 from app.exams.postgres import PostgresEntryStore
 from app.llm.config import load_settings
 from examples.datasette_exam import create_app
@@ -41,11 +43,33 @@ def create_preview():
         )
     flow = app.state.exam_flow
     definition = app.state.datasette_definition
+    rehearsal_id = os.environ.get("VIBEEVAL_R2_DATASETTE_REHEARSAL_ID")
+    rehearsal = None
+    if rehearsal_id:
+        if definition.key != "r2-four-stage":
+            raise ValueError("Datasette rehearsal requires the four-stage R2 exam")
+        stages = definition.stages[2:]
+        rehearsal = definition.model_copy(
+            update={
+                "stages": stages,
+                "title": "Datasette 第三、四题联调",
+                "version": digest([stage.model_dump(mode="json") for stage in stages]),
+            }
+        )
 
     class PreviewEntry(PostgresEntryStore):
         def admit(self, token, browser):
             admitted = super().admit(token, browser)
-            flow.attach(admitted["session_id"], definition)
+            if not admitted["exam_info"]["id"].startswith("room_") and not flow.manages(
+                admitted["session_id"]
+            ):
+                selected = definition
+                if (
+                    rehearsal is not None
+                    and admitted["exam_info"]["id"] == rehearsal_id
+                ):
+                    selected = rehearsal
+                flow.attach(admitted["session_id"], selected)
             return admitted
 
     app.state.entry = PreviewEntry(app.state.entry.factory)

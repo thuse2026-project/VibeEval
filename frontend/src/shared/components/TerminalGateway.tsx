@@ -11,6 +11,8 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
   const [status, setStatus] = useState('终端未连接')
   const allowInput=useRef(inputEnabled)
   allowInput.current=inputEnabled
+  const terminal = useRef<XTerm | null>(null)
+  const [clipboardError, setClipboardError] = useState('')
   const focusTerminal = useRef<(() => void) | null>(null)
 
   useEffect(() => {
@@ -22,8 +24,25 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container.current)
+    terminal.current = term
     let socket: WebSocket | null = null
     let disposed = false
+    setStatus('正在连接终端…')
+    term.attachCustomKeyEventHandler(event => {
+      if (!(event.ctrlKey || event.metaKey)) return true
+      if (event.key.toLowerCase() === 'v') {
+        if (!navigator.clipboard?.readText) return false
+        event.preventDefault()
+        if (event.type === 'keydown' && !event.repeat && allowInput.current && socket?.readyState === WebSocket.OPEN) {
+          void navigator.clipboard.readText().then(text => {
+            if (!disposed && allowInput.current && socket?.readyState === WebSocket.OPEN) term.paste(text)
+          }).catch(() => setClipboardError('请在终端内使用浏览器右键菜单粘贴。'))
+        }
+        return false
+      }
+      if (event.key.toLowerCase() === 'c' && term.hasSelection()) return false
+      return true
+    })
     const resize = () => {
       if (!container.current?.offsetHeight) return
       fit.fit()
@@ -72,6 +91,7 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
       }
     }
     return () => {
+      terminal.current = null
       disposed = true
       focusTerminal.current = null
       socket?.close()
@@ -93,10 +113,25 @@ export function TerminalPane({ sessionId, inputEnabled, apiPrefix = '/api/v1/ses
     <div className="terminal-head">
       <span role="status">{sessionId ? status : '终端已禁用：当前不能写入'}</span>
       <div className="terminal-actions">
+        {sessionId && <><button disabled={!inputEnabled} onClick={async () => {
+          const target = terminal.current
+          try {
+            const text = await navigator.clipboard.readText()
+            if (target && target === terminal.current && allowInput.current) { target.focus(); target.paste(text) }
+            setClipboardError('')
+          } catch { focusTerminal.current?.(); setClipboardError('请在终端内按 Ctrl+V 粘贴。') }
+        }}>粘贴</button>
+        <button onClick={async () => {
+          const text = terminal.current?.getSelection()
+          if (!text) { setClipboardError('请先选中终端输出。'); return }
+          try { await navigator.clipboard.writeText(text); setClipboardError('') }
+          catch { setClipboardError('请使用系统复制快捷键。') }
+        }}>复制</button></>}
         <button disabled={!sessionId} onClick={() => setAttempt(value => value + 1)}>重新连接</button>
         {onCollapse && <button onClick={onCollapse} title="折叠终端">折叠</button>}
       </div>
     </div>
+    {clipboardError && <small role="status">{clipboardError}</small>}
     <div ref={container} className="terminal-body" />
   </div>
 }

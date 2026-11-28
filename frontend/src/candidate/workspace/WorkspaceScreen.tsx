@@ -1,4 +1,5 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { PaneResize } from '../../shared/components/PaneResize'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { CodeEditor } from '../../shared/components/Editor'
 import { FileTree } from '../../shared/components/FileTree'
 import { TerminalPane } from '../../shared/components/TerminalGateway'
@@ -32,10 +33,19 @@ type Props = {
   agentCanExecute?: boolean
   beforeAgentRun?: () => Promise<void>
   onAgentBusy?: (busy: boolean) => void
-  onAgentWorkspaceChange: (change: AgentFileChange) => void
+  onAgentWorkspaceChange?: (change: AgentFileChange) => void
+  initialAgentOpen?: boolean
+  saveFile?: () => void
+  discardFile?: (path: string) => Promise<boolean>
+  processing?: boolean
+  initialProblem?: boolean
+  directSubmit?: boolean
+  saveHint?: string
   actions?: ReactNode
   submissionFields?: ReactNode
+  submissionNotice?: ReactNode
   submitLabel?: string
+  continuesToQuestions?: boolean
   busy: boolean
   tabSelectionDisabled?: boolean
   onSelectFile: (path: string | null) => void
@@ -76,18 +86,21 @@ export function WorkspaceScreen({
   beforeAgentRun,
   onAgentBusy,
   onAgentWorkspaceChange,
-  actions,
+  initialAgentOpen = false, directSubmit = false, saveHint = "5 秒自动保存 · Python 3.12 · UTF-8",
+  saveFile, discardFile, processing, initialProblem, actions,
   submissionFields,
+  submissionNotice = '提交前会保存全部修改并冻结快照；提交后不能继续编辑。',
   submitLabel = '提交答卷',
+  continuesToQuestions = false,
   busy,
   tabSelectionDisabled = busy,
   onSelectFile,
   onEdit,
   onSubmit,
 }: Props) {
-  const [leftTab, setLeftTab] = useState<'files' | 'problem' | 'verification'>('files')
-  const [agentOpened, setAgentOpened] = useState(false)
-  const [agentVisible, setAgentVisible] = useState(false)
+  const [leftTab, setLeftTab] = useState<'files' | 'problem' | 'verification'>(initialProblem ? 'problem' : 'files')
+  const [agentOpened, setAgentOpened] = useState(initialAgentOpen)
+  const [agentVisible, setAgentVisible] = useState(initialAgentOpen)
   const agentOpen = Boolean(agentScope && agentVisible)
   const main = useRef<HTMLDivElement>(null)
   const [fileWidth, setFileWidth] = useState(19)
@@ -110,7 +123,23 @@ export function WorkspaceScreen({
     onSelectFile(path)
   }
 
-  function closeFile(path: string) {
+  const [terminalHeight, setTerminalHeight] = useState(28)
+  useEffect(() => {
+    if (!saveFile) return
+    const shortcut = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (!busy && !activeReadonly && editorPath) saveFile()
+      }
+    }
+    window.addEventListener('keydown', shortcut, true)
+    return () => window.removeEventListener('keydown', shortcut, true)
+  }, [saveFile, busy, activeReadonly, editorPath])
+
+  async function closeFile(path: string) {
+    if (discardFile && tabs.find(tab => tab.path === path)?.dirty) {
+      if (!window.confirm('当前修改尚未保存。放弃未保存的修改并关闭文件？') || !await discardFile(path)) return
+    }
     setClosedPaths(previous => new Set(previous).add(path))
     if (path === editorPath) {
       const index = tabs.findIndex(tab => tab.path === path)
@@ -167,17 +196,21 @@ export function WorkspaceScreen({
         <span className="brand-mark" aria-hidden="true">&lt;/&gt;</span>
         <span className="logo">VibeEval</span>
         <span className="task">{title}</span>
-        <span className="timer mono">{practice ? <small>测试模式 · 本阶段不计时</small> : <><small>剩余 </small>{formatRemaining(remaining)}</>}</span>
+        <span className="timer mono">{submitting || processing ? '正在提交…' : practice ? <small>测试模式 · 本阶段不计时</small> : <><small>剩余 </small>{formatRemaining(remaining)}</>}</span>
         <span className={`save-state ${saveState}`}>
           <span className="save-dot" />
           {saveLabel[saveState]}
         </span>
         <span className="spacer" />
+        {saveFile && <button className="agent-open" title="保存当前文件 (Ctrl+S)" disabled={busy || activeReadonly || !editorPath} onClick={saveFile}>保存</button>}
         {agentScope && <button className="agent-open" aria-expanded={agentOpen} onClick={() => {
           setAgentOpened(true)
           setAgentVisible(!agentOpen)
         }}>Agent</button>}
-        <button className="submit" disabled={busy || remaining<=0} onClick={() => { setSubmitError(null); setConfirmSubmit(true) }}>
+        <button className="submit" disabled={busy || remaining<=0} onClick={() => {
+          if (directSubmit) { void onSubmit(); return }
+          setSubmitError(null); setConfirmSubmit(true)
+        }}>
           {submitLabel}
         </button>
       </div>
@@ -196,9 +229,11 @@ export function WorkspaceScreen({
               验证
             </button>}
           </div>
-          {leftTab === 'verification' && verification ? verification(() => setTermOpen(true), selectFile) : leftTab === 'files' ? (
-            filesPane?.(selectFile, editorPath) ?? <FileTree files={files} activePath={editorPath} onSelect={selectFile} />
-          ) : (
+          <div hidden={leftTab !== 'files'} className="tree-container">{filesPane?.(selectFile, editorPath) ?? <FileTree files={files} activePath={editorPath} onSelect={selectFile} />}</div>
+          {leftTab === 'verification' && verification ? verification(() => {
+            setTermOpen(true)
+            requestAnimationFrame(() => main.current?.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')?.focus())
+          }, selectFile) : leftTab === 'problem' && (
             problem?.(selectFile) ?? <div className="problem-pane">
               <span className="pane-caption">任务说明</span>
               <h2>会议室预约缺陷修复</h2>
@@ -211,19 +246,31 @@ export function WorkspaceScreen({
         </aside>
 
         {resizable && divider('files')}
-        <CodeEditor
-          tabs={tabs}
-          selectDisabled={tabSelectionDisabled}
-          closeDisabled={busy}
-          loadRevision={editorRevision}
-          path={editorPath}
-          value={content}
-          readOnly={activeReadonly}
-          wrapLines={resizable}
-          onSelect={selectFile}
-          onClose={closeFile}
-          onChange={onEdit}
-        />
+        <div className="ide-center">
+          <CodeEditor
+            tabs={tabs}
+            selectDisabled={tabSelectionDisabled}
+            closeDisabled={busy}
+            loadRevision={editorRevision}
+            path={editorPath}
+            value={content}
+            readOnly={activeReadonly}
+            wrapLines={resizable}
+            onSelect={selectFile}
+            onClose={closeFile}
+            onChange={onEdit}
+          />
+          {resizable && termOpen && <PaneResize horizontal label="调整终端高度" min={14} max={65} value={terminalHeight} change={setTerminalHeight} />}
+          <div className="ide-terminal" hidden={!termOpen} style={resizable ? { height: terminalHeight + '%' } : undefined}>
+            <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
+              visible={termOpen} onCollapse={() => setTermOpen(false)} />
+          </div>
+          {!termOpen && (
+            <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
+              展开终端
+            </button>
+          )}
+        </div>
         {resizable && agentOpen && divider('agent')}
         {agentScope && agentOpened && <AgentPanel key={agentScope} sessionId={agentScope}
           prefix={agentPrefix} modelReady={agentModelReady} canExecute={agentCanExecute} hidden={!agentOpen}
@@ -231,20 +278,11 @@ export function WorkspaceScreen({
           onClose={() => setAgentVisible(false)} onWorkspaceChange={onAgentWorkspaceChange} />}
       </div>
 
-      <div className="ide-terminal" hidden={!termOpen}>
-        <TerminalPane sessionId={sessionId} inputEnabled={!busy} apiPrefix={terminalPrefix}
-          visible={termOpen} onCollapse={() => setTermOpen(false)} />
-      </div>
-      {!termOpen && (
-        <button className="terminal-toggle" onClick={() => setTermOpen(true)}>
-          展开终端
-        </button>
-      )}
       <footer className="ide-statusbar">
         <span className="editor-file-status" role="status" title={loadingPath ?? editorPath ?? undefined}>
           {loadingPath ? `正在读取 ${loadingPath}…` : editorPath ? editorPath + (activeReadonly ? ' · 只读' : ' · 可编辑') : '请选择文件'}
         </span>
-        {actions}<span>5 秒自动保存 · Python 3.12 · UTF-8</span>
+        {actions}<span>{saveHint}</span>
       </footer>
       {confirmSubmit && (
         <div className="modal-backdrop">
@@ -258,16 +296,16 @@ export function WorkspaceScreen({
             }
           }}>
             <span className="section-icon" aria-hidden="true">↑</span>
-            <h2 id="submit-title">确认提交答卷？</h2>
+            <h2 id="submit-title">{continuesToQuestions ? '确认结束编程？' : '确认提交答卷？'}</h2>
             <p className="muted">提交前请核对以下信息</p>
-            <dl className="submission-summary"><div><dt>作答时间</dt><dd className="mono">{practice ? '本阶段不计时' : formatRemaining(remaining)}</dd></div><div><dt>文件状态</dt><dd>{saveLabel[saveState]}</dd></div></dl>
-            <p>提交前会保存全部修改并冻结快照；提交后不能继续编辑。</p>
+            <dl className="submission-summary"><div><dt>作答时间</dt><dd className="mono">{submitting ? '正在固定答卷…' : practice ? '本阶段不计时' : formatRemaining(remaining)}</dd></div><div><dt>文件状态</dt><dd>{saveLabel[saveState]}</dd></div></dl>
+            <p>{continuesToQuestions ? '将停止 Agent 和终端、保存并固定代码，此后不能修改或返回编程。代码固定后开始 10 分钟独立问答。' : submissionNotice}</p>
             {submissionFields}
             {submitError && <div className="banner banner-error">{submitError}</div>}
             <div className="modal-actions">
               <button className="btn" autoFocus disabled={submitting} onClick={() => setConfirmSubmit(false)}>返回工作台</button>
               <button className="btn primary" disabled={submitting || remaining<=0} onClick={() => void submit()}>
-                {submitting ? '提交中…' : '确认提交'}
+                {continuesToQuestions ? (submitting ? '正在固定代码…' : '确认结束编程') : (submitting ? '提交中…' : '确认提交')}
               </button>
             </div>
           </div>

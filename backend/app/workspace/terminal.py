@@ -60,7 +60,9 @@ def guarded(websocket, session_id, operation):
         return operation(view)
 
 
-async def relay(websocket, terminal, check_and_run, *, guard_output=False):
+async def relay(
+    websocket, terminal, check_and_run, *, guard_output=False, record_output=None
+):
     async def output():
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while True:
@@ -69,7 +71,9 @@ async def relay(websocket, terminal, check_and_run, *, guard_output=False):
                 continue
             text = decoder.decode(data, final=not data)
             if text:
-                if guard_output:
+                if record_output is not None:
+                    await run_in_threadpool(record_output, text)
+                elif guard_output:
                     await run_in_threadpool(check_and_run, lambda view: None)
                 await asyncio.wait_for(
                     websocket.send_json({"type": "output", "data": text}), 5

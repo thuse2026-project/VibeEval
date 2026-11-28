@@ -208,7 +208,10 @@ test('R2 cached tabs stay responsive during file reads and version checks', asyn
   finishRefresh({ content: '# newer server content', version: 2 });
   await response;
   await expect(active).toContainText('●');
+  page.once('dialog', dialog => dialog.dismiss());
   await page.getByRole('button', { name: `关闭 ${source}`, exact: true }).click();
+  await expect(active).toContainText(source);
+  await tab(readme).click();
   await expect(active).toContainText(readme);
   await expect(page.locator('.workspace-alert')).toContainText('FILE_VERSION_CONFLICT');
   expect(writes).toHaveLength(1);

@@ -1,11 +1,13 @@
 """Phase-bound files, PTY and the existing native Agent transport."""
 
 import os
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -19,6 +21,7 @@ from app.agent_integration.router import (
 from app.agent_integration.router import reading
 from app.agent_integration.router import router as native_agent_router
 from app.core.security import require_browser_header
+from app.db.models import StageTerminal
 from app.exam_flow.router import identity
 from app.exam_flow.types import FlowError
 from app.sandbox.terminal import DockerTerminalFactory
@@ -26,6 +29,7 @@ from app.workspace.files import InvalidFilePath, ReadOnlyFile
 from app.workspace.service import SaveConflict
 from app.workspace.terminal import relay
 
+from .process_record import record_output
 from .types import StageInputReference
 
 router = APIRouter(
@@ -83,6 +87,22 @@ def perform(action):
         raise FlowError("WORKSPACE_OPERATION_UNCERTAIN", 503) from None
 
 
+@router.get("/{phase_id}/frozen-code")
+def frozen_code(phase_id: str, sid=Depends(identity), gateway=Depends(resources)):
+    return perform(lambda: gateway.frozen_code(sid, phase_id))
+
+
+@router.get("/{phase_id}/evidence")
+def frozen_evidence(
+    phase_id: str,
+    sid=Depends(identity),
+    gateway=Depends(resources),
+    limit: int = Query(50, ge=1, le=100),
+    cursor: str | None = Query(None, max_length=160),
+):
+    return perform(lambda: gateway.evidence_page(sid, phase_id, cursor, limit))
+
+
 @router.get("/{phase_id}/files", response_model=FileTree)
 def files(phase_id: str, sid=Depends(identity), gateway=Depends(resources)):
     return perform(lambda: gateway.tree(sid, phase_id))
@@ -113,6 +133,18 @@ def save_file(
     )
 
 
+class TestRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    command: str = Field(min_length=1, max_length=1000)
+
+
+@router.post("/{phase_id}/test-run")
+def test_run(
+    phase_id: str, body: TestRun, sid=Depends(identity), gateway=Depends(resources)
+):
+    return perform(lambda: gateway.run_test(sid, phase_id, body.command))
+
+
 @terminal_router.websocket("/{phase_id}/terminal")
 async def terminal(websocket: WebSocket, phase_id: str):
     handle, code = None, 1000
@@ -136,13 +168,29 @@ async def terminal(websocket: WebSocket, phase_id: str):
             with gateway.guard(sid, phase_id, "use_terminal") as (_, _, _, view):
                 return operation(view)
 
-        def opening(view):
-            nonlocal handle
-            handle = factory.open(view)
+        terminal_id = uuid4().hex
 
-        await run_in_threadpool(check, opening)
+        def opening():
+            nonlocal handle
+            with gateway.guard(sid, phase_id, "use_terminal") as (db, _, _, view):
+                handle = factory.open(view)
+                db.add(
+                    StageTerminal(
+                        id=terminal_id,
+                        phase_id=phase_id,
+                        opened_at=int(gateway.clock()),
+                        transcript="",
+                        truncated=False,
+                    )
+                )
+
+        def output(text):
+            with gateway.guard(sid, phase_id, "use_terminal") as (db, _, workspace, _):
+                record_output(db, workspace, terminal_id, text)
+
+        await run_in_threadpool(opening)
         await websocket.accept()
-        await relay(websocket, handle, check, guard_output=True)
+        await relay(websocket, handle, check, record_output=output)
     except WebSocketDisconnect:
         return
     except (HTTPException, FlowError, ValueError, UnicodeError, KeyError):
